@@ -1,0 +1,793 @@
+# -*- coding: utf-8 -*-
+"""Idiomas: português (padrão), inglês e espanhol.
+
+`_("texto em português")` devolve o texto no idioma escolhido. O idioma vem da variável
+RODPS_LANG, da configuração do medidor ("lang") ou do idioma do Windows, e vale a partir
+da abertura do programa (trocar no menu reabre o medidor).
+
+Nomes do jogo (skills, monstros, itens, buffs) vêm dos arquivos do cliente da LATAM em
+português e não são traduzidos aqui.
+"""
+
+import json
+import os
+
+LANGS = [("pt", "Português"), ("en", "English"), ("es", "Español")]
+
+
+def config_path():
+    return os.environ.get("RODPS_CONFIG") or os.path.join(
+        os.environ.get("APPDATA") or os.path.expanduser("~"), "RODpsMeter", "config.json")
+
+
+def _from_config():
+    try:
+        with open(config_path(), encoding="utf-8") as f:
+            v = json.load(f).get("lang")
+        return v if v in dict(LANGS) else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _from_windows():
+    try:
+        import ctypes
+        primary = ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3FF
+    except (AttributeError, OSError):
+        return "pt"
+    return {0x16: "pt", 0x0A: "es"}.get(primary, "en")
+
+
+def detect():
+    env = os.environ.get("RODPS_LANG")
+    if env in dict(LANGS):
+        return env
+    return _from_config() or _from_windows()
+
+
+LANG = detect()
+
+
+def _(text):
+    if LANG == "pt":
+        return text
+    t = CATALOG.get(text)
+    if t is None:
+        return text
+    return t[0] if LANG == "en" else t[1]
+
+
+# português -> (inglês, espanhol)
+CATALOG = {
+    # --- widget ---------------------------------------------------------------
+    "Grafite": ("Graphite", "Grafito"),
+    "Meia-noite": ("Midnight", "Medianoche"),
+    "Roxo": ("Purple", "Morado"),
+    "Floresta": ("Forest", "Bosque"),
+    "Oceano": ("Ocean", "Océano"),
+    "Vinho": ("Wine", "Vino"),
+    "Âmbar": ("Amber", "Ámbar"),
+    "Neon": ("Neon", "Neón"),
+    "Claro": ("Light", "Claro"),
+    "Pequeno": ("Small", "Pequeño"),
+    "Médio": ("Medium", "Mediano"),
+    "Grande": ("Large", "Grande"),
+    "Muito grande": ("Extra large", "Muy grande"),
+    "estreita": ("narrow", "estrecho"),
+    "normal": ("normal", "normal"),
+    "larga": ("wide", "ancho"),
+    "muito larga": ("extra wide", "muy ancho"),
+    "5 segundos sem dano": ("5 seconds without damage", "5 segundos sin daño"),
+    "10 segundos sem dano": ("10 seconds without damage", "10 segundos sin daño"),
+    "15 segundos sem dano": ("15 seconds without damage", "15 segundos sin daño"),
+    "30 segundos sem dano": ("30 seconds without damage", "30 segundos sin daño"),
+    "1 minuto sem dano": ("1 minute without damage", "1 minuto sin daño"),
+    "Todos os monstros": ("All monsters", "Todos los monstruos"),
+    "Só MVPs e bonecos de treino": ("MVPs and training dummies only", "Solo MVPs y muñecos de entrenamiento"),
+    "Fixar sempre por cima das outras janelas": ("Keep on top of other windows", "Mantener sobre las demás ventanas"),
+    "Análise completa (abre outra janela)": ("Full analysis (opens another window)",
+                                             "Análisis completo (abre otra ventana)"),
+    "Opções": ("Options", "Opciones"),
+    "Minimizar": ("Minimize", "Minimizar"),
+    "Fechar o medidor": ("Close the meter", "Cerrar el medidor"),
+    "Zerar: começa a contar de novo": ("Reset: start counting again", "Reiniciar: empieza a contar de nuevo"),
+    "Escolher o que mostrar: tudo ou uma luta": ("Choose what to show: everything or one fight",
+                                                 "Elegir qué mostrar: todo o una pelea"),
+    "Luta anterior": ("Previous fight", "Pelea anterior"),
+    "Próxima luta": ("Next fight", "Pelea siguiente"),
+    "Dano de cada jogador": ("Damage by player", "Daño de cada jugador"),
+    "O seu dano por skill": ("Your damage by skill", "Tu daño por skill"),
+    "Em quem você bateu": ("Who you hit", "A quién le pegaste"),
+    "Arraste para mudar a largura e o número de linhas": ("Drag to change the width and number of rows",
+                                                          "Arrastra para cambiar el ancho y el número de filas"),
+    "Grupo": ("Party", "Grupo"),
+    "Skills": ("Skills", "Skills"),
+    "Alvos": ("Targets", "Objetivos"),
+    "DPS Ragnarok": ("DPS Ragnarok", "DPS Ragnarok"),
+    "Zerar": ("Reset", "Reiniciar"),
+    "Tudo": ("All", "Todo"),
+    "Luta atual": ("Current fight", "Pelea actual"),
+    "Luta %d de %d": ("Fight %d of %d", "Pelea %d de %d"),
+    "Pasta Replay não encontrada (botão direito › Pasta)": ("Replay folder not found (right-click › Folder)",
+                                                            "Carpeta Replay no encontrada (clic derecho › Carpeta)"),
+    "Aguardando gravação de replay…": ("Waiting for a replay recording…", "Esperando una grabación de replay…"),
+    "Abrindo %s…": ("Opening %s…", "Abriendo %s…"),
+    "Gravação começou · aguardando o jogo (~10 s)": ("Recording started · waiting for the game (~10 s)",
+                                                     "La grabación empezó · esperando al juego (~10 s)"),
+    "Gravando · %s": ("Recording · %s", "Grabando · %s"),
+    "Gravação encerrada · %s": ("Recording ended · %s", "Grabación terminada · %s"),
+    "Personagem": ("Character", "Personaje"),
+    "Medidor de DPS": ("DPS meter", "Medidor de DPS"),
+    "agora %s/s": ("now %s/s", "ahora %s/s"),
+    "total %s": ("total %s", "total %s"),
+    "em combate": ("in combat", "en combate"),
+    "ao vivo": ("live", "en vivo"),
+    "duração": ("duration", "duración"),
+    "Luta %d/%d · %s": ("Fight %d/%d · %s", "Pelea %d/%d · %s"),
+    "Zerado.": ("Reset.", "Reiniciado."),
+    "O próximo dano começa um encontro novo.": ("The next hit starts a new encounter.",
+                                                "El próximo golpe empieza un encuentro nuevo."),
+    "Nenhum dano ainda.": ("No damage yet.", "Todavía no hay daño."),
+    "Ataque algo enquanto grava o replay.": ("Attack something while recording the replay.",
+                                             "Ataca algo mientras grabas el replay."),
+    "No jogo, comece a gravar um replay.": ("In the game, start recording a replay.",
+                                            "En el juego, empieza a grabar un replay."),
+    "O medidor acha o arquivo sozinho.": ("The meter finds the file by itself.",
+                                          "El medidor encuentra el archivo solo."),
+    "Nenhum dano neste encontro.": ("No damage in this encounter.", "No hay daño en este encuentro."),
+    "%.0f%% · %d acertos": ("%.0f%% · %d hits", "%.0f%% · %d golpes"),
+    "Você não causou dano aqui.": ("You dealt no damage here.", "No hiciste daño aquí."),
+    "Tudo (desde o início ou desde Zerar)": ("Everything (since the start or since Reset)",
+                                             "Todo (desde el inicio o desde Reiniciar)"),
+    "Luta atual (a mais recente)": ("Current fight (the latest)", "Pelea actual (la más reciente)"),
+    "Lutas anteriores:": ("Previous fights:", "Peleas anteriores:"),
+    "Luta %d · %s · %s": ("Fight %d · %s · %s", "Pelea %d · %s · %s"),
+    "Uma luta termina após": ("A fight ends after", "Una pelea termina tras"),
+    "Contar dano em": ("Count damage on", "Contar daño en"),
+    "As fases de um MVP contam como uma luta só": ("An MVP's phases count as a single fight",
+                                                   "Las fases de un MVP cuentan como una sola pelea"),
+    "Invocações de jogadores (ex.: Esfera Marinha) nunca contam": (
+        "Player summons (e.g. Esfera Marinha) never count",
+        "Las invocaciones de jugadores (ej.: Esfera Marinha) nunca cuentan"),
+    "Abrir replay": ("Open replay", "Abrir replay"),
+    "Replay do Ragnarok": ("Ragnarok replay", "Replay de Ragnarok"),
+    "Todos": ("All", "Todos"),
+    "Pasta Replay do Ragnarok": ("Ragnarok Replay folder", "Carpeta Replay de Ragnarok"),
+    "Fixar sempre no topo": ("Always on top", "Siempre encima"),
+    "Mostrar": ("Show", "Mostrar"),
+    "Grupo: mostrar % em vez de DPS": ("Party: show % instead of DPS", "Grupo: mostrar % en vez de DPS"),
+    "Análise completa…": ("Full analysis…", "Análisis completo…"),
+    "Avisar quando um buff acabar na luta": ("Warn when a buff ends during a fight",
+                                             "Avisar cuando un buff termine en la pelea"),
+    "Avisar quando eu morrer (com overkill)": ("Warn when I die (with overkill)",
+                                               "Avisar cuando muera (con overkill)"),
+    "Avisar HP baixo com a União Solar (Mestre Taekwon)": ("Warn on low HP with União Solar (Star Emperor)",
+                                                           "Avisar HP bajo con União Solar (Emperador Estelar)"),
+    "Salvar testes no boneco sozinho": ("Save dummy tests automatically",
+                                        "Guardar pruebas en el muñeco automáticamente"),
+    "Abrir replay salvo…": ("Open saved replay…", "Abrir replay guardado…"),
+    "Voltar a seguir a gravação": ("Go back to following the recording", "Volver a seguir la grabación"),
+    "Pasta dos replays…": ("Replay folder…", "Carpeta de replays…"),
+    "(não encontrada)": ("(not found)", "(no encontrada)"),
+    "Cor": ("Color", "Color"),
+    "Largura: %s": ("Width: %s", "Ancho: %s"),
+    "Arraste o canto: largura e linhas": ("Drag the corner: width and rows", "Arrastra la esquina: ancho y filas"),
+    "Ctrl + roda (ou Shift + arrastar): zoom": ("Ctrl + wheel (or Shift + drag): zoom",
+                                                "Ctrl + rueda (o Shift + arrastrar): zoom"),
+    "Tamanho": ("Size", "Tamaño"),
+    "%d linhas": ("%d rows", "%d filas"),
+    "Linhas": ("Rows", "Filas"),
+    "Opacidade": ("Opacity", "Opacidad"),
+    "Fechar": ("Close", "Cerrar"),
+    "Idioma": ("Language", "Idioma"),
+    "Sobre": ("About", "Acerca de"),
+    "Medidor de DPS para Ragnarok Online (ROLatam) · versão %s": (
+        "DPS meter for Ragnarok Online (ROLatam) · version %s",
+        "Medidor de DPS para Ragnarok Online (ROLatam) · versión %s"),
+    "Só lê o arquivo de replay que o jogo grava. Não lê a memória do jogo, não mexe na rede e não "
+    "manda nada para a internet.": (
+        "It only reads the replay file the game records. It doesn't read game memory, touch the network "
+        "or send anything to the internet.",
+        "Solo lee el archivo de replay que graba el juego. No lee la memoria del juego, no toca la red y no "
+        "envía nada a internet."),
+    # --- avisos do widget e nomes gerais (meter.py) ----------------------------
+    "HP %d%% com a União: abaixo de 20%% o próximo ataque mata": (
+        "HP %d%% with União: below 20%% the next attack kills you",
+        "HP %d%% con la União: por debajo del 20%% el próximo ataque te mata"),
+    "HP %d%% com a União: o próximo ataque pode matar!": ("HP %d%% with União: the next attack may kill you!",
+                                                          "HP %d%% con la União: ¡el próximo ataque puede matarte!"),
+    "Ataque básico": ("Basic attack", "Ataque básico"),
+    "Você": ("You", "Tú"),
+    "%s acabou": ("%s ended", "%s terminó"),
+    "Você morreu": ("You died", "Moriste"),
+    ": armadilha do mapa": (": map trap", ": trampa del mapa"),
+    ": União Solar (atacou com %s de HP)": (": União Solar (attacked at %s HP)", ": União Solar (atacó con %s de HP)"),
+    "pouco": ("low", "poco"),
+    "Topo": ("Upper headgear", "Casco superior"),
+    "Meio": ("Middle headgear", "Casco medio"),
+    "Baixo": ("Lower headgear", "Casco inferior"),
+    "Armadura": ("Armor", "Armadura"),
+    "Arma": ("Weapon", "Arma"),
+    "Escudo": ("Shield", "Escudo"),
+    "Capa": ("Garment", "Capa"),
+    "Sapato": ("Shoes", "Zapatos"),
+    "Acessório esq.": ("Accessory L", "Accesorio izq."),
+    "Acessório dir.": ("Accessory R", "Accesorio der."),
+    "Munição": ("Ammo", "Munición"),
+    "Visual topo": ("Costume upper", "Visual superior"),
+    "Visual meio": ("Costume middle", "Visual medio"),
+    "Visual baixo": ("Costume lower", "Visual inferior"),
+    "Visual capa": ("Costume garment", "Visual capa"),
+    "Sombrio armadura": ("Shadow armor", "Sombrío armadura"),
+    "Sombrio arma": ("Shadow weapon", "Sombrío arma"),
+    "Sombrio escudo": ("Shadow shield", "Sombrío escudo"),
+    "Sombrio sapato": ("Shadow shoes", "Sombrío zapatos"),
+    "Sombrio acess. dir.": ("Shadow acc. R", "Sombrío acc. der."),
+    "Sombrio acess. esq.": ("Shadow acc. L", "Sombrío acc. izq."),
+    " · grau %s": (" · grade %s", " · grado %s"),
+    # tipos de status (chaves internas em português; só a tela traduz)
+    "Sistema": ("System", "Sistema"),
+    "Grupo/suporte": ("Party/support", "Grupo/soporte"),
+    "Consumível": ("Consumable", "Consumible"),
+    "Serviço": ("Service", "Servicio"),
+    "Outro": ("Other", "Otro"),
+    "Classe/outros": ("Class/other", "Clase/otros"),
+    # --- análise (analysis.py) ---------------------------------------------------
+    "Homúnculo": ("Homunculus", "Homúnculo"),
+    "Mercenário": ("Mercenary", "Mercenario"),
+    "Elemental": ("Elemental", "Elemental"),
+    "Planta": ("Plant", "Planta"),
+    "Invocação": ("Summon", "Invocación"),
+    " (%d fases)": (" (%d phases)", " (%d fases)"),
+    " ★ (%d fases)": (" ★ (%d phases)", " ★ (%d fases)"),
+    "%s — %s em combate": ("%s — %s in combat", "%s — %s en combate"),
+    "Armadilha do mapa": ("Map trap", "Trampa del mapa"),
+    "Armadilha": ("Trap", "Trampa"),
+    " (errou)": (" (missed)", " (falló)"),
+    "HP atualizado": ("HP updated", "HP actualizado"),
+    " (%d%% do HP máx.)": (" (%d%% of max HP)", " (%d%% del HP máx.)"),
+    " (~%d%% do HP máx.)": (" (~%d%% of max HP)", " (~%d%% del HP máx.)"),
+    "Sem golpe visível": ("No visible hit", "Sin golpe visible"),
+    "HP perdido (efeitos no momento: %s)": ("HP lost (effects at that moment: %s)",
+                                            "HP perdido (efectos en ese momento: %s)"),
+    # --- testes ------------------------------------------------------------------
+    "DPS (em combate)": ("DPS (in combat)", "DPS (en combate)"),
+    "DPS do 1º ao último golpe": ("DPS from first to last hit", "DPS del 1.º al último golpe"),
+    "Dano": ("Damage", "Daño"),
+    "Tempo em combate": ("Time in combat", "Tiempo en combate"),
+    "Acertos": ("Hits", "Golpes"),
+    "Maior golpe": ("Biggest hit", "Golpe más grande"),
+    # --- janela de análise ------------------------------------------------------
+    "Sessão inteira": ("Whole session", "Sesión completa"),
+    "Último encontro (acompanha)": ("Latest encounter (follows)", "Último encuentro (sigue)"),
+    "Sem eventos de dano para exibir.": ("No damage events to show.", "No hay eventos de daño para mostrar."),
+    "Nenhum dano neste recorte.": ("No damage in this range.", "No hay daño en este rango."),
+    "Análise — DPS Ragnarok   (Ctrl + roda do mouse: tamanho)": (
+        "Analysis — DPS Ragnarok   (Ctrl + mouse wheel: size)", "Análisis — DPS Ragnarok   (Ctrl + rueda: tamaño)"),
+    "Análise": ("Analysis", "Análisis"),
+    "Copiar ranking": ("Copy ranking", "Copiar ranking"),
+    "Recorte:": ("Range:", "Rango:"),
+    "Agrupar fases dos MVPs": ("Group MVP phases", "Agrupar fases de los MVPs"),
+    "Dano do grupo": ("Party damage", "Daño del grupo"),
+    "DPS do grupo": ("Party DPS", "DPS del grupo"),
+    "Em combate": ("In combat", "En combate"),
+    "Jogadores": ("Players", "Jugadores"),
+    "Eventos de dano": ("Damage events", "Eventos de daño"),
+    "Gravação": ("Recording", "Grabación"),
+    "Resumo": ("Summary", "Resumen"),
+    "Seu dano": ("Your damage", "Tu daño"),
+    "Seu DPS (em combate)": ("Your DPS (in combat)", "Tu DPS (en combate)"),
+    "Skill mais usada": ("Most used skill", "Skill más usada"),
+    "Abates (golpe fatal)": ("Kills (killing blow)", "Muertes causadas (golpe final)"),
+    "Dano recebido": ("Damage taken", "Daño recibido"),
+    "Mortes": ("Deaths", "Muertes"),
+    "Seus maiores golpes": ("Your biggest hits", "Tus golpes más grandes"),
+    "Tempo": ("Time", "Tiempo"),
+    "Habilidade": ("Skill", "Habilidad"),
+    "Alvo": ("Target", "Objetivo"),
+    "Hits": ("Hits", "Hits"),
+    "Fonte": ("Source", "Fuente"),
+    "De onde veio o dano que você levou": ("Where the damage you took came from",
+                                           "De dónde vino el daño que recibiste"),
+    "Jogadores — dano de invocações e skills de chão conta para o dono": (
+        "Players — damage from summons and ground skills counts for the owner",
+        "Jugadores — el daño de invocaciones y skills de suelo cuenta para el dueño"),
+    "Jogador": ("Player", "Jugador"),
+    "Classe": ("Class", "Clase"),
+    "Erros": ("Misses", "Fallos"),
+    "Monstros": ("Monsters", "Monstruos"),
+    "Abates": ("Kills", "Muertes causadas"),
+    "Habilidades": ("Skills", "Habilidades"),
+    "Dano total": ("Total damage", "Daño total"),
+    "Dano médio": ("Average damage", "Daño medio"),
+    "Hits médios": ("Average hits", "Hits medios"),
+    "Cast médio": ("Average cast", "Cast medio"),
+    "Monstros atingidos": ("Monsters hit", "Monstruos golpeados"),
+    "Monstro": ("Monster", "Monstruo"),
+    "Dano ao longo do tempo (todos)": ("Damage over time (everyone)", "Daño a lo largo del tiempo (todos)"),
+    "Dano a cada": ("Damage every", "Daño cada"),
+    "Monstros atacados — clique para ver o confronto": ("Monsters attacked — click to see the fight",
+                                                        "Monstruos atacados — haz clic para ver el combate"),
+    "ID do mob": ("Mob ID", "ID del mob"),
+    "Atacantes": ("Attackers", "Atacantes"),
+    "HP máx.": ("Max HP", "HP máx."),
+    "Tempo até abate": ("Time to kill", "Tiempo hasta matarlo"),
+    "Abatido por": ("Killed by", "Matado por"),
+    "Dano por jogador": ("Damage by player", "Daño por jugador"),
+    "Linha do tempo": ("Timeline", "Línea de tiempo"),
+    "uma linha por jogador · tracejado = troca de fase": ("one line per player · dashed = phase change",
+                                                          "una línea por jugador · discontinua = cambio de fase"),
+    "Habilidades usadas contra ele": ("Skills used against it", "Habilidades usadas contra él"),
+    "Habilidades do monstro": ("Monster skills", "Habilidades del monstruo"),
+    "Com dano e de suporte/debuff.   Filtrar por alvo:": ("With damage and support/debuff.   Filter by target:",
+                                                          "Con daño y de soporte/debuff.   Filtrar por objetivo:"),
+    "Todos os alvos": ("All targets", "Todos los objetivos"),
+    "ID": ("ID", "ID"),
+    "Usos sem dano": ("Uses without damage", "Usos sin daño"),
+    "Análise de DPS": ("DPS analysis", "Análisis de DPS"),
+    "Jogador:": ("Player:", "Jugador:"),
+    "  Barras a cada": ("  Bars every", "  Barras cada"),
+    "Limpar seleção": ("Clear selection", "Borrar selección"),
+    "Estatísticas da janela": ("Window stats", "Estadísticas del tramo"),
+    "Janela": ("Window", "Tramo"),
+    "DPS médio": ("Average DPS", "DPS medio"),
+    "Intervalo médio": ("Average interval", "Intervalo medio"),
+    "Dano por golpe": ("Damage per hit", "Daño por golpe"),
+    "Maior intervalo": ("Longest interval", "Intervalo más largo"),
+    "Skills distintas": ("Distinct skills", "Skills distintas"),
+    "Skill com mais dano": ("Top damage skill", "Skill con más daño"),
+    "Habilidades no trecho": ("Skills in the window", "Habilidades en el tramo"),
+    "Encontro %d · %s–%s · %s": ("Encounter %d · %s–%s · %s", "Encuentro %d · %s–%s · %s"),
+    "sem replay aberto — comece a gravar no jogo ou abra um replay salvo": (
+        "no replay open — start recording in the game or open a saved replay",
+        "sin replay abierto — empieza a grabar en el juego o abre un replay guardado"),
+    "● ao vivo": ("● live", "● en vivo"),
+    "gravando": ("recording", "grabando"),
+    "replay encerrado": ("replay ended", "replay terminado"),
+    "%s · gravado %02d/%02d às %02d:%02d": ("%s · recorded %02d/%02d at %02d:%02d",
+                                            "%s · grabado %02d/%02d a las %02d:%02d"),
+    "%s · %s · nível %d": ("%s · %s · level %d", "%s · %s · nivel %d"),
+    "%s do grupo": ("%s of the party", "%s del grupo"),
+    "tempo em combate %s": ("time in combat %s", "tiempo en combate %s"),
+    "como no Ragna Recap": ("same as Ragna Recap", "igual que en Ragna Recap"),
+    "%d erros · %d críticos": ("%d misses · %d crits", "%d fallos · %d críticos"),
+    "%d usos": ("%d uses", "%d usos"),
+    "%d chefes": ("%d bosses", "%d jefes"),
+    "%d acertos": ("%d hits", "%d golpes"),
+    "dano %s": ("damage %s", "daño %s"),
+    "Fase %d": ("Phase %d", "Fase %d"),
+    "Nenhum monstro atacado neste recorte.": ("No monsters attacked in this range.",
+                                              "Ningún monstruo atacado en este rango."),
+    "HP máx. %s": ("Max HP %s", "HP máx. %s"),
+    "abatido em %s por %s": ("killed in %s by %s", "matado en %s por %s"),
+    "%s (você)": ("%s (you)", "%s (tú)"),
+    "DPS móvel (5 s)": ("Rolling DPS (5 s)", "DPS móvil (5 s)"),
+    "média da janela: %s": ("window average: %s", "promedio del tramo: %s"),
+    "Nenhum dano deste jogador no recorte.": ("No damage from this player in the range.",
+                                              "Ningún daño de este jugador en el rango."),
+    "Estatísticas da janela — %s": ("Window stats — %s", "Estadísticas del tramo — %s"),
+    "recorte inteiro (arraste no gráfico para escolher)": ("whole range (drag on the chart to pick)",
+                                                           "rango completo (arrastra en el gráfico para elegir)"),
+    "do 1º ao último golpe": ("from first to last hit", "del 1.º al último golpe"),
+    "tudo": ("all", "todo"),
+    "Buffs": ("Buffs", "Buffs"),
+    "Seus buffs": ("Your buffs", "Tus buffs"),
+    "Buff": ("Buff", "Buff"),
+    "Tipo": ("Type", "Tipo"),
+    "Tempo ativo em combate": ("Uptime in combat", "Tiempo activo en combate"),
+    "Aplicações": ("Applications", "Aplicaciones"),
+    "Já estava no início": ("Already on at start", "Ya estaba al inicio"),
+    "Agora": ("Now", "Ahora"),
+    "Debuffs no monstro": ("Debuffs on the monster", "Debuffs en el monstruo"),
+    "Debuff": ("Debuff", "Debuff"),
+    "Tempo ativo enquanto apanhava": ("Uptime while being hit", "Tiempo activo mientras recibía golpes"),
+    "Importante": ("Important", "Importante"),
+    "sim": ("yes", "sí"),
+    "ativo · %s": ("active · %s", "activo · %s"),
+    "ativo": ("active", "activo"),
+    "Seus buffs — %% do tempo em combate, vivo (%s). Em vermelho: buff de grupo ou consumível ativo em "
+    "menos de 80%% desse tempo.": (
+        "Your buffs — %% of the time in combat, alive (%s). In red: party buff or consumable active for "
+        "less than 80%% of that time.",
+        "Tus buffs — %% del tiempo en combate, vivo (%s). En rojo: buff de grupo o consumible activo menos "
+        "del 80%% de ese tiempo."),
+    "apanhou durante %s": ("was hit for %s", "recibió golpes durante %s"),
+    "Mortes de jogadores — HP só é conhecido para você e para quem está no seu grupo": (
+        "Player deaths — HP is only known for you and your party",
+        "Muertes de jugadores — el HP solo se conoce para ti y para tu grupo"),
+    "Causa": ("Cause", "Causa"),
+    "Golpe": ("Hit", "Golpe"),
+    "HP antes": ("HP before", "HP antes"),
+    "Overkill": ("Overkill", "Overkill"),
+    "Dano em 5 s": ("Damage in 5 s", "Daño en 5 s"),
+    "Antes da morte": ("Before death", "Antes de morir"),
+    "Habilidade / evento": ("Skill / event", "Habilidad / evento"),
+    "HP": ("HP", "HP"),
+    "União Solar, Lunar e Estelar (atacou com %s de HP)": ("União Solar, Lunar e Estelar (attacked at %s HP)",
+                                                           "União Solar, Lunar e Estelar (atacó con %s de HP)"),
+    "20% ou menos": ("20% or less", "20% o menos"),
+    "sem golpe visível (efeito, debuff ou algo fora da tela)": (
+        "no visible hit (effect, debuff or something off screen)",
+        "sin golpe visible (efecto, debuff o algo fuera de pantalla)"),
+    "último golpe: %s · %s (não bastava sozinho)": ("last hit: %s · %s (not enough on its own)",
+                                                    "último golpe: %s · %s (no bastaba solo)"),
+    "Nenhuma morte de jogador neste recorte.": ("No player deaths in this range.",
+                                                "Ninguna muerte de jugador en este rango."),
+    "%s morreu em %s": ("%s died at %s", "%s murió en %s"),
+    " — armadilha do mapa": (" — map trap", " — trampa del mapa"),
+    " · overkill ~%s": (" · overkill ~%s", " · overkill ~%s"),
+    " — União Solar, Lunar e Estelar": (" — União Solar, Lunar e Estelar", " — União Solar, Lunar e Estelar"),
+    " — %s de %s: %s": (" — %s from %s: %s", " — %s de %s: %s"),
+    " · overkill %s": (" · overkill %s", " · overkill %s"),
+    " (o golpe foi %.1f× o HP que restava)": (" (the hit was %.1f× the HP left)",
+                                              " (el golpe fue %.1f× el HP que quedaba)"),
+    "as armadilhas da Torre da Constelação tiram uma %% fixa do HP máx. (irredutível), que sobe com a "
+    "dificuldade e conforme o chefe perde vida; a %% vem das armadilhas que não mataram%s": (
+        "the Constellation Tower traps take a fixed %% of max HP (irreducible), which grows with the difficulty "
+        "and as the boss loses HP; the %% comes from the traps that didn't kill%s",
+        "las trampas de la Torre de la Constelación quitan un %% fijo del HP máx. (irreducible), que sube con la "
+        "dificultad y a medida que el jefe pierde vida; el %% viene de las trampas que no mataron%s"),
+    " — HP antes: %s": (" — HP before: %s", " — HP antes: %s"),
+    "a armadilha estimada era menor que o último HP conhecido: o HP do grupo chega com atraso, então algum "
+    "golpe pode ter vindo antes": (
+        "the estimated trap was smaller than the last known HP: party HP arrives late, so some hit may have "
+        "come first",
+        "la trampa estimada era menor que el último HP conocido: el HP del grupo llega con retraso, así que "
+        "algún golpe pudo llegar antes"),
+    "com a União, cada ataque físico custa 2%% do HP máx. e atacar com 20%% de HP ou menos mata na hora. HP no "
+    "último registro: %s%s": (
+        "with União, each physical attack costs 2%% of max HP and attacking at 20%% HP or less kills instantly. "
+        "HP at last record: %s%s",
+        "con la União, cada ataque físico cuesta el 2%% del HP máx. y atacar con 20%% de HP o menos mata al "
+        "instante. HP en el último registro: %s%s"),
+    " (%d%% de %s)": (" (%d%% of %s)", " (%d%% de %s)"),
+    "HP gasto pela União nos 10 s antes: %s": ("HP spent by União in the 10 s before: %s",
+                                               "HP gastado por la União en los 10 s anteriores: %s"),
+    "HP antes do último golpe: %s%s": ("HP before the last hit: %s%s", "HP antes del último golpe: %s%s"),
+    " de %s": (" of %s", " de %s"),
+    "perdeu %s de HP sem golpe visível": ("lost %s HP with no visible hit", "perdió %s de HP sin golpe visible"),
+    "o último golpe visível (%s) era menor que o HP: a causa real não apareceu no replay": (
+        "the last visible hit (%s) was smaller than the HP: the real cause isn't in the replay",
+        "el último golpe visible (%s) era menor que el HP: la causa real no aparece en el replay"),
+    "dano recebido nos últimos 5 s: %s em %d golpes": ("damage taken in the last 5 s: %s in %d hits",
+                                                       "daño recibido en los últimos 5 s: %s en %d golpes"),
+    "efeitos ativos: ": ("active effects: ", "efectos activos: "),
+    "Testes": ("Tests", "Pruebas"),
+    "Salvar recorte atual": ("Save current range", "Guardar rango actual"),
+    "Renomear": ("Rename", "Renombrar"),
+    "Excluir": ("Delete", "Borrar"),
+    "Gravado em": ("Recorded", "Grabado el"),
+    "Rótulo": ("Label", "Etiqueta"),
+    "Métrica": ("Metric", "Métrica"),
+    "Skill": ("Skill", "Skill"),
+    "A dano": ("A damage", "A daño"),
+    "B dano": ("B damage", "B daño"),
+    "Equipamento": ("Equipment", "Equipo"),
+    "Slot": ("Slot", "Slot"),
+    "A tempo ativo": ("A uptime", "A tiempo activo"),
+    "B tempo ativo": ("B uptime", "B tiempo activo"),
+    "%d teste(s). Os encontros contra bonecos de treino são salvos sozinhos. Ctrl + clique escolhe dois para "
+    "comparar.": (
+        "%d test(s). Fights against training dummies are saved automatically. Ctrl + click picks two to compare.",
+        "%d prueba(s). Las peleas contra muñecos de entrenamiento se guardan solas. Ctrl + clic elige dos para "
+        "comparar."),
+    "Escolha um teste (compara com o anterior do mesmo personagem) ou dois.": (
+        "Pick a test (compares with the previous one of the same character) or two.",
+        "Elige una prueba (compara con la anterior del mismo personaje) o dos."),
+    "A: %s     B: %s": ("A: %s     B: %s", "A: %s     B: %s"),
+    "Salvar teste": ("Save test", "Guardar prueba"),
+    "Rótulo (ex.: com Coroa +12, sem Impositio):": ("Label (e.g. with +12 Crown, no Impositio):",
+                                                    "Etiqueta (ej.: con Corona +12, sin Impositio):"),
+    "Renomear teste": ("Rename test", "Renombrar prueba"),
+    "Rótulo:": ("Label:", "Etiqueta:"),
+    "Copiado!": ("Copied!", "¡Copiado!"),
+    "Encontro": ("Encounter", "Encuentro"),
+    # --- Dedo Duro (aba) -----------------------------------------------------------
+    "Dedo Duro": ("Snitch", "Soplón"),
+    "Chefe:": ("Boss:", "Jefe:"),
+    "Copiar relatório": ("Copy report", "Copiar informe"),
+    "Fora do grupo": ("Outside the party", "Fuera del grupo"),
+    "Gravidade": ("Severity", "Gravedad"),
+    "Fase": ("Phase", "Fase"),
+    "O quê": ("What", "Qué"),
+    "Quem": ("Who", "Quién"),
+    "Detalhe": ("Detail", "Detalle"),
+    "Fase 1": ("Phase 1", "Fase 1"),
+    "Fase 2": ("Phase 2", "Fase 2"),
+    "Fase 3": ("Phase 3", "Fase 3"),
+    "Buffs no clímax": ("Buffs at the climax", "Buffs en el clímax"),
+    "Recarga / AP": ("Cooldown / AP", "Recarga / AP"),
+    "Debuffs no chefe": ("Debuffs on the boss", "Debuffs en el jefe"),
+    "Quem aplica": ("Who applies", "Quién aplica"),
+    "Observação": ("Note", "Nota"),
+    "Início": ("Start", "Inicio"),
+    "Sem Garra": ("Without Garra", "Sin Garra"),
+    "Refletidos": ("Reflected", "Reflejados"),
+    "Executores": ("Shadow Crosses", "Ejecutores"),
+    "Morreu": ("Died", "Murió"),
+    "Tempo morto": ("Time dead", "Tiempo muerto"),
+    "Volta": ("Back", "Vuelta"),
+    "Buffs que não voltaram em 15 s": ("Buffs not back within 15 s", "Buffs que no volvieron en 15 s"),
+    "Elemento": ("Element", "Elemento"),
+    "Dano no Florescer": ("Damage during Florescer", "Daño durante Florescer"),
+    "Com fogo": ("With fire", "Con fuego"),
+    "Sem conversor": ("No converter", "Sin conversor"),
+    "Não visível": ("Not visible", "No visible"),
+    "Situação": ("Status", "Situación"),
+    "Papel": ("Role", "Rol"),
+    "Dano no chefe": ("Damage on the boss", "Daño al jefe"),
+    "% do dano": ("% of damage", "% del daño"),
+    "Maior tempo morto": ("Longest time dead", "Mayor tiempo muerto"),
+    "Veneno": ("Poison", "Veneno"),
+    "Arma com veneno": ("Poisoned weapon", "Arma con veneno"),
+    "Chefe c/ Potencializar Veneno": ("Boss with Potencializar Veneno", "Jefe con Potencializar Veneno"),
+    "Os dois juntos": ("Both together", "Los dos juntos"),
+    "Só o que faltou (abaixo de 50% em alguma fase)": ("Only what was missing (below 50% in some phase)",
+                                                       "Solo lo que faltó (debajo del 50% en alguna fase)"),
+    "Nenhuma luta contra chefe neste recorte": ("No boss fights in this range", "Ninguna pelea contra jefes en este rango"),
+    "O Dedo Duro olha as lutas contra MVPs, chefes de instância e bonecos de treino.": (
+        "The Snitch looks at fights against MVPs, instance bosses and training dummies.",
+        "El Soplón mira las peleas contra MVPs, jefes de instancia y muñecos de entrenamiento."),
+    "MVP": ("MVP", "MVP"),
+    "boneco de treino": ("training dummy", "muñeco de entrenamiento"),
+    "chefe": ("boss", "jefe"),
+    "não morreu": ("not killed", "no murió"),
+    "morto em %s": ("killed in %s", "muerto en %s"),
+    "elemento %s %d%s": ("element %s %d%s", "elemento %s %d%s"),
+    " (vantagem: %s)": (" (advantage: %s)", " (ventaja: %s)"),
+    " (nenhum elemento tem vantagem; só o Florescer muda isso)": (
+        " (no element has an advantage; only Florescer changes that)",
+        " (ningún elemento tiene ventaja; solo Florescer cambia eso)"),
+    "elemento do chefe desconhecido: só a regra do Florescer vale": (
+        "boss element unknown: only the Florescer rule applies",
+        "elemento del jefe desconocido: solo vale la regla de Florescer"),
+    "usa Dor Máxima (reflete dano)": ("uses Dor Máxima (reflects damage)", "usa Dor Máxima (refleja daño)"),
+    "grupo: ● %d grave%s   ◐ %d atenção": ("party: ● %d serious%.0s   ◐ %d warning", "grupo: ● %d grave%s   ◐ %d atención"),
+    "Grupo (%d)": ("Party (%d)", "Grupo (%d)"),
+    "Fora do grupo (%d)": ("Outside the party (%d)", "Fuera del grupo (%d)"),
+    "O que faltou e o que deu errado — %d grave(s), %d de atenção, %d informativo(s)": (
+        "What was missing and what went wrong — %d serious, %d warning(s), %d info",
+        "Qué faltó y qué salió mal — %d grave(s), %d de atención, %d informativo(s)"),
+    "Só no clímax, por fase e com quem está vivo; só é cobrado o que alguma classe do grupo dá. De quem gravou, "
+    "todos os buffs aparecem. Dos outros, buff dado antes de começar a gravar só aparece quando acaba (? = não dá "
+    "para saber; grave antes de buffar). Competentia, Benedictum, Presens Acies, Argutus, Lauda, Reencarnação das "
+    "Almas e Talismã do Guerreiro/Mago o jogo não mostra nos outros jogadores: desses, só se cobra de quem gravou.": (
+        "Climax only, per phase and only while alive; something is only flagged if a class in the party provides "
+        "it. All of the recorder's buffs are visible. For others, a buff given before recording started only shows "
+        "up when it ends (? = can't tell; record before buffing). Competentia, Benedictum, Presens Acies, Argutus, "
+        "Lauda, Reencarnação das Almas and Talismã do Guerreiro/Mago are not shown on other players by the game: "
+        "those are only checked on the recorder.",
+        "Solo en el clímax, por fase y con quien está vivo; solo se exige lo que alguna clase del grupo da. De "
+        "quien grabó, todos los buffs aparecen. De los demás, un buff dado antes de empezar a grabar solo aparece "
+        "cuando termina (? = no se puede saber; graba antes de buffear). Competentia, Benedictum, Presens Acies, "
+        "Argutus, Lauda, Reencarnação das Almas y Talismã do Guerreiro/Mago el juego no los muestra en los demás "
+        "jugadores: de esos solo se exige a quien grabó."),
+    "Jogadores fora do grupo — %d grave(s), %d de atenção": ("Players outside the party — %d serious, %d warning(s)",
+                                                             "Jugadores fuera del grupo — %d grave(s), %d de atención"),
+    "Ninguém de fora do grupo bateu neste chefe": ("Nobody outside the party hit this boss",
+                                                   "Nadie de fuera del grupo golpeó a este jefe"),
+    "Buffs e debuffs de quem está fora do grupo não chegam no replay: aqui só aparecem dano, mortes, a Garra "
+    "Sombria e o elemento das skills de elemento fixo.": (
+        "Buffs and debuffs of players outside the party don't reach the replay: only damage, deaths, Garra "
+        "Sombria and fixed-element skills show up here.",
+        "Los buffs y debuffs de quien está fuera del grupo no llegan al replay: aquí solo aparecen daño, muertes, "
+        "la Garra Sombria y el elemento de las skills de elemento fijo."),
+    "Garra Sombria": ("Garra Sombria", "Garra Sombria"),
+    " (sem Executor)": (" (no Shadow Cross)", " (sin Ejecutor)"),
+    "Mortes (%d)": ("Deaths (%d)", "Muertes (%d)"),
+    "Elemento e veneno": ("Element and poison", "Elemento y veneno"),
+    # --- Dedo Duro (regras) -----------------------------------------------------------
+    "● grave": ("● serious", "● grave"),
+    "◐ atenção": ("◐ warning", "◐ atención"),
+    "○ info": ("○ info", "○ info"),
+    "Neutro": ("Neutral", "Neutro"),
+    "Água": ("Water", "Agua"),
+    "Terra": ("Earth", "Tierra"),
+    "Fogo": ("Fire", "Fuego"),
+    "Vento": ("Wind", "Viento"),
+    "Sagrado": ("Holy", "Sagrado"),
+    "Sombrio": ("Shadow", "Sombra"),
+    "Fantasma": ("Ghost", "Fantasma"),
+    "Maldito": ("Undead", "Maldito"),
+    "dos outros jogadores o jogo não mostra esse buff: só dá para ver em quem gravou": (
+        "the game doesn't show this buff on other players: it can only be seen on the recorder",
+        "el juego no muestra este buff en los demás jugadores: solo se ve en quien grabó"),
+    "recarga %d s": ("cooldown %d s", "recarga %d s"),
+    "%d AP": ("%d AP", "%d AP"),
+    "precisa do Clímax (%s)": ("needs Clímax (%s)", "necesita el Clímax (%s)"),
+    "Pólen (Florescer)": ("Pólen (Florescer)", "Pólen (Florescer)"),
+    "MVP ": ("MVP ", "MVP "),
+    "boneco": ("dummy", "muñeco"),
+    "Todas as fases": ("All phases", "Todas las fases"),
+    "Luta inteira": ("Whole fight", "Pelea completa"),
+    "Clímax": ("Climax", "Clímax"),
+    "Antes do clímax": ("Before the climax", "Antes del clímax"),
+    "troca de fase": ("phase change", "cambio de fase"),
+    "%s: recarga de %d s, usado em %s, só voltaria em %s": ("%s: %d s cooldown, used at %s, only back at %s",
+                                                            "%s: recarga de %d s, usado en %s, solo volvería en %s"),
+    " (depois do fim da fase)": (" (after the phase ended)", " (después del final de la fase)"),
+    "sai ao morrer e custa AP demais: só conta até a 1ª morte (%s)": (
+        "lost on death and costs too much AP: only counts until the 1st death (%s)",
+        "se pierde al morir y cuesta demasiado AP: solo cuenta hasta la 1.ª muerte (%s)"),
+    "tem que ficar o tempo todo": ("must be up all the time", "tiene que estar todo el tiempo"),
+    "%s é de alvo único: quem gravou talvez não precise%s": (
+        "%s is single-target: the recorder may not need it%s",
+        "%s es de objetivo único: quizás quien grabó no lo necesite%s"),
+    " (em quem recebe, tem que ficar o tempo todo)": (" (on whoever gets it, it must be up all the time)",
+                                                      " (en quien lo recibe, tiene que estar todo el tiempo)"),
+    "%s tem que ficar o tempo todo": ("%s must be up all the time", "%s tiene que estar todo el tiempo"),
+    "%s dura 60 s ou menos": ("%s lasts 60 s or less", "%s dura 60 s o menos"),
+    "nenhum membro do grupo recebeu em nenhuma fase (os buffs de quem está no grupo aparecem no replay, não só os "
+    "de quem gravou)": (
+        "no party member got it in any phase (party members' buffs show up in the replay, not only the "
+        "recorder's)",
+        "ningún miembro del grupo lo recibió en ninguna fase (los buffs de quien está en el grupo aparecen en el "
+        "replay, no solo los de quien grabó)"),
+    "não apareceu em ninguém do grupo; no começo da gravação não dá para saber (buff dado antes de gravar só "
+    "aparece quando acaba)": (
+        "it didn't show up on anyone in the party; at the start of the recording it can't be told (a buff given "
+        "before recording only shows up when it ends)",
+        "no apareció en nadie del grupo; al inicio de la grabación no se puede saber (un buff dado antes de grabar "
+        "solo aparece cuando termina)"),
+    "Ninguém do grupo recebeu ": ("Nobody in the party got ", "Nadie del grupo recibió "),
+    "a classe que dá está no grupo, mas ": ("the class that gives it is in the party, but ",
+                                            "la clase que lo da está en el grupo, pero "),
+    "Sem %s depois de morrer": ("No %s after dying", "Sin %s después de morir"),
+    "Faltou %s": ("Missing %s", "Faltó %s"),
+    "quem dá: %s": ("given by: %s", "lo da: %s"),
+    " · estava com o buff antes da 1ª morte, mas não recebeu de novo depois de ressuscitar": (
+        " · had the buff before the 1st death, but didn't get it again after being resurrected",
+        " · tenía el buff antes de la 1.ª muerte, pero no lo recibió de nuevo después de resucitar"),
+    "da classe": ("class", "de clase"),
+    "%s sumiu": ("%s vanished", "%s desapareció"),
+    "estava em %s de outra fase · %s": ("was up %s of another phase · %s", "estuvo %s de otra fase · %s"),
+    "%s fora do clímax": ("%s outside the climax", "%s fuera del clímax"),
+    "usou na luta, mas ficou ativo em no máximo %s do clímax · %s": (
+        "used in the fight, but active for at most %s of the climax · %s",
+        "lo usó en la pelea, pero estuvo activo como máximo %s del clímax · %s"),
+    "a fase é um monstro novo e chega sem Pólen: não foi aplicado de novo": (
+        "the phase is a new monster and arrives without Pólen: it wasn't applied again",
+        "la fase es un monstruo nuevo y llega sin Pólen: no se aplicó de nuevo"),
+    "a fase é um monstro novo e chega sem Pólen: só foi aplicado em %s (a fase começou em %s)": (
+        "the phase is a new monster and arrives without Pólen: it was only applied at %s (the phase started at %s)",
+        "la fase es un monstruo nuevo y llega sin Pólen: solo se aplicó en %s (la fase empezó en %s)"),
+    "%s estava com Clímax em %s do clímax da fase: dava para usar o Florescer (recarga 6 s)": (
+        "%s had Clímax for %s of the phase climax: Florescer could have been used (6 s cooldown)",
+        "%s tenía Clímax en %s del clímax de la fase: se podía usar Florescer (recarga 6 s)"),
+    "%s morreu em %s e perdeu o Clímax — sem AP para usar de novo depois de ressuscitar": (
+        "%s died at %s and lost Clímax — no AP to use it again after being resurrected",
+        "%s murió en %s y perdió el Clímax — sin AP para usarlo de nuevo después de resucitar"),
+    "Clímax de %s em recarga até %s": ("%s's Clímax on cooldown until %s", "Clímax de %s en recarga hasta %s"),
+    "%s sem Clímax nesta fase (o Pólen só tira 100%% da resistência a fogo com Clímax nv 4)": (
+        "%s without Clímax in this phase (Pólen only removes 100%% of fire resistance with Clímax lv 4)",
+        "%s sin Clímax en esta fase (el Pólen solo quita el 100%% de la resistencia al fuego con Clímax nv 4)"),
+    "o chefe usa Dor Máxima: tem que ficar o tempo todo": ("the boss uses Dor Máxima: it must be up all the time",
+                                                           "el jefe usa Dor Máxima: tiene que estar todo el tiempo"),
+    "tem que ficar o tempo todo; cada fase chega sem Pólen; o Pólen fica se o Magus morre, o Clímax não": (
+        "must be up all the time; each phase arrives without Pólen; Pólen stays if the Magus dies, Clímax doesn't",
+        "tiene que estar todo el tiempo; cada fase llega sin Pólen; el Pólen se queda si el Magus muere, el Clímax "
+        "no"),
+    "ninguém com veneno na arma": ("nobody with a poisoned weapon", "nadie con veneno en el arma"),
+    "com veneno na arma: ": ("with a poisoned weapon: ", "con veneno en el arma: "),
+    "Garra Sombria nunca apareceu no chefe": ("Garra Sombria never showed up on the boss",
+                                              "Garra Sombria nunca apareció en el jefe"),
+    "o chefe usa Dor Máxima: %d golpes refletidos (%s de dano)": (
+        "the boss uses Dor Máxima: %d hits reflected (%s damage)",
+        "el jefe usa Dor Máxima: %d golpes reflejados (%s de daño)"),
+    "Potencializar Veneno nunca apareceu no chefe": ("Potencializar Veneno never showed up on the boss",
+                                                     "Potencializar Veneno nunca apareció en el jefe"),
+    "bateram com veneno na arma: %s": ("hit with a poisoned weapon: %s", "golpearon con veneno en el arma: %s"),
+    "%s nunca apareceu no chefe": ("%s never showed up on the boss", "%s nunca apareció en el jefe"),
+    "pode ser imunidade do chefe ou a skill não foi usada": ("the boss may be immune or the skill wasn't used",
+                                                             "puede ser inmunidad del jefe o no se usó la skill"),
+    "o chefe usa Dor Máxima e a Garra Sombria ficou só %s do clímax · %s": (
+        "the boss uses Dor Máxima and Garra Sombria was up only %s of the climax · %s",
+        "el jefe usa Dor Máxima y la Garra Sombria estuvo solo %s del clímax · %s"),
+    " · no maior buraco (%s, %s): %s": (" · in the biggest gap (%s, %s): %s", " · en el hueco más grande (%s, %s): %s"),
+    "no chefe só %s do clímax · quem aplica: %s": ("on the boss only %s of the climax · applied by: %s",
+                                                   "en el jefe solo %s del clímax · lo aplica: %s"),
+    "faltou": ("missing", "faltó"),
+    "durou pouco": ("too short", "duró poco"),
+    "%s %s": ("%s %s", "%s %s"),
+    "Dor Máxima refletiu sem Garra Sombria": ("Dor Máxima reflected without Garra Sombria",
+                                              "Dor Máxima reflejó sin Garra Sombria"),
+    "%d golpes refletidos (%s de dano) com a Garra Sombria desligada": (
+        "%d hits reflected (%s damage) with Garra Sombria off",
+        "%d golpes reflejados (%s de daño) con la Garra Sombria apagada"),
+    "em recarga (%d s)": ("on cooldown (%d s)", "en recarga (%d s)"),
+    ", depois disponível por %s": (", then available for %s", ", luego disponible por %s"),
+    "disponível (usou em %s)": ("available (used at %s)", "disponible (la usó en %s)"),
+    "disponível? (nenhum uso visto desde o começo da gravação)": (
+        "available? (no use seen since the recording started)",
+        "¿disponible? (ningún uso visto desde el inicio de la grabación)"),
+    "disponível (ainda não tinha usado na luta)": ("available (not used yet in the fight)",
+                                                   "disponible (todavía no la había usado en la pelea)"),
+    "disponível": ("available", "disponible"),
+    " e ": (" and ", " y "),
+    "de %s %s": ("%s's %s", "de %s %s"),
+    "estava disponível": ("was available", "estaba disponible"),
+    "estavam disponíveis": ("were available", "estaban disponibles"),
+    "estava morto": ("was dead", "estaba muerto"),
+    "estavam mortos": ("were dead", "estaban muertos"),
+    "de %s %s %s": ("%s's %s %s", "de %s %s %s"),
+    "estava": ("was", "estaba"),
+    "estavam": ("were", "estaban"),
+    "Garra Sombria ": ("Garra Sombria ", "Garra Sombria "),
+    "de ": ("of ", "de "),
+    "com Dor Máxima no chefe": ("with Dor Máxima on the boss", "con Dor Máxima en el jefe"),
+    "no clímax": ("in the climax", "en el clímax"),
+    "Garra Sombria pronta e sem usar": ("Garra Sombria ready and unused", "Garra Sombria lista y sin usar"),
+    "ficou %s disponível enquanto o chefe estava sem Garra (%s); usou %d× na luta": (
+        "was available for %s while the boss had no Garra (%s); used it %d× in the fight",
+        "estuvo %s disponible mientras el jefe no tenía Garra (%s); la usó %d× en la pelea"),
+    "não voltou": ("didn't come back", "no volvió"),
+    "voltou (sem aviso de ressurreição)": ("came back (no resurrection packet)", "volvió (sin aviso de resurrección)"),
+    "na hora": ("instantly", "al instante"),
+    "ressuscitado": ("resurrected", "resucitado"),
+    " · provável wipe": (" · likely wipe", " · probable wipe"),
+    "Morreu e não voltou": ("Died and didn't come back", "Murió y no volvió"),
+    "morreu em %s e ficou %s morto até o fim da luta": ("died at %s and stayed dead %s until the fight ended",
+                                                        "murió en %s y estuvo %s muerto hasta el final de la pelea"),
+    "Demorou para ressuscitar": ("Slow to be resurrected", "Tardó en resucitar"),
+    " (%d×)": (" (%d×)", " (%d×)"),
+    "ficou ": ("was ", "estuvo "),
+    "%s%s morto em %s": ("%s%s dead at %s", "%s%s muerto en %s"),
+    "Perdeu buffs ao morrer": ("Lost buffs on death", "Perdió buffs al morir"),
+    "não voltaram em %d s: %s": ("not back within %d s: %s", "no volvieron en %d s: %s"),
+    "arma de %s no Florescer": ("%s weapon during Florescer", "arma de %s en el Florescer"),
+    "Sem fogo no Florescer": ("No fire during Florescer", "Sin fuego en el Florescer"),
+    "%s do dano no Florescer saiu com arma de %s; o chefe estava sem resistência a fogo": (
+        "%s of the damage during Florescer came from a %s weapon; the boss had no fire resistance",
+        "%s del daño en el Florescer salió con arma de %s; el jefe no tenía resistencia al fuego"),
+    "sem fogo visível na arma": ("no visible fire on the weapon", "sin fuego visible en el arma"),
+    "Sem fogo no Florescer?": ("No fire during Florescer?", "¿Sin fuego en el Florescer?"),
+    "nenhum conversor ou encantamento de fogo durante o Florescer (%s do dano dele ali usava o elemento da arma). "
+    "Se a arma já é de fogo, ignore": (
+        "no fire converter or endow during Florescer (%s of their damage there used the weapon element). "
+        "If the weapon is already fire, ignore this",
+        "ningún conversor o encantamiento de fuego durante el Florescer (%s de su daño ahí usaba el elemento del "
+        "arma). Si el arma ya es de fuego, ignóralo"),
+    "fogo em %s do dano no Florescer": ("fire on %s of the damage during Florescer",
+                                        "fuego en %s del daño en el Florescer"),
+    "elemento da arma não visível em %s": ("weapon element not visible for %s", "elemento del arma no visible en %s"),
+    "%s com skill de elemento fixo": ("%s with fixed-element skills", "%s con skills de elemento fijo"),
+    "desvantagem: %s": ("disadvantage: %s", "desventaja: %s"),
+    "Atacou com desvantagem elemental": ("Attacked at an elemental disadvantage", "Atacó con desventaja elemental"),
+    "%s do dano com %s contra %s %d (%d%% do dano)": ("%s of the damage with %s against %s %d (%d%% damage)",
+                                                      "%s del daño con %s contra %s %d (%d%% del daño)"),
+    "arma com veneno, chefe sem Potencializar Veneno": ("poisoned weapon, boss without Potencializar Veneno",
+                                                        "arma con veneno, jefe sin Potencializar Veneno"),
+    "Veneno sem Potencializar Veneno": ("Poison without Potencializar Veneno", "Veneno sin Potencializar Veneno"),
+    "arma com veneno em %s do clímax, mas o chefe teve Potencializar Veneno só %s · quem aplica: %s": (
+        "poisoned weapon for %s of the climax, but the boss had Potencializar Veneno only %s · applied by: %s",
+        "arma con veneno en %s del clímax, pero el jefe tuvo Potencializar Veneno solo %s · lo aplica: %s"),
+    "chefe com Potencializar Veneno, arma sem veneno": ("boss with Potencializar Veneno, weapon without poison",
+                                                        "jefe con Potencializar Veneno, arma sin veneno"),
+    "Arma sem veneno": ("Weapon without poison", "Arma sin veneno"),
+    "o chefe estava com Potencializar Veneno em %s do clímax e a arma com veneno só %s": (
+        "the boss had Potencializar Veneno for %s of the climax and the weapon was poisoned only %s",
+        "el jefe tuvo Potencializar Veneno en %s del clímax y el arma con veneno solo %s"),
+    "os dois juntos em %s do clímax": ("both together for %s of the climax", "los dos juntos en %s del clímax"),
+    "Florescer fraco": ("Weak Florescer", "Florescer débil"),
+    "o chefe perdeu só %d%% de resistência a fogo (com Clímax nv 4 seriam 100%%)": (
+        "the boss lost only %d%% fire resistance (with Clímax lv 4 it would be 100%%)",
+        "el jefe perdió solo %d%% de resistencia al fuego (con Clímax nv 4 sería 100%%)"),
+    "proteção": ("defense", "protección"),
+    "grupo": ("party", "grupo"),
+    "físico": ("physical", "físico"),
+    "mágico": ("magic", "mágico"),
+    "suporte": ("support", "soporte"),
+    "o chefe morreu: HP = dano total": ("the boss died: HP = total damage", "el jefe murió: HP = daño total"),
+    "estimado: o chefe não morreu, conta o dano feito até agora": (
+        "estimated: the boss didn't die, counting the damage done so far",
+        "estimado: el jefe no murió, cuenta el daño hecho hasta ahora"),
+    "Clímax a partir de %s, depois dos primeiros %d%% do HP (%s)": (
+        "Climax from %s, after the first %d%% of HP (%s)", "Clímax desde %s, después del primer %d%% del HP (%s)"),
+    "clímax a partir de %s, depois dos primeiros %d%% do HP (%s)": (
+        "climax from %s, after the first %d%% of HP (%s)", "clímax desde %s, después del primer %d%% del HP (%s)"),
+    "Dedo Duro — %s · %s–%s%s": ("Snitch — %s · %s–%s%s", "Soplón — %s · %s–%s%s"),
+    " · morto": (" · killed", " · muerto"),
+    "Grupo:": ("Party:", "Grupo:"),
+    "Grupo: nada para apontar.": ("Party: nothing to point out.", "Grupo: nada que señalar."),
+    "Fora do grupo:": ("Outside the party:", "Fuera del grupo:"),
+}

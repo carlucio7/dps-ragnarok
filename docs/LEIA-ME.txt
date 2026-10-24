@@ -1,0 +1,60 @@
+DPS Ragnarok {VERSION} — medidor de DPS para Ragnarok Online (ROLatam)
+=====================================================================
+
+Um widget pequeno que mostra o seu DPS e o ranking de dano do grupo em tempo
+real, lendo a gravação de replay do próprio jogo. Tem também uma janela de
+análise completa (por jogador, por monstro, buffs, mortes, testes de build) e a
+aba "Dedo Duro", que aponta o que faltou nas lutas contra chefes.
+
+Idiomas: português, English, español (botão direito › Idioma).
+
+
+COMO USAR
+---------
+1. Extraia o .zip numa pasta sua (ex.: Documentos\DpsRagnarok).
+2. Abra o DpsRagnarok.exe. Não precisa instalar nem ser administrador.
+3. No jogo, comece a gravar um replay. O medidor acha a gravação sozinho e
+   começa a contar.
+4. Botão direito no widget abre todas as opções. O botão de gráfico abre a
+   análise completa.
+
+Dá para abrir um replay já gravado: botão direito › Abrir replay salvo, ou
+arraste o arquivo .rrf em cima do DpsRagnarok.exe.
+
+Dica para o Dedo Duro: comece a gravar antes de o grupo se buffar. Os buffs dos
+outros que já estavam ativos quando a gravação começou só aparecem quando acabam.
+
+
+SEGURANÇA
+---------
+- O programa só lê os arquivos .rrf da pasta Replay do jogo
+  (C:\Gravity\Ragnarok\Replay). Não lê a memória do jogo, não injeta nada, não
+  captura pacotes de rede e não acessa a internet.
+- Ele grava só as próprias configurações e os testes salvos em
+  %APPDATA%\RODpsMeter.
+- O programa não tem assinatura digital, então o Windows pode mostrar "O Windows
+  protegeu o computador". Antes de liberar, confira se o arquivo é o original:
+  abra o PowerShell na pasta e rode
+
+      Get-FileHash .\DpsRagnarok.exe
+
+  O código que aparecer tem que ser igual ao do arquivo SHA256.txt (e ao da
+  página de onde você baixou). Se for igual, clique em "Mais informações" ›
+  "Executar assim mesmo".
+- Baixe só pelo link oficial. Não aceite o .exe solto, passado por outra pessoa,
+  sem conferir o código.
+- Não é um programa oficial da Gravity nem da ROLatam. Use por sua conta.
+
+
+PARA REMOVER
+------------
+Apague a pasta do programa e a pasta %APPDATA%\RODpsMeter.
+
+
+LIMITES
+-------
+- Só aparece o dano que o seu cliente recebe: quem está fora da tela não conta.
+- Nomes de skills, buffs, monstros e itens aparecem como no cliente da LATAM em
+  português, em todos os idiomas.
+- Com vários clientes gravando ao mesmo tempo, o medidor segue a gravação mais
+  nova (dá para abrir outra manualmente).

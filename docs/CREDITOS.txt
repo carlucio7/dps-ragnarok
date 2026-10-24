@@ -1,0 +1,29 @@
+DPS Ragnarok {VERSION} — créditos / credits / créditos
+=====================================================
+
+- Formato do replay (.rrf) / replay format / formato del replay:
+  rrfparser e ragreplaystats, de Adson Leal (licença MIT / MIT license).
+  https://github.com/adsonpleal/rrfparser
+  https://github.com/adsonpleal/ragreplaystats
+
+- Nomes de skills, classes, monstros, buffs e itens (cliente da LATAM) /
+  skill, class, monster, buff and item names (LATAM client):
+  extraídos pelo projeto ragreplaystats / extracted by ragreplaystats.
+  © Gravity Co., Ltd.
+
+- Status, skills de cada classe, recargas, custo de AP, elementos e tabela
+  elemental / statuses, class skills, cooldowns, AP costs, elements and the
+  element table: gerados a partir do rAthena (GPL-3.0) /
+  generated from rAthena (GPL-3.0). https://github.com/rathena/rathena
+
+- Lista de buffs e debuffs do simulador / buff and debuff list from the
+  simulator: LATAM Tools. https://simulador.latam-tools.com.br/
+
+- Conferência dos números / numbers checked against: Ragna Recap.
+  https://recap.latam-tools.com.br/
+
+- Elemento do Betelgeuse / Betelgeuse element: Divine Pride.
+
+Ragnarok Online é marca da Gravity Co., Ltd. Este programa não é oficial nem tem
+ligação com a Gravity ou a ROLatam. / Ragnarok Online is a trademark of Gravity
+Co., Ltd. This program is unofficial and not affiliated with Gravity or ROLatam.
