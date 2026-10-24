@@ -2,6 +2,13 @@
 
 Português · [English](#english) · [Español](#español)
 
+## [1.0.2] — 2026-10-24
+
+- Nomes em inglês e espanhol sem os espaços que o cliente do jogo deixa sobrando
+  ("Solar, Lunar and Stellar Union ." nos avisos).
+- Espanhol: "durante Explosión Floreciente" no Dedo Duro, em vez de "en el
+  Explosión Floreciente".
+
 ## [1.0.1] — 2026-10-24
 
 - **Nomes no seu idioma:** em inglês e espanhol, skills, buffs, debuffs, classes,
@@ -32,6 +39,13 @@ inglês e espanhol.
 
 ## English
 
+### [1.0.2] — 2026-10-24
+
+- English and Spanish names without the extra spaces the game client leaves in
+  some of them ("Solar, Lunar and Stellar Union ." in the warnings).
+- Spanish: "durante Explosión Floreciente" in the Snitch tab, instead of "en el
+  Explosión Floreciente".
+
 ### [1.0.1] — 2026-10-24
 
 - **Names in your language:** in English and Spanish, skills, buffs, debuffs,
@@ -61,6 +75,13 @@ and Spanish.
 ---
 
 ## Español
+
+### [1.0.2] — 2026-10-24
+
+- Nombres en inglés y español sin los espacios que el cliente del juego deja de
+  más en algunos ("Unión Solar, Lunar y Estelar ." en los avisos).
+- Español: "durante Explosión Floreciente" en el Soplón, en lugar de "en el
+  Explosión Floreciente".
 
 ### [1.0.1] — 2026-10-24
 

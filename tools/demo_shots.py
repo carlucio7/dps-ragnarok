@@ -66,7 +66,7 @@ def build(path):
            (50000, fr.vanish(FENRIR)), (50800, fr.resurrect(FENRIR)),
            (31000, fr.vanish(P1, kind=0)), (62000, fr.vanish(P2))]
     with open(path, "wb") as f:
-        f.write(fr.build(ME, sorted(ev, key=lambda e: e[0]), player="Aria", map_name="Torre da Constelação")[0])
+        f.write(fr.build(ME, sorted(ev, key=lambda e: e[0]), player="Aria", map_name="1@ch_t.gat")[0])
 
 
 def shots(out, lang, replay):

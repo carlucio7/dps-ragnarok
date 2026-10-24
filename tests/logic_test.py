@@ -247,12 +247,15 @@ finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
 # inglês e espanhol sem o jogo instalado: nomes da cópia do pacote (data/names.json), descrições do
-# rAthena e catálogo para skills de monstro, e as classes que o cliente grafa diferente (JT_ARC_MAGE)
+# rAthena e catálogo para skills de monstro, as classes que o cliente grafa diferente (JT_ARC_MAGE)
+# e nomes sem o espaço que o cliente deixa sobrando
 probe = ("import meter; print('|'.join([meter.job_name(4255), meter.job_name(4309), meter.skill_name(172), "
-         "meter.skill_name(717), meter.skill_name(783), meter.status_name(1339), meter.skill_name(5001)]))")
-for lang, expected in (("en", "Arch Mage|Sky Emperor|Guided Attack|Max Pain (attack)|Killing Aura|Killing Aura|Dark Claw"),
+         "meter.skill_name(717), meter.skill_name(783), meter.status_name(1339), meter.skill_name(5001), "
+         "meter.skill_name(444)]))")
+for lang, expected in (("en", "Arch Mage|Sky Emperor|Guided Attack|Max Pain (attack)|Killing Aura|Killing Aura|Dark Claw|"
+                              "Solar, Lunar and Stellar Union"),
                        ("es", "Archimago|Emperador Celestial|Ataque Guiado|Dolor Máxima (ataque)|Aura Asesina|"
-                              "Aura Asesina|Garra Tenebrosa")):
+                              "Aura Asesina|Garra Tenebrosa|Unión Solar, Lunar y Estelar")):
     out = subprocess.run([sys.executable, "-X", "utf8", "-c", probe], cwd=os.path.join(HERE, ".."),
                          env=dict(os.environ, RODPS_LANG=lang), capture_output=True, text=True,
                          encoding="utf-8").stdout.strip()

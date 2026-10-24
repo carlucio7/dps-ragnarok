@@ -780,21 +780,21 @@ CATALOG = {
     "%s%s morto em %s": ("%s%s dead at %s", "%s%s muerto en %s"),
     "Perdeu buffs ao morrer": ("Lost buffs on death", "Perdió buffs al morir"),
     "não voltaram em %d s: %s": ("not back within %d s: %s", "no volvieron en %d s: %s"),
-    "arma de %s no Florescer": ("%s weapon during Florescer", "arma de %s en el Florescer"),
-    "Sem fogo no Florescer": ("No fire during Florescer", "Sin fuego en el Florescer"),
+    "arma de %s no Florescer": ("%s weapon during Florescer", "arma de %s durante Florescer"),
+    "Sem fogo no Florescer": ("No fire during Florescer", "Sin fuego durante Florescer"),
     "%s do dano no Florescer saiu com arma de %s; o chefe estava sem resistência a fogo": (
         "%s of the damage during Florescer came from a %s weapon; the boss had no fire resistance",
-        "%s del daño en el Florescer salió con arma de %s; el jefe no tenía resistencia al fuego"),
+        "%s del daño durante Florescer salió con arma de %s; el jefe no tenía resistencia al fuego"),
     "sem fogo visível na arma": ("no visible fire on the weapon", "sin fuego visible en el arma"),
-    "Sem fogo no Florescer?": ("No fire during Florescer?", "¿Sin fuego en el Florescer?"),
+    "Sem fogo no Florescer?": ("No fire during Florescer?", "¿Sin fuego durante Florescer?"),
     "nenhum conversor ou encantamento de fogo durante o Florescer (%s do dano dele ali usava o elemento da arma). "
     "Se a arma já é de fogo, ignore": (
         "no fire converter or endow during Florescer (%s of their damage there used the weapon element). "
         "If the weapon is already fire, ignore this",
-        "ningún conversor o encantamiento de fuego durante el Florescer (%s de su daño ahí usaba el elemento del "
+        "ningún conversor o encantamiento de fuego durante Florescer (%s de su daño ahí usaba el elemento del "
         "arma). Si el arma ya es de fuego, ignóralo"),
     "fogo em %s do dano no Florescer": ("fire on %s of the damage during Florescer",
-                                        "fuego en %s del daño en el Florescer"),
+                                        "fuego en %s del daño durante Florescer"),
     "elemento da arma não visível em %s": ("weapon element not visible for %s", "elemento del arma no visible en %s"),
     "%s com skill de elemento fixo": ("%s with fixed-element skills", "%s con skills de elemento fijo"),
     "desvantagem: %s": ("disadvantage: %s", "desventaja: %s"),

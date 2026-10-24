@@ -33,7 +33,7 @@ COLUMNS = {"en": 2, "pt": 7, "es": 9}          # colunas das tabelas do jogo
 MAX_KEY = 4                                    # chaves de monstros têm 4 letras
 MAX_NAME = 48                                  # textos maiores que isso são frases, não nomes
 I18N_PREFIX = b"data\\i18n\\sc\\"
-CACHE_VERSION = 4
+CACHE_VERSION = 5
 SUFFIX = {"en": "enus", "es": "eses", "pt": "ptbr"}
 LUA = "data\\luafiles514\\lua files\\"
 ID_FILES = {"skill": LUA + "skillinfoz\\skillid.lub", "status": LUA + "stateicon\\efstids.lub",
@@ -156,7 +156,8 @@ def read_game_names(grf, lang, pt_names=None, pt_monsters=None):
         row = (pt_names or {}).get(pt.strip().lower())
         if row and row[col]:
             out["monster"][mid] = row[col]
-    return {kind: {str(k): v for k, v in table.items() if isinstance(v, str) and v.strip()}
+    # o cliente tem nomes com espaço sobrando ("Solar, Lunar and Stellar Union ")
+    return {kind: {str(k): " ".join(v.split()) for k, v in table.items() if isinstance(v, str) and v.strip()}
             for kind, table in out.items()}
 
 
@@ -167,7 +168,7 @@ def read_names(path, by_pt=None):
 
     def text(v):
         try:
-            return base64.b64decode(v).decode("utf-8") if v else ""
+            return " ".join(base64.b64decode(v).decode("utf-8").split()) if v else ""
         except (ValueError, UnicodeDecodeError):
             return ""
 
