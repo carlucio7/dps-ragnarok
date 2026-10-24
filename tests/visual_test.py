@@ -92,6 +92,11 @@ an_win.nb.select(3)
 an_win.refresh(force=True)
 s.shot_window(an_win.top, "18_analise_zoom")
 an_win.set_zoom(0)
+an_win.top.geometry("1180x860+60+40")
+for i, name in ((4, "buffs"), (5, "mortes"), (6, "testes")):
+    an_win.nb.select(i)
+    an_win.refresh(force=True)
+    s.shot_window(an_win.top, "18_analise_%d_%s" % (i, name))
 # Dedo Duro: grupo (alertas e cada detalhe) e fora do grupo
 an_win.top.geometry("1180x860+60+40")
 an_win.nb.select(7)

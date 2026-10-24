@@ -3,9 +3,12 @@
 import collections
 import json
 import os
+import re
 import struct
 import sys
 
+import clientdata
+import i18n
 import rrf
 from i18n import _
 from fmt import num as _num
@@ -20,8 +23,9 @@ PHASED_BOSSES = {20994}       # Betelgeuse: 3 fases, ~11 s entre elas
 MAX_PHASE_GAP_MS = 60000
 DUMMY_MIN, DUMMY_MAX = 21060, 21099   # bonecos de treino
 MVP_HP = 1000000
-FUSION_WARNINGS = [(0.28, _("HP %d%% com a União: abaixo de 20%% o próximo ataque mata")),
-                   (0.22, _("HP %d%% com a União: o próximo ataque pode matar!"))]
+# (traduzidos na hora do aviso: os nomes do jogo só carregam depois do import)
+FUSION_WARNINGS = [(0.28, "HP %d%% com a União: abaixo de 20%% o próximo ataque mata"),
+                   (0.22, "HP %d%% com a União: o próximo ataque pode matar!")]
 FUSION_REARM = 0.32
 DEDUP_MS = 200
 FRIENDLY_KINDS = {"pc", "homun", "merc", "elem", "abr", "bionic", "pet"}
@@ -39,15 +43,117 @@ def _load(name):
 SKILLS = _load("skill.json")
 JOBS = _load("job.json")
 MONSTERS = _load("monster.json")
+# Nomes em inglês e espanhol tirados do cliente da LATAM (tools/build_names.py), para quando o jogo
+# não está instalado no PC. Com o jogo instalado, valem os da instalação (clientdata), mais novos.
+BUNDLED_NAMES = _load("names.json").get(i18n.LANG, {}) if i18n.LANG != "pt" else {}
+clientdata.NAMES.pt_monsters = {int(k): v["name"] for k, v in MONSTERS.items() if v.get("name")}
+
+
+def game_name(kind, ident, pt=None):
+    """Nome do jogo no idioma escolhido: o português da base do medidor, ou o do cliente (instalação
+    do jogador, depois a cópia do pacote) em inglês e espanhol. Em português, o cliente só completa
+    o que a base não tem (conteúdo novo)."""
+    if i18n.LANG == "pt" and pt:
+        return pt
+    return clientdata.NAMES.game_name(kind, ident) or BUNDLED_NAMES.get(kind, {}).get(str(ident)) or pt
+
+
+# Nomes do jogo citados nos textos da tela (em português no catálogo do i18n): em inglês e espanhol
+# viram o nome que o jogador vê no jogo dele. (texto em português, tipo, id)
+TERMS = [("União Solar, Lunar e Estelar", "skill", 444), ("União Solar", "skill", 444), ("União", "skill", 444),
+         ("Mestre Taekwon", "job", 4047), ("Executor", "job", 4254), ("Engenheiro", "job", 4253),
+         ("Magus", "job", 4255), ("Cardeal", "job", 4256), ("Asceta", "job", 4303),
+         ("Garra Sombria", "skill", 5001), ("Dor Máxima", "skill", 716), ("Florescer", "skill", 5222),
+         ("Pólen", "status", 1183), ("Clímax", "skill", 5232), ("Potencializar Veneno", "skill", 2021),
+         ("Manejo Perfeito", "skill", 112), ("Grito de Guerra", "skill", 155), ("Bênção", "skill", 34),
+         ("Aumentar Agilidade", "skill", 29), ("Impositio Manus", "skill", 66), ("Avanço Sísmico", "skill", 5296),
+         ("Talismã dos Elementos", "skill", 5423), ("Talismã do Guerreiro", "skill", 5419),
+         ("Talismã do Mago", "skill", 5420), ("Reencarnação das Almas", "skill", 5432),
+         ("Competentia", "skill", 5278), ("Benedictum", "skill", 5282), ("Religio", "skill", 5281),
+         ("Presens Acies", "skill", 5275), ("Argutus Telum", "skill", 5272), ("Argutus Vita", "skill", 5271),
+         ("Lauda Agnus", "skill", 2047), ("Lauda Ramus", "skill", 2048), ("Encanto de Órion", "skill", 2451),
+         ("Clementia", "skill", 2041), ("Canto Candidus", "skill", 2042), ("Esfera Marinha", "monster", 1142)]
+_terms = [None, None]
+
+
+def localize_terms(text):
+    """Troca os nomes do jogo em português que aparecem num texto pelos do idioma escolhido."""
+    if clientdata.NAMES.version != _terms[0]:
+        pairs = {}
+        for pt, kind, ident in TERMS:
+            if pt == "Clímax" and i18n.LANG != "en":
+                continue            # em espanhol "Clímax" também é o momento da luta
+            name = game_name(kind, ident)
+            if name and name != pt:
+                pairs[pt] = name
+        order = sorted(pairs, key=len, reverse=True)
+        pattern = re.compile("|".join(r"(?<!\w)%s(?!\w)" % re.escape(p) for p in order)) if order else None
+        _terms[:] = [clientdata.NAMES.version, (pattern, pairs)]
+    pattern, pairs = _terms[1]
+    return pattern.sub(lambda m: pairs[m.group(0)], text) if pattern else text
+
+
+if i18n.LANG != "pt":
+    i18n.TERM_HOOK = localize_terms
+
+
+_pt_index = {}
+
+
+def translate_pt(name):
+    """Nome em português que o cliente não tem pelo id (ex.: "Dor Máxima (ataque)", skill de item,
+    comida): procura o mesmo nome entre skills, monstros e itens, ou traduz base + complemento."""
+    if not name or i18n.LANG == "pt":
+        return None
+    if not _pt_index:
+        for kind, table in (("skill", SKILLS), ("monster", MONSTERS), ("item", ITEMS)):
+            idx = _pt_index[kind] = collections.defaultdict(list)
+            for k, v in table.items():
+                if isinstance(v, dict) and v.get("name"):
+                    idx[v["name"].strip().lower()].append(k)
+    key = name.strip().lower()
+    for kind in ("skill", "monster", "item"):
+        for ident in _pt_index[kind].get(key, ()):
+            loc = clientdata.NAMES.game_name(kind, ident) or BUNDLED_NAMES.get(kind, {}).get(str(ident))
+            if loc:
+                return loc
+    m = re.match(r"^(.*\S) \((.+)\)$", name)
+    if m:
+        base = translate_pt(m.group(1)) or (_(m.group(1)) if _(m.group(1)) != m.group(1) else None)
+        if base:
+            return "%s (%s)" % (base, translate_pt(m.group(2)) or _(m.group(2)))
+    t = _(name)                                        # rótulos do próprio medidor
+    return t if t != name else None
 
 
 def skill_name(sid, fallback=None):
     if sid == 0:
         return _("Ataque básico")
     e = SKILLS.get(str(sid))
-    if e and e.get("name"):
-        return e["name"]
-    return fallback or "Skill %d" % sid
+    pt = e.get("name") if e else None
+    name = game_name("skill", sid, pt)
+    if name == pt and pt:
+        name = translate_pt(pt) or _aegis_name(sid) or pt
+    return name or fallback or "Skill %d" % sid
+
+
+_aegis = {}
+
+
+def _aegis_name(sid):
+    """Em inglês, para skill que o cliente não nomeia (skills de monstro, invocações): a descrição do
+    rAthena ("Guided Attack") ou o nome interno legível."""
+    if i18n.LANG != "en":
+        return None
+    if not _aegis:
+        _aegis.update({k: (v.get("d") if v.get("d") and not v["d"].isupper() else None) or pretty_aegis(v.get("n"))
+                       for k, v in (_load("rathena.json").get("skills") or {}).items()})
+    return _aegis.get(str(sid))
+
+
+def monster_name(mob_id):
+    m = MONSTERS.get(str(mob_id))
+    return game_name("monster", mob_id, m.get("name") if m else None)
 
 
 STATUSES = _load("status.json")
@@ -107,6 +213,29 @@ SERVICE_WORDS = ("bonus de exp", "bonus de drop", "armazem", "premium", "vip")
 
 
 def status_name(efst):
+    """Nome do buff/debuff na tela (no idioma escolhido)."""
+    if i18n.LANG != "pt":
+        name = clientdata.NAMES.game_name("status", efst) or BUNDLED_NAMES.get("status", {}).get(str(efst))
+        if name and name.isupper():
+            # alguns ícones têm nome interno em maiúsculas ("DARK CROW"): o da skill é o que o jogador conhece
+            skill = next((game_name("skill", sid) for sid in (EFST.get(str(efst)) or {}).get("s", [])
+                          if game_name("skill", sid)), None)
+            name = skill or name.title()
+        if name and "%" not in name:
+            return name
+        pt = status_name_pt(efst)
+        name = translate_pt(pt) or (translate_pt(re.sub(r" \(.*\)$", "", pt)) if "(" in pt else None)
+        if name:
+            return name
+        for sid in (EFST.get(str(efst)) or {}).get("s", []):     # nome da skill que aplica o status
+            name = game_name("skill", sid) or _aegis_name(sid)
+            if name:
+                return name
+    return status_name_pt(efst)
+
+
+def status_name_pt(efst):
+    """Nome em português (com os nomes do simulador): é o que a lógica usa para classificar."""
     name = (STATUSES.get(str(efst)) or {}).get("name") or ""
     if not name or name == "?" or "%" in name:
         name = ""
@@ -133,7 +262,7 @@ def status_kind(efst):
         return "Sistema"
     if efst in PARTY_BUFFS:
         return "Grupo/suporte"
-    n = _norm(status_name(efst))
+    n = _norm(status_name_pt(efst))
     if any(w in n for w in CONSUMABLE_WORDS):
         return "Consumível"
     if any(w in n for w in SERVICE_WORDS):
@@ -160,7 +289,7 @@ GRADES = {1: "D", 2: "C", 3: "B", 4: "A"}
 
 def item_name(item_id):
     e = ITEMS.get(str(item_id))
-    return e["name"] if e and e.get("name") else "Item %d" % item_id
+    return game_name("item", item_id, e.get("name") if e else None) or "Item %d" % item_id
 
 
 def item_text(it):
@@ -174,7 +303,7 @@ def item_text(it):
         text += _(" · grau %s") % GRADES[it.grade]
     opts = []
     for oid, val, _param in it.options:
-        fmt_ = RANDOM_OPTIONS.get(str(oid))
+        fmt_ = game_name("option", oid, RANDOM_OPTIONS.get(str(oid)))
         if fmt_:
             try:
                 opts.append(fmt_ % val if "%d" in fmt_ else fmt_.replace("%%", "%"))
@@ -186,7 +315,7 @@ def item_text(it):
 
 
 def job_name(jid):
-    return JOBS.get(str(jid), "")
+    return game_name("job", jid, JOBS.get(str(jid))) or ""
 
 
 class Stat:
@@ -332,12 +461,11 @@ class Combat:
             return self.session.player or _("Você")
         e = self.entities.get(aid)
         if e:
-            if e.name:
-                return e.name
+            name = clientdata.NAMES.resolve(e.name) if e.name else None
+            if name:
+                return name
             if e.kind == "mob":
-                m = MONSTERS.get(str(e.job))
-                if m:
-                    return m["name"]
+                return monster_name(e.job) or _("Monstro %d") % e.job   # nem o jogo nem a base conhecem
         return "#%d" % aid
 
     def is_mvp(self, aid):
@@ -553,7 +681,7 @@ class Combat:
                 self._fusion_armed[level] = False
                 if level == 0:
                     self._fusion_armed[1] = pct > FUSION_WARNINGS[1][0]
-                self.alert(t, "fusion", text % round(pct * 100))
+                self.alert(t, "fusion", _(text) % round(pct * 100))
                 break
 
     def on_my_death(self, t):
@@ -808,13 +936,93 @@ def pretty_aegis(name):
 
 DEFAULT_DIRS = [r"C:\Gravity\Ragnarok\Replay", r"C:\Gravity\Ragnarok Online\Replay",
                 r"C:\Program Files (x86)\Gravity\Ragnarok\Replay"]
+# pastas de instalação comuns, procuradas em todos os discos fixos
+GAME_SUBDIRS = [r"Gravity\Ragnarok", r"Gravity\Ragnarok Online", r"Gravity\ROLatam",
+                r"Program Files (x86)\Gravity\Ragnarok", r"Program Files\Gravity\Ragnarok", "Ragnarok",
+                "Ragnarok Online", "ROLatam", r"Games\Ragnarok", r"Jogos\Ragnarok", r"Juegos\Ragnarok"]
+UNINSTALL_KEYS = [r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+                  r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"]
+
+
+def _registry_game_dirs():
+    """Onde o instalador do jogo disse que instalou (só leitura do registro do Windows)."""
+    try:
+        import winreg
+    except ImportError:
+        return []
+    out = []
+    for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        for path in UNINSTALL_KEYS:
+            try:
+                key = winreg.OpenKey(root, path)
+            except OSError:
+                continue
+            for i in range(winreg.QueryInfoKey(key)[0]):
+                try:
+                    sub = winreg.OpenKey(key, winreg.EnumKey(key, i))
+                    name = str(winreg.QueryValueEx(sub, "DisplayName")[0])
+                except OSError:
+                    continue
+                if "ragnarok" not in name.lower():
+                    continue
+                for field in ("InstallLocation", "DisplayIcon"):
+                    try:
+                        v = str(winreg.QueryValueEx(sub, field)[0]).strip().strip('"').split(",")[0]
+                    except OSError:
+                        continue
+                    if v:
+                        out.append(os.path.dirname(v) if field == "DisplayIcon" else v)
+    return out
+
+
+def _fixed_drives():
+    if os.name != "nt":
+        return []
+    try:
+        import ctypes
+        mask = ctypes.windll.kernel32.GetLogicalDrives()
+        drives = [chr(65 + i) + ":\\" for i in range(26) if mask >> i & 1]
+        return [d for d in drives if ctypes.windll.kernel32.GetDriveTypeW(d) == 3]      # 3 = disco fixo
+    except (AttributeError, OSError):
+        return ["C:\\"]
+
+
+def game_dirs():
+    out = []
+    for d in _registry_game_dirs() + [os.path.join(drive, rel) for drive in _fixed_drives() for rel in GAME_SUBDIRS]:
+        d = os.path.normpath(d)
+        if d.lower() not in (x.lower() for x in out):
+            out.append(d)
+    return out
+
+
+def is_game_dir(d):
+    return any(os.path.exists(os.path.join(d, x)) for x in ("data.grf", "Ragexe.exe", "Ragnarok.exe", "Replay"))
+
+
+def replay_dir_for(path):
+    """Pasta escolhida pelo usuário: aceita a pasta Replay ou a pasta do jogo."""
+    path = os.path.normpath(path)
+    if os.path.basename(path).lower() != "replay" and is_game_dir(path):
+        return os.path.join(path, "Replay")
+    return path
+
+
+def find_replay_dirs():
+    """Todas as pastas Replay que dá para achar (há quem tenha várias instalações do jogo).
+    A pasta de uma instalação sem gravações ainda não existe: o jogo cria na primeira."""
+    out = []
+    for d in [x for x in DEFAULT_DIRS if os.path.isdir(x)] + \
+            [os.path.join(g, "Replay") for g in game_dirs() if is_game_dir(g)]:
+        d = os.path.normpath(d)
+        if d.lower() not in (x.lower() for x in out):
+            out.append(d)
+    return out
 
 
 def find_replay_dir():
-    for d in DEFAULT_DIRS:
-        if os.path.isdir(d):
-            return d
-    return None
+    dirs = find_replay_dirs()
+    return dirs[0] if dirs else None
 
 
 class ReplayFile:
@@ -823,6 +1031,7 @@ class ReplayFile:
 
     def __init__(self, path, gap_ms=10000, targets="all"):
         self.path = path
+        clientdata.NAMES.use_folder(os.path.dirname(path))
         self.gap_ms = gap_ms
         self.targets = targets
         self.header = self.session = self.reader = self.combat = None
@@ -882,13 +1091,18 @@ class ReplayFile:
 
 
 class Watcher:
-    """Segue a gravacao mais recente da pasta Replay."""
+    """Segue a gravacao mais recente entre as pastas Replay (a escolhida e todas as que achar)."""
 
     ACTIVE_S = 15.0     # arquivo modificado ha menos que isso = gravando
+    FIND_S = 30.0       # de quanto em quanto tempo procura instalações novas
 
-    def __init__(self, folder=None, gap_ms=10000, targets="all"):
+    def __init__(self, folder=None, gap_ms=10000, targets="all", auto=True):
         self.targets = targets
-        self.folder = folder or find_replay_dir()
+        self.extra = replay_dir_for(folder) if folder else None     # escolhida pelo usuário
+        self.auto = auto
+        self.folders = []
+        self._next_find = 0.0
+        self.refresh_folders()
         self.gap_ms = gap_ms
         self.file = None
         self.pinned = False           # True quando o usuario abriu um arquivo manualmente
@@ -907,27 +1121,50 @@ class Watcher:
         self.pinned = False
         self.file = None
 
+    @property
+    def folder(self):
+        """A pasta principal (a escolhida, ou a primeira que achou)."""
+        return self.folders[0] if self.folders else None
+
+    def refresh_folders(self):
+        found = find_replay_dirs() if self.auto else []
+        out = []
+        for d in ([self.extra] if self.extra else []) + found:
+            if d.lower() not in (x.lower() for x in out):
+                out.append(d)
+        self.folders = out
+        for d in out:
+            clientdata.NAMES.use_folder(d)
+
+    def set_folder(self, folder):
+        self.extra = replay_dir_for(folder) if folder else None
+        self.refresh_folders()
+        self.follow()
+
     def scan(self, now):
-        if not self.folder or not os.path.isdir(self.folder):
-            return None
         best = None
-        try:
-            for f in os.listdir(self.folder):
+        for folder in self.folders:
+            try:
+                files = os.listdir(folder)
+            except OSError:
+                continue                              # pasta que o jogo ainda não criou
+            for f in files:
                 if not f.lower().endswith(".rrf"):
                     continue
-                p = os.path.join(self.folder, f)
+                p = os.path.join(folder, f)
                 try:
                     st = os.stat(p)
                 except OSError:
                     continue
                 if now - st.st_mtime <= self.ACTIVE_S and (best is None or st.st_mtime > best[1]):
                     best = (p, st.st_mtime)
-        except OSError:
-            return None
         return best[0] if best else None
 
     def poll(self, now):
         """Devolve True se houve dado novo."""
+        if now >= self._next_find:
+            self._next_find = now + self.FIND_S      # instalação nova, disco novo, pasta criada
+            self.refresh_folders()
         if not self.pinned:
             path = self.scan(now)
             if path and (self.file is None or os.path.normcase(path) != os.path.normcase(self.file.path)):

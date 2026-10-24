@@ -18,6 +18,14 @@ COMO USAR
 4. Botão direito no widget abre todas as opções. O botão de gráfico abre a
    análise completa.
 
+SE O JOGO NÃO ESTÁ EM C:\Gravity\Ragnarok
+O medidor procura a pasta do jogo sozinho (no registro do Windows e nos
+discos). Se o meio do widget disser "Não achei a pasta Replay do jogo", clique
+ali e escolha a pasta do Ragnarok (a que tem o Ragexe.exe e o data.grf) ou a
+pasta Replay dentro dela. Dá para trocar depois em: botão direito › Pasta dos
+replays. Com várias instalações do jogo, ele olha todas as pastas Replay e
+segue a gravação mais nova.
+
 Dá para abrir um replay já gravado: botão direito › Abrir replay salvo, ou
 arraste o arquivo .rrf em cima do DpsRagnarok.exe.
 
@@ -27,11 +35,13 @@ outros que já estavam ativos quando a gravação começou só aparecem quando a
 
 SEGURANÇA
 ---------
-- O programa só lê os arquivos .rrf da pasta Replay do jogo
-  (C:\Gravity\Ragnarok\Replay). Não lê a memória do jogo, não injeta nada, não
+- O programa só lê: os arquivos .rrf da pasta Replay do jogo, as tabelas de
+  nomes do data.grf do jogo (para mostrar o nome de monstros novos, como os da
+  Biosfera de Varmundt) e, no registro do Windows, onde o jogo foi instalado.
+  Não altera nada disso, não lê a memória do jogo, não injeta nada, não
   captura pacotes de rede e não acessa a internet.
-- Ele grava só as próprias configurações e os testes salvos em
-  %APPDATA%\RODpsMeter.
+- Ele grava só as próprias configurações, os testes salvos e um cache dos nomes
+  em %APPDATA%\RODpsMeter.
 - O programa não tem assinatura digital, então o Windows pode mostrar "O Windows
   protegeu o computador". Antes de liberar, confira se o arquivo é o original:
   abra o PowerShell na pasta e rode
@@ -54,7 +64,9 @@ Apague a pasta do programa e a pasta %APPDATA%\RODpsMeter.
 LIMITES
 -------
 - Só aparece o dano que o seu cliente recebe: quem está fora da tela não conta.
-- Nomes de skills, buffs, monstros e itens aparecem como no cliente da LATAM em
-  português, em todos os idiomas.
+- Nomes de skills, buffs, monstros e itens vêm do jogo instalado, no idioma
+  escolhido. Sem o jogo no PC, o programa usa uma cópia que pode estar
+  desatualizada; skills de monstro que o jogo não nomeia aparecem com um nome
+  aproximado.
 - Com vários clientes gravando ao mesmo tempo, o medidor segue a gravação mais
   nova (dá para abrir outra manualmente).

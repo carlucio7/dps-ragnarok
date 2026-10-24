@@ -29,6 +29,25 @@ não interage com o GameGuard.
 Também dá para abrir um replay já salvo (botão direito › *Abrir replay salvo…*,
 ou arrastar o `.rrf` em cima do `.exe`).
 
+**Pasta do jogo:** o medidor acha sozinho as pastas Replay de todas as
+instalações do jogo: pelo registro do Windows (onde o instalador disse que
+instalou) e pelas pastas de costume em todos os discos fixos. Ele segue a
+gravação mais nova de qualquer uma delas. Se não achar nenhuma, o meio do widget
+avisa, e um clique ali abre a escolha da pasta (vale a pasta do jogo ou a pasta
+Replay dela).
+
+**Monstros novos:** alguns monstros (os da Biosfera de Varmundt e, daqui para
+frente, os do episódio 19) chegam no replay com uma chave no lugar do nome,
+como `␜VpIB␜`. O medidor traduz a chave com as tabelas `data/i18n/sc/*.csv` que
+ficam dentro do `data.grf` do próprio jogo, em português, inglês ou espanhol.
+Ele lê o arquivo uma vez, em segundo plano e só para leitura, e guarda um cache
+em `%APPDATA%\RODpsMeter\nomes_do_jogo.json`, que é refeito quando o jogo é
+atualizado (`clientdata.py`). Monstro sem nome em lugar nenhum aparece como
+"Monstro 21559" (o id do monstro). As mesmas tabelas dão os nomes de skills,
+buffs, classes, monstros e itens em inglês e espanhol.
+
+Novidades de cada versão: [CHANGELOG.md](CHANGELOG.md).
+
 O widget é controlado só pelo mouse (não tem teclas de atalho) e clicar nele
 não tira o foco do jogo: as teclas continuam indo para o Ragnarok. Passe o mouse
 sobre um botão para ver no rodapé o que ele faz; o botão direito abre todas as
@@ -220,6 +239,10 @@ Configuração e `erros.log` ficam em `%APPDATA%\RODpsMeter` (ou na variável
   mais nova. Para escolher outra, abra o arquivo manualmente.
 - Crítico: o servidor da LATAM quase nunca marca o acerto como crítico, então
   a contagem de críticos não é confiável.
+- Nomes em inglês e espanhol vêm do jogo instalado. Sem o jogo, o medidor usa a
+  cópia do pacote (`data/names.json`), que pode estar desatualizada. Skills de
+  monstro que o cliente não nomeia usam a descrição do rAthena (inglês) ou o
+  catálogo do `i18n.py` (espanhol); o que faltar aparece em português.
 
 ## Como funciona (resumo do formato `.rrf`)
 
@@ -270,6 +293,7 @@ python make_icon.py                           # gera dpsmeter.ico
 python tools\build_efst.py PASTA_RATHENA      # gera data\efst.json (status.hpp, status.yml, skill_db.yml)
 python tools\build_rathena.py PASTA_RATHENA   # gera data\rathena.json (classes, skills, monstros, elementos)
 python -m PyInstaller --noconfirm --onefile --windowed --name DpsRagnarok --icon dpsmeter.ico --add-data "dpsmeter.ico;." --add-data "data;data" dpsmeter.py
+python tools\build_names.py [PASTA_DO_JOGO]   # gera data\names.json (nomes em inglês e espanhol do cliente)
 python tools\build_release.py                 # pacote para compartilhar: release\DpsRagnarok-VERSÃO-win.zip + SHA-256
 python tools\demo_shots.py SAIDA              # prints de divulgação (nomes fictícios) em pt, en e es
 ```
@@ -277,6 +301,12 @@ python tools\demo_shots.py SAIDA              # prints de divulgação (nomes fi
 Idiomas: os textos ficam em português no código, dentro de `_()`, e as traduções
 para inglês e espanhol ficam em `i18n.py`. Texto novo na tela precisa de `_()` e de
 uma linha no catálogo. Os testes rodam em português (`RODPS_LANG=pt`); para ver
-outro idioma, rode com `RODPS_LANG=en` ou `es`. A versão fica em `version.py`.
+outro idioma, rode com `RODPS_LANG=en` ou `es`. A versão fica em `version.py` e as
+mudanças de cada versão no [CHANGELOG.md](CHANGELOG.md).
+
+Nomes do jogo em inglês e espanhol: `clientdata.py` lê do `data.grf` as tabelas do
+cliente (`skillinfolist`, `stateiconinfo`, `pcjobnamegender`,
+`addrandomoptionnametable`, `iteminfo_new` e `data/i18n/sc/*.csv`), que são Lua
+compilado; `lub.py` executa esse bytecode só o bastante para montar as tabelas.
 
 O `python` aqui é o Python 32 bits que já tem PyInstaller.

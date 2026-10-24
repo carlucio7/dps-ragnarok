@@ -18,6 +18,14 @@ HOW TO USE
 4. Right-click the widget for all options. The chart button opens the full
    analysis.
 
+IF THE GAME IS NOT IN C:\Gravity\Ragnarok
+The meter looks for the game folder by itself (in the Windows registry and on
+your drives). If the middle of the widget says "I couldn't find the game's
+Replay folder", click there and pick the Ragnarok folder (the one with
+Ragexe.exe and data.grf) or the Replay folder inside it. You can change it later
+in: right-click › Replay folder. With several game installations, it watches all
+Replay folders and follows the newest recording.
+
 You can also open a recorded replay: right-click › Open saved replay, or drag
 the .rrf file onto DpsRagnarok.exe.
 
@@ -28,10 +36,13 @@ when they end.
 
 SAFETY
 ------
-- The program only reads the .rrf files in the game's Replay folder
-  (C:\Gravity\Ragnarok\Replay). It does not read game memory, inject anything,
-  capture network packets or access the internet.
-- It only writes its own settings and saved tests to %APPDATA%\RODpsMeter.
+- The program only reads: the .rrf files in the game's Replay folder, the name
+  tables in the game's data.grf (to show the names of new monsters, like the
+  ones in the Varmundt Biosphere) and, in the Windows registry, where the game
+  was installed. It changes none of these, does not read game memory, inject
+  anything, capture network packets or access the internet.
+- It only writes its own settings, saved tests and a name cache to
+  %APPDATA%\RODpsMeter.
 - The program is not digitally signed, so Windows may show "Windows protected
   your PC". Before allowing it, check that the file is the original: open
   PowerShell in the folder and run
@@ -53,7 +64,8 @@ Delete the program folder and the %APPDATA%\RODpsMeter folder.
 LIMITS
 ------
 - Only the damage your client receives is shown: players off screen don't count.
-- Skill, buff, monster and item names are shown as in the Portuguese LATAM
-  client, in every language.
+- Skill, buff, monster and item names come from the installed game, in the
+  chosen language. Without the game on the PC, the program uses a copy that may
+  be out of date; monster skills the game doesn't name get an approximate name.
 - With several clients recording at once, the meter follows the newest recording
   (you can open another one manually).

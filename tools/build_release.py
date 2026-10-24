@@ -69,6 +69,10 @@ def main():
             text = f.read().replace("{VERSION}", VERSION)
         with open(os.path.join(out, doc), "w", encoding="utf-8-sig", newline="\r\n") as f:
             f.write(text)
+    with open("CHANGELOG.md", encoding="utf-8") as f:                 # novidades, para abrir no Bloco de Notas
+        text = f.read()
+    with open(os.path.join(out, "CHANGELOG.txt"), "w", encoding="utf-8-sig", newline="\r\n") as f:
+        f.write(text)
     exe_hash = sha256(exe)
     with open(os.path.join(out, "SHA256.txt"), "w", encoding="utf-8", newline="\r\n") as f:
         f.write("%s  DpsRagnarok.exe\n" % exe_hash)

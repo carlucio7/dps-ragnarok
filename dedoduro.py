@@ -103,7 +103,8 @@ class Rule:
         self.single = single          # de alvo único: quem gravou talvez não precise, então é atenção
         self.no_renew = no_renew      # sai ao morrer e custa AP demais: só se cobra até a primeira morte
         self.split_death = split_death  # grave antes da 1ª morte; depois dela, não renovar é só atenção
-        self.name = name or meter.status_name(ids[0])
+        self._name = name
+        self.first = ids[0]
         self.skills = _sources(ids)
         self.jobs = {j for j, sk in JOB_SKILLS.items() if sk & self.skills}
         own = (self.skills & CLASS_SKILLS) or self.skills      # sem as versões de guilda, mercenário e item
@@ -113,6 +114,10 @@ class Rule:
         self.cost_name = SKILL_DB.get(str(cost_from[0]), {}).get("n") if cost_from else None
         self.cd_status = set(cd_status)   # status no conjurador que marca o uso (ex.: Clímax no Magus)
         self.hidden = bool(self.ids & HIDDEN)
+
+    @property
+    def name(self):
+        return self._name or meter.status_name(self.first)
 
     def hard(self):
         return self.cd >= HARD_CD_MS or self.ap >= BIG_AP
@@ -181,7 +186,7 @@ GROUP_BUFFS = _rules([
 DEFENSE_BUFFS = _rules([((19,), {}), ((9,), {}), ((1121, 473, 110), {}), ((1204,), {})], core=False)
 # Debuffs no chefe
 BOSS_DEBUFFS = _rules([
-    ((DARK_CLAW,), {}), ((FLORESCER, 1182, 1184), dict(name=_("Pólen (Florescer)"),
+    ((DARK_CLAW,), {}), ((FLORESCER, 1182, 1184), dict(
                                                        cost_from=(AG_CLIMAX,), cd_status=(CLIMAX,))),
     ((1142,), {}), ((1402,), {}), ((1230,), {}), ((1231,), {}), ((655,), {}), ((VENOM_IMPRESS,), {}),
     ((1190,), dict(core=False)), ((1125,), dict(core=False)), ((1319,), dict(core=False)),
@@ -852,8 +857,8 @@ def claw_text(c, states):
     if not parts:
         return ""
     if i18n.LANG != "en" and parts[0].startswith("de "):
-        return "Garra Sombria " + "; ".join(parts)
-    return "Garra Sombria: " + "; ".join(parts)
+        return meter.skill_name(5001) + " " + "; ".join(parts)
+    return meter.skill_name(5001) + ": " + "; ".join(parts)
 
 
 def _claw(x, alerts, refl, aids, party):

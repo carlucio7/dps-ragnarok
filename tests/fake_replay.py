@@ -147,6 +147,21 @@ def hp(value, var=rrf.SP_HP):
     return struct.pack("<HHi", rrf.P_PARAM, var, value)
 
 
+def build_grf(path, files):
+    """data.grf mínimo no formato 0x300 ("Event Horizon"), com os arquivos {nome: bytes} compactados."""
+    import zlib
+    body = b""
+    table = b""
+    for name, data in files.items():
+        packed = zlib.compress(data)
+        table += name.encode("cp949") + b"\0" + struct.pack("<IIIBQ", len(packed), len(packed), len(data), 1, len(body))
+        body += packed
+    ztable = zlib.compress(table)
+    head = b"Event Horizon\x00c\x00" + bytes(14) + struct.pack("<QII", len(body), len(files), 0x300)
+    with open(path, "wb") as f:
+        f.write(head + body + struct.pack("<III", 0, len(ztable), len(table)) + ztable)
+
+
 def effect(aid, effect_id):
     """0x01f3: efeito especial numa unidade (ex.: 537 = armadilha da Torre da Constelação)."""
     return struct.pack("<HIi", rrf.P_EFFECT, aid, effect_id)

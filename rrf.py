@@ -217,9 +217,8 @@ def entity_name(raw):
     i = 0
     while i < len(raw) and raw[i] in (0, 0xFF):
         i += 1
-    name = decode_name(raw[i:])
-    # "\x1cpY4B\x1c" = referencia a uma tabela de nomes do cliente, nao o nome em si
-    return "" if "\x1c" in name else name
+    # "\x1cpY4B\x1c" = chave das tabelas de nomes do cliente (monstros novos); clientdata traduz
+    return decode_name(raw[i:])
 
 
 class Session:

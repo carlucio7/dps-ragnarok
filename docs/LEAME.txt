@@ -18,6 +18,14 @@ CÓMO USAR
 4. Clic derecho en el widget abre todas las opciones. El botón del gráfico abre
    el análisis completo.
 
+SI EL JUEGO NO ESTÁ EN C:\Gravity\Ragnarok
+El medidor busca la carpeta del juego solo (en el registro de Windows y en los
+discos). Si en el medio del widget dice "No encontré la carpeta Replay del
+juego", haz clic ahí y elige la carpeta de Ragnarok (la que tiene Ragexe.exe y
+data.grf) o la carpeta Replay dentro de ella. Se puede cambiar después en: clic
+derecho › Carpeta de replays. Con varias instalaciones del juego, mira todas las
+carpetas Replay y sigue la grabación más nueva.
+
 También se puede abrir un replay grabado: clic derecho › Abrir replay guardado,
 o arrastra el archivo .rrf sobre DpsRagnarok.exe.
 
@@ -28,11 +36,13 @@ cuando terminan.
 
 SEGURIDAD
 ---------
-- El programa solo lee los archivos .rrf de la carpeta Replay del juego
-  (C:\Gravity\Ragnarok\Replay). No lee la memoria del juego, no inyecta nada, no
-  captura paquetes de red y no accede a internet.
-- Solo guarda su propia configuración y las pruebas guardadas en
-  %APPDATA%\RODpsMeter.
+- El programa solo lee: los archivos .rrf de la carpeta Replay del juego, las
+  tablas de nombres del data.grf del juego (para mostrar el nombre de monstruos
+  nuevos, como los de la Biosfera de Varmundt) y, en el registro de Windows,
+  dónde se instaló el juego. No cambia nada de eso, no lee la memoria del juego,
+  no inyecta nada, no captura paquetes de red y no accede a internet.
+- Solo guarda su propia configuración, las pruebas guardadas y una caché de los
+  nombres en %APPDATA%\RODpsMeter.
 - El programa no tiene firma digital, así que Windows puede mostrar "Windows
   protegió su PC". Antes de permitirlo, comprueba que el archivo es el original:
   abre PowerShell en la carpeta y ejecuta
@@ -57,7 +67,9 @@ LÍMITES
 -------
 - Solo aparece el daño que recibe tu cliente: quien está fuera de pantalla no
   cuenta.
-- Los nombres de skills, buffs, monstruos e ítems aparecen como en el cliente de
-  LATAM en portugués, en todos los idiomas.
+- Los nombres de skills, buffs, monstruos e ítems vienen del juego instalado, en
+  el idioma elegido. Sin el juego en el PC, el programa usa una copia que puede
+  estar desactualizada; las skills de monstruo que el juego no nombra aparecen
+  con un nombre aproximado.
 - Con varios clientes grabando a la vez, el medidor sigue la grabación más nueva
   (se puede abrir otra a mano).

@@ -1521,8 +1521,8 @@ class AnalysisWindow:
             ]
         specs += [
             ("claw", _("Garra Sombria"), [("phase", _("Fase"), 80, "w", "text"), ("start", _("Início"), 70, "e", "dur"),
-                                       ("dur_txt", _("Sem Garra"), 85, "e", "text"),
-                                       ("pain_txt", "Dor Máxima", 90, "center", "text"),
+                                       ("dur_txt", _("Sem Garra"), 130, "e", "text"),
+                                       ("pain_txt", _("Dor Máxima"), 90, "center", "text"),
                                        ("refl", _("Refletidos"), 85, "e", "int"), ("who", _("Executores"), 560, "w", "text")]),
             ("deaths", _("Mortes"), [("phase", _("Fase"), 80, "w", "text"), ("t", _("Morreu"), 70, "e", "dur"),
                                   ("name", _("Jogador"), 140, "w", "text"), ("job", _("Classe"), 120, "w", "text"),

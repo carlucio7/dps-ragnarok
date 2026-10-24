@@ -7,6 +7,7 @@ import json
 import os
 os.environ.setdefault("RODPS_LANG", "pt")      # os testes conferem os textos em português
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -141,7 +142,7 @@ try:
              [(1000 + i * 250, fr.skill_damage(ME, MOB, 1000 + i)) for i in range(200)]
     data, stream_at = fr.build(ME, events)
     path = os.path.join(tmp, "teste.rrf")
-    w = meter.Watcher(tmp)
+    w = meter.Watcher(tmp, auto=False)
     seen = []
     with open(path, "wb") as fh:
         fh.write(data[:stream_at - 37])                             # cabecalho incompleto
@@ -166,7 +167,7 @@ try:
     # inicio da gravacao: o cliente ainda nao preencheu a tabela do cabecalho
     path2 = os.path.join(tmp, "sem_tabela.rrf")
     blank = fr.without_table(data)
-    w2 = meter.Watcher(tmp)
+    w2 = meter.Watcher(tmp, auto=False)
     with open(path2, "wb") as fh:
         fh.write(blank[:stream_at + 5])                             # containers prontos, 1o registro pela metade
         fh.flush()
@@ -193,6 +194,69 @@ try:
               "sem tabela e chave fraca (%02d:%02d:%02d)" % date[3:])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
+
+# --- monstros novos (nome em código) e várias instalações do jogo ----------------
+import base64  # noqa: E402
+import clientdata  # noqa: E402
+
+tmp = tempfile.mkdtemp()
+try:
+    os.environ["RODPS_CONFIG"] = os.path.join(tmp, "cfg", "config.json")      # o cache não vai para o seu PC
+    game = os.path.join(tmp, "Jogo")
+    os.makedirs(os.path.join(game, "Replay"))
+    b64 = lambda t: base64.b64encode(t.encode("utf-8")).decode()
+    csv = "VpIB,,%s,,,,,%s,,%s\noIY2DA,,%s,,,,,%s,,%s\n" % (
+        b64("[Bio] Lava Golem"), b64("[Eco] Golem de Lava"), b64("[Eco] Gólem de Lava"),
+        b64("A long sentence"), b64("Uma frase"), b64("Una frase"))
+    fr.build_grf(os.path.join(game, "data.grf"), {"data\\i18n\\sc\\abc.csv": csv.encode("utf-8"),
+                                                 "data\\sprite\\x.spr": b"nada"})
+    check(meter.replay_dir_for(game) == os.path.join(game, "Replay"), "escolher a pasta do jogo usa a pasta Replay dela")
+    clientdata.NAMES = clientdata.ClientNames()
+    rpath = os.path.join(game, "Replay", "bio.rrf")
+    with open(rpath, "wb") as fh:
+        fh.write(fr.build(ME, [(0, fr.spawn(685, "mob", 21559, "\x1cVpIB\x1c")), (0, fr.spawn(686, "mob", 21999, "")),
+                               (1000, fr.skill_damage(ME, 685, 5000)), (1500, fr.skill_damage(ME, 686, 3000))])[0])
+    rf = meter.ReplayFile(rpath)
+    rf.poll(max_bytes=1 << 30)
+    rf.combat.name_of(685)
+    clientdata.NAMES.wait(30)
+    names = {t["name"] for t in rf.combat.snapshot(session=True)["targets"]}
+    check(names == {"[Eco] Golem de Lava", "Monstro 21999"},
+          "nome de monstro novo vem das tabelas do jogo; sem nome, mostra o id do monstro: %s" % names)
+    check(os.path.isfile(clientdata.cache_path()) and "oIY2DA" not in (clientdata.NAMES.names or {}),
+          "cache dos nomes gravado (só chaves curtas)")
+    # várias instalações: segue a gravação mais nova de qualquer pasta Replay
+    other = os.path.join(tmp, "Outro", "Replay")
+    os.makedirs(other)
+    old, new = os.path.join(game, "Replay", "a.rrf"), os.path.join(other, "b.rrf")
+    for path in (old, new):
+        with open(path, "wb") as fh:
+            fh.write(b"x")
+    os.utime(old, (time.time() - 5, time.time() - 5))
+    saved = meter.find_replay_dirs
+    meter.find_replay_dirs = lambda: [os.path.join(game, "Replay"), other]
+    try:
+        w = meter.Watcher(None)
+        check(w.folders == [os.path.join(game, "Replay"), other] and w.scan(time.time()) == new,
+              "várias pastas Replay: segue a gravação mais nova")
+    finally:
+        meter.find_replay_dirs = saved
+finally:
+    os.environ.pop("RODPS_CONFIG", None)
+    clientdata.NAMES = clientdata.ClientNames()
+    shutil.rmtree(tmp, ignore_errors=True)
+
+# inglês e espanhol sem o jogo instalado: nomes da cópia do pacote (data/names.json), descrições do
+# rAthena e catálogo para skills de monstro, e as classes que o cliente grafa diferente (JT_ARC_MAGE)
+probe = ("import meter; print('|'.join([meter.job_name(4255), meter.job_name(4309), meter.skill_name(172), "
+         "meter.skill_name(717), meter.skill_name(783), meter.status_name(1339), meter.skill_name(5001)]))")
+for lang, expected in (("en", "Arch Mage|Sky Emperor|Guided Attack|Max Pain (attack)|Killing Aura|Killing Aura|Dark Claw"),
+                       ("es", "Archimago|Emperador Celestial|Ataque Guiado|Dolor Máxima (ataque)|Aura Asesina|"
+                              "Aura Asesina|Garra Tenebrosa")):
+    out = subprocess.run([sys.executable, "-X", "utf8", "-c", probe], cwd=os.path.join(HERE, ".."),
+                         env=dict(os.environ, RODPS_LANG=lang), capture_output=True, text=True,
+                         encoding="utf-8").stdout.strip()
+    check(out == expected, "nomes em %s sem o jogo: %s" % (lang, out))
 
 # --- replays reais (opcional) ------------------------------------------------
 # tests/local_replays.json (fica só no seu PC, fora do repositório):

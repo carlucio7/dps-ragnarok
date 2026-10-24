@@ -20,6 +20,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
+import clientdata
 import meter
 import testes
 from analysis_ui import AnalysisWindow
@@ -97,6 +98,12 @@ DEFAULTS = {
 
 
 # ---------------------------------------------------------------- utilidades
+
+def short_path(path, keep=2):
+    """C:\Gravity\Ragnarok\Replay -> …\Ragnarok\Replay (cabe no widget)."""
+    parts = os.path.normpath(path).split(os.sep)
+    return path if len(parts) <= keep + 1 else "…" + os.sep + os.sep.join(parts[-keep:])
+
 
 def _rgb(h):
     h = h.lstrip("#")
@@ -197,6 +204,10 @@ class DpsApp:
         self.root = root
         self.cfg = load_config()
         self.watcher = meter.Watcher(self.cfg["folder"], self.gap_ms(), self.cfg["targets"])
+        # nomes do jogo no idioma escolhido (da instalação; com o cache leva ~0,1 s, na 1ª vez alguns segundos)
+        clientdata.NAMES.load()
+        self.names_v = clientdata.NAMES.version
+        self.press_xy = None
         self.enc_back = 0                   # 0 = encontro atual, 1 = anterior...
         self.hover = self.pressed = self.drag = self.resize = None
         self.hwnd = None
@@ -372,6 +383,12 @@ class DpsApp:
                 self.dirty = True
         except Exception:  # noqa: BLE001 - um replay estranho nao pode derrubar o widget
             self.log_error(*sys.exc_info())
+        if clientdata.NAMES.version != self.names_v:
+            # os nomes dos monstros novos (lidos do próprio jogo) ficaram prontos
+            self.names_v = clientdata.NAMES.version
+            self.dirty = True
+            if self.analysis is not None:
+                self.analysis.refresh(force=True)
         f = self.watcher.file
         if f is not None and f.ready:
             f.combat.finished = not self.watcher.recording(now)
@@ -417,8 +434,8 @@ class DpsApp:
         t = self.t
         now = time.time()
         w = self.watcher
-        if not w.folder or not os.path.isdir(w.folder):
-            return _("Pasta Replay não encontrada (botão direito › Pasta)"), t["muted"], False
+        if not w.folders:
+            return _("Pasta Replay não encontrada"), t["live"], False
         f = w.file
         if f is None:
             return _("Aguardando gravação de replay…"), t["muted"], False
@@ -593,8 +610,13 @@ class DpsApp:
                 msg = (_("Zerado."), _("O próximo dano começa um encontro novo."))
             elif f is not None and f.ready:
                 msg = (_("Nenhum dano ainda."), _("Ataque algo enquanto grava o replay."))
+            elif not self.watcher.folders:
+                # sem pasta Replay: um clique no meio abre a escolha da pasta do jogo
+                msg = (_("Não achei a pasta Replay do jogo."), _("Clique aqui e escolha a pasta do Ragnarok."))
             else:
-                msg = (_("No jogo, comece a gravar um replay."), _("O medidor acha o arquivo sozinho."))
+                folders = self.watcher.folders
+                where = short_path(folders[0]) if len(folders) == 1 else _("%d pastas Replay") % len(folders)
+                msg = (_("No jogo, comece a gravar um replay."), _("Olhando em %s") % where)
         elif tab == "group":
             players = snap["players"]
             shown = players[:n]
@@ -897,13 +919,13 @@ class DpsApp:
         self.dirty = True
 
     def pick_folder(self):
-        path = filedialog.askdirectory(parent=self.root, title=_("Pasta Replay do Ragnarok"),
+        path = filedialog.askdirectory(parent=self.root,
+                                       title=_("Escolha a pasta do Ragnarok (ou a pasta Replay dentro dela)"),
                                        initialdir=self.watcher.folder or "C:\\")
         if path:
-            self.cfg["folder"] = os.path.normpath(path)
+            self.cfg["folder"] = meter.replay_dir_for(path)       # aceita a pasta do jogo ou a Replay
             self.save()
-            self.watcher.folder = self.cfg["folder"]
-            self.watcher.follow()
+            self.watcher.set_folder(self.cfg["folder"])
             self.dirty = True
 
     def minimize(self):
@@ -1002,7 +1024,8 @@ class DpsApp:
         if self.watcher.pinned:
             m.add_command(label=_("Voltar a seguir a gravação"), command=self.follow)
         m.add_command(label=_("Pasta dos replays…"), command=self.pick_folder)
-        m.add_command(label="  " + (self.watcher.folder or _("(não encontrada)")), state="disabled")
+        for folder in self.watcher.folders[:5] or [_("(não encontrada)")]:
+            m.add_command(label="  " + folder, state="disabled")
         m.add_separator()
 
         color = self.new_menu(m)
@@ -1102,6 +1125,7 @@ class DpsApp:
             self.resize = (e.x_root, e.y_root, self.W, self.H, self.cfg["scale"], bool(e.state & 0x1))
         else:
             self.drag = (e.x_root - self.root.winfo_x(), e.y_root - self.root.winfo_y())
+            self.press_xy = (e.x_root, e.y_root)
 
     def on_drag(self, e):
         if self.drag:
@@ -1129,7 +1153,11 @@ class DpsApp:
                 self.activate(tgt)
         elif self.drag:
             self.drag = None
-            self.save_position()
+            moved = self.press_xy and abs(e.x_root - self.press_xy[0]) + abs(e.y_root - self.press_xy[1]) > 4
+            if not moved and not self.watcher.folders:
+                self.pick_folder()
+            else:
+                self.save_position()
         elif self.resize:
             self.resize = None
             self.save()

@@ -46,15 +46,15 @@ def detect():
 
 
 LANG = detect()
+TERM_HOOK = None        # o meter instala: troca nomes do jogo citados no texto pelos do idioma escolhido
 
 
 def _(text):
     if LANG == "pt":
         return text
     t = CATALOG.get(text)
-    if t is None:
-        return text
-    return t[0] if LANG == "en" else t[1]
+    t = text if t is None else (t[0] if LANG == "en" else t[1])
+    return TERM_HOOK(t) if TERM_HOOK else t
 
 
 # português -> (inglês, espanhol)
@@ -161,8 +161,8 @@ CATALOG = {
                                              "Avisar cuando un buff termine en la pelea"),
     "Avisar quando eu morrer (com overkill)": ("Warn when I die (with overkill)",
                                                "Avisar cuando muera (con overkill)"),
-    "Avisar HP baixo com a União Solar (Mestre Taekwon)": ("Warn on low HP with União Solar (Star Emperor)",
-                                                           "Avisar HP bajo con União Solar (Emperador Estelar)"),
+    "Avisar HP baixo com a União Solar (Mestre Taekwon)": ("Warn on low HP with União Solar (Mestre Taekwon)",
+                                                           "Avisar HP bajo con União Solar (Mestre Taekwon)"),
     "Salvar testes no boneco sozinho": ("Save dummy tests automatically",
                                         "Guardar pruebas en el muñeco automáticamente"),
     "Abrir replay salvo…": ("Open saved replay…", "Abrir replay guardado…"),
@@ -197,6 +197,50 @@ CATALOG = {
     "HP %d%% com a União: o próximo ataque pode matar!": ("HP %d%% with União: the next attack may kill you!",
                                                           "HP %d%% con la União: ¡el próximo ataque puede matarte!"),
     "Ataque básico": ("Basic attack", "Ataque básico"),
+    "Monstro %d": ("Monster %d", "Monstruo %d"),
+    # complementos dos nomes de skill da base do medidor ("Dor Máxima (ataque)") e rótulos próprios
+    "ataque": ("attack", "ataque"),
+    "água": ("water", "agua"),
+    "fogo": ("fire", "fuego"),
+    "vento": ("wind", "viento"),
+    "terra": ("earth", "tierra"),
+    "explosão": ("explosion", "explosión"),
+    "bônus": ("bonus", "bono"),
+    "ativar": ("on", "activar"),
+    "desativar": ("off", "desactivar"),
+    "Alívio": ("Relieve", "Alivio"),
+    "Quebra Aleatória": ("Random Break", "Ruptura Aleatoria"),
+    "Redução de dano do chefe": ("Boss damage reduction", "Reducción de daño del jefe"),
+    # skills de monstro que o cliente não nomeia (em inglês o resto vem da descrição do rAthena)
+    "Ataque Guiado": ("Guided Attack", "Ataque Guiado"),
+    "Ataque de Fogo": ("Fire Attack", "Ataque de Fuego"),
+    "Golpe Sombrio": ("Dark Strike", "Golpe Oscuro"),
+    "Aumentar Poder": ("Power Up", "Aumentar Poder"),
+    "Encantar Arma": ("Weapon Enchantment", "Encantar Arma"),
+    "Invencibilidade": ("Invincible", "Invencibilidad"),
+    "Mover para Coordenada": ("Move Coordinate", "Mover a Coordenada"),
+    "Sangramento": ("Bleeding", "Sangrado"),
+    "Remover Equipamento Sombrio": ("Remove Shadow Equipment", "Quitar Equipo de Sombra"),
+    "Aura Assassina": ("Killing Aura", "Aura Asesina"),
+    "Barreira": ("Barrier", "Barrera"),
+    # skills das invocações do Cientista (o cliente não dá nome; invocações como em "Criar ..." do cliente)
+    "Arremesso de Pedra (Bárbaro)": ("Throw Rock (Wooden Warrior)", "Lanzar Roca (Guerrero de Madera)"),
+    "Ataque de Madeira (Bárbaro)": ("Wooden Attack (Wooden Warrior)", "Ataque de Madera (Guerrero de Madera)"),
+    "Uivo Infernal (Árvore Infernal)": ("Hell Howling (Hell Tree)", "Aullido Infernal (Árbol Infernal)"),
+    "Poeira Infernal (Árvore Infernal)": ("Hell Dust (Hell Tree)", "Polvo Infernal (Árbol Infernal)"),
+    "Em Fúria!": ("Berserk Potion", "¡En Furia!"),
+    "Comida de Precisão": ("Accuracy food", "Comida de precisión"),
+    "Comida de Crítico": ("Critical food", "Comida de crítico"),
+    "Pasta Replay não encontrada": ("Replay folder not found", "Carpeta Replay no encontrada"),
+    "Não achei a pasta Replay do jogo.": ("I couldn't find the game's Replay folder.",
+                                          "No encontré la carpeta Replay del juego."),
+    "Clique aqui e escolha a pasta do Ragnarok.": ("Click here and pick the Ragnarok folder.",
+                                                   "Haz clic aquí y elige la carpeta de Ragnarok."),
+    "%d pastas Replay": ("%d Replay folders", "%d carpetas Replay"),
+    "Olhando em %s": ("Watching %s", "Mirando en %s"),
+    "Escolha a pasta do Ragnarok (ou a pasta Replay dentro dela)": (
+        "Pick the Ragnarok folder (or the Replay folder inside it)",
+        "Elige la carpeta de Ragnarok (o la carpeta Replay dentro de ella)"),
     "Você": ("You", "Tú"),
     "%s acabou": ("%s ended", "%s terminó"),
     "Você morreu": ("You died", "Moriste"),
@@ -501,9 +545,10 @@ CATALOG = {
     "Quem aplica": ("Who applies", "Quién aplica"),
     "Observação": ("Note", "Nota"),
     "Início": ("Start", "Inicio"),
-    "Sem Garra": ("Without Garra", "Sin Garra"),
+    "Sem Garra": ("No Garra Sombria", "Sin Garra Sombria"),
+    "Dor Máxima": ("Dor Máxima", "Dor Máxima"),
     "Refletidos": ("Reflected", "Reflejados"),
-    "Executores": ("Shadow Crosses", "Ejecutores"),
+    "Executores": ("Executor", "Executor"),
     "Morreu": ("Died", "Murió"),
     "Tempo morto": ("Time dead", "Tiempo muerto"),
     "Volta": ("Back", "Vuelta"),
@@ -555,12 +600,13 @@ CATALOG = {
         "Climax only, per phase and only while alive; something is only flagged if a class in the party provides "
         "it. All of the recorder's buffs are visible. For others, a buff given before recording started only shows "
         "up when it ends (? = can't tell; record before buffing). Competentia, Benedictum, Presens Acies, Argutus, "
-        "Lauda, Reencarnação das Almas and Talismã do Guerreiro/Mago are not shown on other players by the game: "
+        "Lauda, Reencarnação das Almas, Talismã do Guerreiro and Talismã do Mago are not shown on other players by "
+        "the game: "
         "those are only checked on the recorder.",
         "Solo en el clímax, por fase y con quien está vivo; solo se exige lo que alguna clase del grupo da. De "
         "quien grabó, todos los buffs aparecen. De los demás, un buff dado antes de empezar a grabar solo aparece "
         "cuando termina (? = no se puede saber; graba antes de buffear). Competentia, Benedictum, Presens Acies, "
-        "Argutus, Lauda, Reencarnação das Almas y Talismã do Guerreiro/Mago el juego no los muestra en los demás "
+        "Argutus, Lauda, Reencarnação das Almas, Talismã do Guerreiro y Talismã do Mago el juego no los muestra en los demás "
         "jugadores: de esos solo se exige a quien grabó."),
     "Jogadores fora do grupo — %d grave(s), %d de atenção": ("Players outside the party — %d serious, %d warning(s)",
                                                              "Jugadores fuera del grupo — %d grave(s), %d de atención"),
@@ -573,7 +619,7 @@ CATALOG = {
         "Los buffs y debuffs de quien está fuera del grupo no llegan al replay: aquí solo aparecen daño, muertes, "
         "la Garra Sombria y el elemento de las skills de elemento fijo."),
     "Garra Sombria": ("Garra Sombria", "Garra Sombria"),
-    " (sem Executor)": (" (no Shadow Cross)", " (sin Ejecutor)"),
+    " (sem Executor)": (" (no Executor)", " (sin Executor)"),
     "Mortes (%d)": ("Deaths (%d)", "Muertes (%d)"),
     "Elemento e veneno": ("Element and poison", "Elemento y veneno"),
     # --- Dedo Duro (regras) -----------------------------------------------------------

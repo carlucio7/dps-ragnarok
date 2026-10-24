@@ -1,7 +1,8 @@
 """Gera data/rathena.json a partir do rAthena (para o Dedo Duro).
 
   jobs:   id da classe -> nome e skills que ela pode ter (com herança: a 4ª classe tem as da 3ª...)
-  skills: id -> tipo (W físico, M mágico, X outro), elemento, recarga (ms) e custo de AP
+  skills: id -> nome interno, descrição em inglês, tipo (W físico, M mágico, X outro), elemento,
+          recarga (ms) e custo de AP
   mobs:   id -> elemento, nível do elemento, classe (Normal/Boss...) e se é MVP
   attr:   tabela de vantagem elemental: nível -> elemento do ataque -> elemento do alvo -> %
 
@@ -111,7 +112,7 @@ def main():
         sid = int(e["Id"])
         skill_ids[e.get("Name")] = sid
         req = e.get("Requires") if isinstance(e.get("Requires"), dict) else {}
-        skills[sid] = {"n": e.get("Name"), "t": {"Weapon": "W", "Magic": "M"}.get(e.get("Type"), "X"),
+        skills[sid] = {"n": e.get("Name"), "d": e.get("Description") or "", "t": {"Weapon": "W", "Magic": "M"}.get(e.get("Type"), "X"),
                        "e": e.get("Element") if isinstance(e.get("Element"), str) else "",
                        "cd": as_max(e.get("Cooldown"), "Time"), "ap": as_max(req.get("ApCost"), "Amount")}
 

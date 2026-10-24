@@ -162,7 +162,7 @@ def monsters(c, rng, group=True):
         if phases > 1:
             name += _(" (%d fases)") % phases
         rows.append(dict(key=a["key"], name=name, mob_id=mob_id, boss=boss, total=a["total"], hits=a["hits"],
-                         attackers=len(a["attackers"]), max_hp=max_hp,
+                         attackers=len(a["attackers"]), max_hp=max_hp or None,
                          ttk=(death - a["first"]) if death is not None else None,
                          killer=c.name_of(killer) if killer is not None else "", first=a["first"], last=a["last"]))
     rows.sort(key=lambda r: -r["total"])
