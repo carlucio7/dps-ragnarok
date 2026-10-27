@@ -56,6 +56,18 @@ SAFETY
 - This is not an official Gravity or ROLatam program. Use at your own risk.
 
 
+IF THE PROGRAM DOESN'T OPEN
+---------------------------
+- DpsRagnarok.exe is gone from the folder, or Windows says "Windows cannot access
+  the specified device, path, or file": your antivirus deleted it (a false alarm,
+  common with unsigned programs). Check the .exe code as explained above and
+  restore the file in Windows Security › Virus & threat protection › Protection
+  history (or in your antivirus quarantine). Then add the program folder as an
+  exclusion.
+- "The ordinal 380 could not be located": this happened up to version 1.0.2.
+  Download the latest version.
+
+
 UNINSTALL
 ---------
 Delete the program folder and the %APPDATA%\RODpsMeter folder.

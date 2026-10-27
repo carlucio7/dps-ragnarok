@@ -292,8 +292,8 @@ python tools\tail_test.py                     # mede o atraso de escrita numa gr
 python make_icon.py                           # gera dpsmeter.ico
 python tools\build_efst.py PASTA_RATHENA      # gera data\efst.json (status.hpp, status.yml, skill_db.yml)
 python tools\build_rathena.py PASTA_RATHENA   # gera data\rathena.json (classes, skills, monstros, elementos)
-python -m PyInstaller --noconfirm --onefile --windowed --name DpsRagnarok --icon dpsmeter.ico --add-data "dpsmeter.ico;." --add-data "data;data" dpsmeter.py
 python tools\build_names.py [PASTA_DO_JOGO]   # gera data\names.json (nomes em inglês e espanhol do cliente)
+python tools\build_bootloader.py              # uma vez: .venv-build com o lançador do PyInstaller compilado aqui
 python tools\build_release.py                 # pacote para compartilhar: release\DpsRagnarok-VERSÃO-win.zip + SHA-256
 python tools\demo_shots.py SAIDA              # prints de divulgação (nomes fictícios) em pt, en e es
 ```
@@ -310,3 +310,12 @@ cliente (`skillinfolist`, `stateiconinfo`, `pcjobnamegender`,
 compilado; `lub.py` executa esse bytecode só o bastante para montar as tabelas.
 
 O `python` aqui é o Python 32 bits que já tem PyInstaller.
+
+O `.exe` de release sai do `.venv-build`, não do PyInstaller instalado no Python: o
+lançador de janela padrão do PyInstaller importa `LoadIconMetric` da comctl32 (ordinal
+380), que só existe quando o Windows aplica o manifesto do `.exe`. Em PCs onde isso
+não acontece, o programa nem abria ("Não foi possível localizar o número ordinal
+380"). O `tools\build_bootloader.py` baixa o código do PyInstaller, troca essa chamada
+por `LoadIconW` e compila o lançador com o gcc MinGW 32 bits (o do Strawberry Perl
+serve). O `build_release.py` usa o `.venv-build` sozinho e recusa um `.exe` que ainda
+importe a comctl32.

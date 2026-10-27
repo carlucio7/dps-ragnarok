@@ -2,6 +2,14 @@
 
 Português · [English](#english) · [Español](#español)
 
+## [1.0.3] — 2026-10-26
+
+- Corrige o erro "Não foi possível localizar o número ordinal 380", que impedia o
+  programa de abrir em alguns PCs. O lançador do .exe agora é compilado sem a
+  função da comctl32 que só existe quando o Windows aplica o manifesto do
+  programa, coisa que alguns PCs não fazem. Um lançador próprio também costuma
+  ser menos marcado por antivírus que o padrão do PyInstaller.
+
 ## [1.0.2] — 2026-10-24
 
 - Nomes em inglês e espanhol sem os espaços que o cliente do jogo deixa sobrando
@@ -39,6 +47,14 @@ inglês e espanhol.
 
 ## English
 
+### [1.0.3] — 2026-10-26
+
+- Fixes the "The ordinal 380 could not be located" error that kept the program
+  from opening on some PCs. The .exe launcher is now built without the comctl32
+  function that only exists when Windows applies the program's manifest, which
+  some PCs don't do. A custom launcher also tends to be flagged by antivirus less
+  often than PyInstaller's default one.
+
 ### [1.0.2] — 2026-10-24
 
 - English and Spanish names without the extra spaces the game client leaves in
@@ -75,6 +91,14 @@ and Spanish.
 ---
 
 ## Español
+
+### [1.0.3] — 2026-10-26
+
+- Corrige el error "No se encontró el ordinal 380", que impedía abrir el programa
+  en algunos PC. El lanzador del .exe ahora se compila sin la función de comctl32
+  que solo existe cuando Windows aplica el manifiesto del programa, algo que
+  algunos PC no hacen. Un lanzador propio además suele ser marcado por los
+  antivirus menos que el estándar de PyInstaller.
 
 ### [1.0.2] — 2026-10-24
 

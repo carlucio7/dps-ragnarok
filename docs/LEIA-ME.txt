@@ -56,6 +56,18 @@ SEGURANÇA
 - Não é um programa oficial da Gravity nem da ROLatam. Use por sua conta.
 
 
+SE O PROGRAMA NÃO ABRIR
+-----------------------
+- O DpsRagnarok.exe sumiu da pasta, ou aparece "O Windows não pode acessar o
+  dispositivo, caminho ou arquivo especificado": o antivírus apagou o arquivo
+  (alarme falso, comum em programas sem assinatura). Confira o código do .exe
+  como explicado acima e restaure o arquivo em Segurança do Windows › Proteção
+  contra vírus e ameaças › Histórico de proteção (ou na quarentena do seu
+  antivírus). Depois, adicione a pasta do programa como exceção.
+- "Não foi possível localizar o número ordinal 380": acontecia até a versão
+  1.0.2. Baixe a versão mais recente.
+
+
 PARA REMOVER
 ------------
 Apague a pasta do programa e a pasta %APPDATA%\RODpsMeter.

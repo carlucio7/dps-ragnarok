@@ -5,3 +5,4 @@ release/
 *.spec
 *.rrf
 tests/local_replays.json
+.venv-build/

@@ -5,6 +5,10 @@ saída: release/DpsRagnarok-VERSÃO/ e release/DpsRagnarok-VERSÃO-win.zip
 
 O UPX fica desligado (compactar o .exe faz antivírus desconfiar à toa). O código SHA-256 do .exe
 vai no SHA256.txt do pacote; o do .zip aparece no fim, para pôr na página de download.
+
+Roda com o Python do .venv-build (tools/build_bootloader.py), cujo PyInstaller tem o lançador
+compilado aqui, sem a comctl32: com o lançador padrão o programa não abre em PCs que não aplicam o
+manifesto ("número ordinal 380"). O pacote não é gerado se o .exe ainda importar a comctl32.
 """
 
 import hashlib
@@ -17,6 +21,7 @@ import zipfile
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, ROOT)
 from version import VERSION  # noqa: E402
+from build_bootloader import VENV, ordinal_imports  # noqa: E402
 
 DOCS = ["LEIA-ME.txt", "README.txt", "LEAME.txt", "CREDITOS.txt"]
 
@@ -50,6 +55,11 @@ def version_file(path):
 
 
 def main():
+    venv_py = os.path.join(VENV, "Scripts", "python.exe")
+    if os.path.normcase(os.path.abspath(sys.executable)) != os.path.normcase(venv_py):
+        if not os.path.isfile(venv_py):
+            sys.exit("falta o .venv-build: rode antes python tools/build_bootloader.py")
+        sys.exit(subprocess.call([venv_py, os.path.abspath(__file__)] + sys.argv[1:]))
     os.chdir(ROOT)
     os.makedirs("build", exist_ok=True)
     vfile = os.path.join("build", "version_info.txt")
@@ -57,6 +67,9 @@ def main():
     subprocess.check_call([sys.executable, "-m", "PyInstaller", "--noconfirm", "--onefile", "--windowed", "--noupx",
                            "--name", "DpsRagnarok", "--icon", "dpsmeter.ico", "--version-file", vfile,
                            "--add-data", "dpsmeter.ico;.", "--add-data", "data;data", "dpsmeter.py"])
+    imports = ordinal_imports(os.path.join("dist", "DpsRagnarok.exe"))
+    if "comctl32.dll" in imports:
+        sys.exit("o .exe importa a comctl32 %s: o lançador é o padrão do PyInstaller" % imports["comctl32.dll"])
     name = "DpsRagnarok-%s" % VERSION
     out = os.path.join("release", name)
     if os.path.isdir(out):

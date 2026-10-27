@@ -58,6 +58,19 @@ SEGURIDAD
   responsabilidad.
 
 
+SI EL PROGRAMA NO ABRE
+----------------------
+- DpsRagnarok.exe desapareció de la carpeta, o Windows dice "Windows no puede
+  obtener acceso al dispositivo, la ruta o el archivo especificados": el
+  antivirus borró el archivo (falsa alarma, común en programas sin firma).
+  Comprueba el código del .exe como se explica arriba y restaura el archivo en
+  Seguridad de Windows › Protección antivirus y contra amenazas › Historial de
+  protección (o en la cuarentena de tu antivirus). Después, agrega la carpeta del
+  programa como exclusión.
+- "No se encontró el ordinal 380": pasaba hasta la versión 1.0.2. Descarga la
+  versión más reciente.
+
+
 PARA QUITARLO
 -------------
 Borra la carpeta del programa y la carpeta %APPDATA%\RODpsMeter.
