@@ -836,4 +836,112 @@ CATALOG = {
     "Grupo:": ("Party:", "Grupo:"),
     "Grupo: nada para apontar.": ("Party: nothing to point out.", "Grupo: nada que señalar."),
     "Fora do grupo:": ("Outside the party:", "Fuera del grupo:"),
+    # 1.1: Dedo Duro (Garra Sombria antes de bater, Elo Celestial)
+    "Atacou antes da Garra Sombria": ("Attacked before Garra Sombria", "Atacó antes de la Garra Sombria"),
+    "dano no chefe antes da Garra Sombria (limite: %s do HP, %s)": (
+        "damage on the boss before Garra Sombria (limit: %s of HP, %s)",
+        "daño al jefe antes de la Garra Sombria (límite: %s del HP, %s)"),
+    "a Garra só chegou em %s, %s depois do começo da fase": (
+        "Garra Sombria only landed at %s, %s after the phase started",
+        "la Garra Sombria solo llegó en %s, %s después del inicio de la fase"),
+    "Dor Máxima no chefe desde %s: esse dano volta para o grupo": (
+        "Dor Máxima on the boss since %s: that damage comes back to the party",
+        "Dor Máxima en el jefe desde %s: ese daño vuelve al grupo"),
+    "maior golpe de %s: %s %s em %s": ("%s's biggest hit: %s %s at %s", "golpe más fuerte de %s: %s %s en %s"),
+    "sai ao morrer e custa 120 AP: só conta até a 1ª morte (%s)": (
+        "lost on death and costs 120 AP: only counts until the 1st death (%s)",
+        "se pierde al morir y cuesta 120 AP: solo cuenta hasta la 1.ª muerte (%s)"),
+    "buff do próprio Mestre Celestial: tem que ficar o tempo todo até a 1ª morte (dura até 15 min; depois de "
+    "morrer não tem AP para usar de novo)": (
+        "the Mestre Celestial's own buff: must be up all the time until the 1st death (lasts up to 15 min; after "
+        "dying there's no AP to use it again)",
+        "buff del propio Mestre Celestial: tiene que estar todo el tiempo hasta la 1.ª muerte (dura hasta 15 min; "
+        "después de morir no hay AP para usarlo de nuevo)"),
+    "buff do próprio Mestre Celestial: dura até 15 min, sai ao morrer e custa 120 AP": (
+        "the Mestre Celestial's own buff: lasts up to 15 min, lost on death, costs 120 AP",
+        "buff del propio Mestre Celestial: dura hasta 15 min, se pierde al morir y cuesta 120 AP"),
+    # 1.1: DPS ativo
+    "Seu DPS ativo": ("Your active DPS", "Tu DPS activo"),
+    "DPS ativo": ("Active DPS", "DPS activo"),
+    "só o tempo batendo: %s": ("only the time attacking: %s", "solo el tiempo atacando: %s"),
+    "DPS": ("DPS", "DPS"),
+    "Em combate (dano ÷ tempo da luta)": ("In combat (damage ÷ fight time)", "En combate (daño ÷ tiempo de la pelea)"),
+    "Ativo (dano ÷ tempo em que cada um estava batendo)": (
+        "Active (damage ÷ time each player was attacking)", "Activo (daño ÷ tiempo en que cada uno estaba atacando)"),
+    "Ativo: pausas de mais de 5 s sem bater não contam (morto, esperando, correndo)": (
+        "Active: pauses of more than 5 s without attacking don't count (dead, waiting, running)",
+        "Activo: las pausas de más de 5 s sin atacar no cuentan (muerto, esperando, corriendo)"),
+    "batendo %s": ("attacking %s", "atacando %s"),
+    # 1.1: Linha do tempo
+    "morreu": ("died", "murió"),
+    "ressuscitou": ("resurrected", "resucitó"),
+    "Dano refletido": ("Reflected damage", "Daño reflejado"),
+    "Golpes fortes (≥ 0,5% do HP)": ("Strong hits (≥ 0.5% of HP)", "Golpes fuertes (≥ 0,5% del HP)"),
+    "Usos da %s": ("%s uses", "Usos de %s"),
+    "usou %s": ("used %s", "usó %s"),
+    "Dor Máxima devolveu %s": ("Dor Máxima returned %s", "Dor Máxima devolvió %s"),
+    "%d jogadores atingidos, maior: %s": ("%d players hit, biggest: %s", "%d jugadores alcanzados, mayor: %s"),
+    "%s começou": ("%s started", "%s empezó"),
+    "durou %s": ("lasted %s", "duró %s"),
+    "sem média": ("no average", "sin promedio"),
+    "média de 1 s": ("1 s average", "promedio de 1 s"),
+    "média de 3 s": ("3 s average", "promedio de 3 s"),
+    "média de 5 s": ("5 s average", "promedio de 5 s"),
+    "HP do chefe (estimado)": ("Boss HP (estimated)", "HP del jefe (estimado)"),
+    "Dano recebido pelo grupo": ("Damage taken by the party", "Daño recibido por el grupo"),
+    "Eventos (só os das marcações ligadas)": ("Events (only from the markers turned on)",
+                                              "Eventos (solo los de las marcas activadas)"),
+    "Curvas": ("Curves", "Curvas"),
+    "DPS de cada jogador": ("Each player's DPS", "DPS de cada jugador"),
+    "Marcações de fase": ("Phase markers", "Marcas de fase"),
+    "Fases e clímax": ("Phases and climax", "Fases y clímax"),
+    " (fora do grupo)": (" (outside the party)", " (fuera del grupo)"),
+    "No chefe": ("On the boss", "En el jefe"),
+    "Eventos": ("Events", "Eventos"),
+    "Escolha uma luta contra chefe.": ("Pick a boss fight.", "Elige una pelea contra un jefe."),
+    "Luta:": ("Fight:", "Pelea:"),
+    "Arraste no gráfico ou gire a roda do mouse para aproximar; duplo clique volta. Passe o mouse para ver o que "
+    "acontecia em cada instante.": (
+        "Drag on the chart or turn the mouse wheel to zoom in; double-click goes back. Hover to see what was "
+        "happening at each moment.",
+        "Arrastra en el gráfico o gira la rueda del ratón para acercar; doble clic vuelve. Pasa el ratón para ver qué "
+        "pasaba en cada momento."),
+    "Ver a luta toda": ("See the whole fight", "Ver toda la pelea"),
+    # 1.1: HP do chefe pela dificuldade
+    "Selado": ("Sealed", "Sellado"),
+    "Nível 1": ("Level 1", "Nivel 1"),
+    "Nível 2": ("Level 2", "Nivel 2"),
+    "Nível 3": ("Level 3", "Nivel 3"),
+    "Nível 4": ("Level 4", "Nivel 4"),
+    "Nível 5": ("Level 5", "Nivel 5"),
+    "Dificuldade:": ("Difficulty:", "Dificultad:"),
+    "deduzir pelo dano": ("infer from damage", "deducir por el daño"),
+    "escolhido": ("picked", "elegido"),
+    "deduzido: morreu com %s de dano em %s de luta": ("inferred: died after %s damage in %s of fighting",
+                                                      "deducido: murió con %s de daño en %s de pelea"),
+    "deduzido: %s, %s de dano visto em %s de luta (o nível mais comum)": (
+        "inferred: %s, %s damage seen in %s of fighting (the most common level)",
+        "deducido: %s, %s de daño visto en %s de pelea (el nivel más común)"),
+    "deduzido: %s, %s de dano visto em %s de luta (no mínimo este nível)": (
+        "inferred: %s, %s damage seen in %s of fighting (at least this level)",
+        "deducido: %s, %s de daño visto en %s de pelea (como mínimo este nivel)"),
+    "não morreu": ("didn't die", "no murió"),
+    "a gravação começou com a luta em andamento": ("the recording started with the fight underway",
+                                                   "la grabación empezó con la pelea en curso"),
+    "no mínimo o dano visto (a gravação começou com a luta em andamento)": (
+        "at least the damage seen (the recording started with the fight underway)",
+        "como mínimo el daño visto (la grabación empezó con la pelea en curso)"),
+    "Alívio (redução de dano)": ("Relieve (damage reduction)", "Alivio (reducción de daño)"),
+    "informado pelo servidor": ("sent by the server", "informado por el servidor"),
+    "dano até morrer": ("damage until death", "daño hasta morir"),
+    "da base de dados": ("from the database", "de la base de datos"),
+    "no mínimo o dano visto": ("at least the damage seen", "como mínimo el daño visto"),
+    "HP %s, %s — %s": ("HP %s, %s — %s", "HP %s, %s — %s"),
+    "HP do chefe (%s)": ("Boss HP (%s)", "HP del jefe (%s)"),
+    "%s depois do começo da %s (%s de luta)": ("%s after %s started (%s into the fight)",
+                                               "%s después del inicio de la %s (%s de pelea)"),
+    "%s depois do começo da %s": ("%s after %s started", "%s después del inicio de la %s"),
+    "%s antes do começo da luta": ("%s before the fight started", "%s antes del inicio de la pelea"),
+    "%s de luta": ("%s into the fight", "%s de pelea"),
+    "Desde o começo": ("Since start", "Desde el inicio"),
 }

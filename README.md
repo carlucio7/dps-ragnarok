@@ -77,6 +77,12 @@ opções.
   juntadas numa luta só ("Betelgeuse ★ (3 fases)"), e o tempo de troca de fase
   não entra no DPS. Mesma regra do Ragna Recap / ragreplaystats. A lista de
   chefes com fases fica em `meter.PHASED_BOSSES`.
+- **DPS em combate ou ativo** (botão direito › DPS): *em combate* divide o dano
+  pelo tempo da luta (igual para todo mundo); *ativo* divide pelo tempo em que
+  cada um estava de fato batendo: pausas de mais de 5 s sem bater (morto,
+  esperando, correndo) não contam, e cada sequência de golpes ganha 1 s
+  (`meter.active_ms`). No modo ativo, a linha da direita mostra "batendo" com o
+  seu tempo ativo.
 - **Tamanho:** arraste o canto de baixo à direita para mudar largura e número
   de linhas. Ctrl + roda (ou Shift + arrastar o canto) muda o zoom. Em larguras
   maiores, o Grupo mostra DPS e % juntos e a aba Skills mostra "acertos" por
@@ -91,10 +97,10 @@ jogador tem uma cor fixa em todas as tabelas e gráficos. Ctrl + roda muda o
 tamanho de tudo; os cartões se reorganizam conforme a largura. **Copiar
 ranking** copia o ranking do recorte em texto (para colar no Discord/WhatsApp).
 
-- **Resumo:** o seu dano e % do grupo, DPS em combate e do 1º ao último golpe,
+- **Resumo:** o seu dano e % do grupo, DPS em combate, DPS ativo e do 1º ao último golpe,
   acertos/erros, maior golpe (skill e alvo), skill mais usada, abates, dano
   recebido, mortes, seus maiores golpes e de onde veio o dano que você levou.
-- **Jogadores:** dano, DPS, %, acertos, erros, maior golpe, monstros atingidos
+- **Jogadores:** dano, DPS, DPS ativo, %, acertos, erros, maior golpe, monstros atingidos
   e abates (golpe fatal). Para o jogador escolhido: habilidades (acertos, dano
   total e médio, hits médios, cast médio), monstros atingidos e a linha do
   tempo de todos.
@@ -109,6 +115,34 @@ ranking** copia o ranking do recorte em texto (para colar no Discord/WhatsApp).
   5 s e a média da janela. Arraste para escolher um trecho e veja as
   estatísticas dele (dano, DPS do 1º ao último golpe, intervalo médio, maior
   intervalo, maior golpe) e qual habilidade deu mais dano ali.
+- **Linha do tempo:** uma luta contra chefe no tempo, com gráficos e marcações
+  sobrepostos (`timeline.py` e `timeline_ui.py`). Em cima, as curvas: DPS do
+  grupo, DPS de cada jogador escolhido, HP estimado do chefe (pelo dano visto) e
+  dano recebido pelo grupo. Embaixo, uma faixa por marcação, cada uma ligável:
+  status no chefe (Garra Sombria, Pólen, Avanço Sísmico, Dor Máxima, Cometa e os
+  outros debuffs que apareceram), mortes e ressurreições (na cor do jogador),
+  skills do chefe, dano devolvido pela Dor Máxima (por onda, com o total),
+  usos da Garra Sombria, golpes fortes (≥ 0,5% do HP) e Elo Celestial; linhas
+  tracejadas marcam as fases e o clímax. Arrastar no gráfico ou girar a roda
+  aproxima (a média encolhe junto, para ver o que acontece em menos de 1 s);
+  duplo clique volta. Passar o mouse mostra quanto tempo depois do começo da
+  fase (e da luta) foi, os valores, os status ativos e os eventos daquele
+  instante. A fase começa quando o monstro dela aparece (o pacote de
+  aparecimento, até 15 s antes do primeiro golpe; o chefe já pode agir antes de
+  apanhar). A lista embaixo traz cada evento com décimo de segundo e o tempo
+  desde o começo da fase; clicar num evento marca o instante no gráfico, e
+  clicar no gráfico leva a lista até ali.
+  - **Alívio do chefe:** o Betelgeuse usa o Alívio assim que cada fase aparece
+    (nível 3 em quase todos os replays) e o refaz um nível acima a cada Alma
+    invocada (e um abaixo a cada Alma morta). O status no chefe (1166) traz a
+    redução de dano: 10% por nível, até 99%. A faixa "Alívio (redução de dano)"
+    mostra cada trecho com a redução. O nível inicial é a opção Defesa da
+    dificuldade, que é separada da Saúde (HP), por isso não serve para deduzir
+    o HP.
+  - **HP do chefe no replay:** o servidor esconde o HP dos monstros (manda -1 no
+    pacote de aparecimento e nunca a barra de HP, 0x0977), e o Betelgeuse não
+    usa nenhuma skill de cura nos replays. Por isso o HP vem da dificuldade e o
+    que ele perde vem do dano visto.
 - **Buffs:** seus buffs com o % do tempo em combate (vivo) em que estiveram
   ativos, quantas vezes foram aplicados, se já estavam no início e quanto falta
   para acabar (ao vivo). Buffs de grupo (a lista do simulador da LATAM Tools) e
@@ -149,6 +183,25 @@ ranking** copia o ranking do recorte em texto (para colar no Discord/WhatsApp).
   barra só; enquanto ele não morre, a conta usa o dano feito até agora),
   separado por fase e só com quem está vivo. **Copiar relatório** copia o texto
   para colar no Discord/WhatsApp.
+  - **HP do chefe e dificuldade:** o replay não diz a dificuldade. Para chefes
+    com tabela (`analysis.BOSS_LEVELS`; Betelgeuse: Selado 500M, Nível 1 800M,
+    2 1,1B, 3 1,4B, 4 1,7B, 5 2B, da calculadora da LATAM Tools), o medidor
+    deduz pelo dano: morto, o nível cujo HP mais a regeneração na luta mais se
+    aproxima do dano feito; vivo, o nível de costume (Nível 1) ou o menor que
+    comporta o dano visto (com a regeneração). Nos replays, todo Betelgeuse
+    morto levou de 826M a 887M (Nível 1), e o dano além dos 800M cresce com a
+    duração da luta: ~18M de overkill mais ~0,8M por segundo, a regeneração
+    (`analysis.BOSS_REGEN`, ~6% do HP por minuto). A curva de HP da Linha do
+    tempo também regenera quando ninguém está batendo. Se o pacote de
+    aparecimento do chefe não está no replay, a gravação começou com a luta em
+    andamento (`analysis.caught_midway`): aí mesmo um abate só diz o mínimo do
+    HP. O dano em invocações de jogadores (ex.: bater na Esfera Marinha para ela
+    explodir) não conta, por isso o total pode ficar abaixo do Ragna Recap, que
+    soma esse dano. O seletor **Dificuldade** (no Dedo Duro e na Linha do tempo)
+    fixa o nível quando a dedução não bate. O HP vale para o clímax (10%), os
+    golpes antes da Garra (0,5%), a curva de HP e a coluna HP máx. de Monstros.
+    Sem tabela, vale o HP que o servidor manda, o dano total se o chefe morreu,
+    ou a base de dados.
   - **Buffs de grupo** que faltaram em quem bate (físico ou mágico, pelo tipo de
     dano), só quando a classe que dá o buff está no grupo (ex.: Manejo Perfeito
     e Avanço Sísmico só com Engenheiro). Os alertas juntam os buffs que
@@ -173,6 +226,13 @@ ranking** copia o ranking do recorte em texto (para colar no Discord/WhatsApp).
     - **Competentia** sai ao morrer e custa AP demais: só é cobrada até a
       primeira morte de cada um.
     - Força Violenta ficou de fora (quase não muda o dano).
+    - **Elo Celestial** (buff do próprio Mestre Celestial, até 15 min, sai ao
+      morrer, 120 AP): faltar antes da primeira morte é grave (começou a luta
+      sem ele, ou acabou e não renovou). Depois de morrer não é cobrado: o
+      Mestre Celestial volta sem AP para usar de novo. Dos outros jogadores o
+      jogo só manda o fim do status, mas o uso da skill todo mundo vê, então o
+      Elo conta a partir de cada uso até a morte seguinte. Sem uso nem fim à
+      vista, o estado fica "?" (pode ter sido usado antes de gravar).
   - **Debuffs no chefe** que faltaram ou duraram pouco. Cada fase é um monstro
     novo e chega sem nada. O **Pólen (Florescer)** tem que ficar o tempo todo:
     o alerta diz se o Magus estava com Clímax (dava para usar o Florescer:
@@ -184,6 +244,11 @@ ranking** copia o ranking do recorte em texto (para colar no Discord/WhatsApp).
     dele estava em recarga (e quanto faltava), disponível ou se ele estava
     morto, e quantos golpes foram refletidos ali. A recarga sai dos usos da
     skill que aparecem no replay (60 s).
+  - **Atacou antes da Garra Sombria:** quem fez 0,5% ou mais do HP do chefe
+    numa fase antes de a Garra chegar (somando os golpes: vários golpes médios
+    contam tanto quanto um forte). Cada fase é um monstro novo, que chega sem
+    a Garra. Grave quando o chefe usa Dor Máxima (esse dano volta para o grupo
+    inteiro), atenção nos outros chefes. Só vale com Executor na luta.
   - **Mortes:** de 2 a 7 s morto até ressuscitar, e os buffs de recarga longa
     ou AP alto que não voltaram depois de ressuscitar. Mais de 7 s morto é
     tratado como provável wipe (o grupo vai se reagrupar ou desistir) e fica

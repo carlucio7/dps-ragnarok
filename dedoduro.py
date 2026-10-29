@@ -8,7 +8,8 @@ chefe perdeu os primeiros 10% do HP, quando o grupo já devia estar pronto):
   - buffs de recarga longa ou de AP que sumiram de uma fase para outra ou depois de morrer;
   - quem ficou mais de 2 s morto até ser ressuscitado;
   - elemento: fogo durante o Florescer e ataques com desvantagem elemental;
-  - arma com veneno x chefe com Potencializar Veneno.
+  - arma com veneno x chefe com Potencializar Veneno;
+  - quem bateu forte antes da Garra Sombria da fase e Mestre Celestial sem o Elo Celestial.
 
 Quem está no grupo e quem está fora ficam em listas separadas: buffs de quem está fora do
 grupo não chegam no replay, então para eles só dá para ver dano, mortes e skills.
@@ -23,7 +24,7 @@ import collections
 import analysis as an
 import i18n
 import meter
-from fmt import dec
+from fmt import dec, num
 from i18n import _
 
 RATHENA = meter._load("rathena.json")
@@ -74,6 +75,11 @@ REFLECT_SKILLS = {716, 717}   # Dor Máxima (usar) e o dano que ela devolve
 FLORESCER = 1183              # Pólen (Florescer): o alvo perde resistência a fogo (100% com Clímax nv 4)
 AG_CLIMAX = 5232
 CLIMAX = 1152                 # Clímax (Intensificação) no Magus
+ELO = 1392                    # Elo Celestial no Mestre Celestial (dos outros, o jogo só manda o fim do status)
+ELO_SKILL = 5475              # o uso da skill todo mundo vê
+ELO_MS = 900000               # dura até 15 min (nv 10) e sai ao morrer
+STRONG_HIT = 0.005            # dano no chefe antes da Garra Sombria da fase acima disso do HP = erro
+APPEAR_MS = 15000             # o monstro da fase apareceu até isso antes do 1º golpe: a fase começa ali
 EXTRA_SOURCES = {1402: [5296], 1121: [361], 110: [361]}   # status sem skill no rAthena
 # Buffs que o jogo não mostra nos outros jogadores (conferido nos replays): o início nunca chega e o fim
 # só chega quando acaba sozinho (na morte, nem isso). Desses, só dá para cobrar de quem gravou.
@@ -253,6 +259,11 @@ def _secs(ms):
     return dec("%.1f s" % (ms / 1000.0))
 
 
+def _when(t):
+    """00:22,1 — com décimo de segundo, para o que acontece em menos de 1 s."""
+    return an._dur(t) + dec(".%d" % (int(t) % 1000 // 100))
+
+
 def _names(c, aids):
     return ", ".join(c.name_of(a) for a in aids)
 
@@ -353,9 +364,13 @@ class Ctx:
         if self.killed:
             self.end = max(self.end, c.deaths[order[-1]])
         self.total = sum(h.dmg for h in hits)
-        # clímax: depois que o chefe perdeu 10% do HP (todas as fases são uma barra só). O HP só é
-        # conhecido quando ele morre (= dano total); antes disso conta o dano feito até agora
-        goal, acc, self.climax = CLIMAX_HP * self.total, 0, self.end
+        # HP do chefe: pela dificuldade (deduzida do dano ou escolhida), o que o servidor manda ou a base
+        self.hp, self.hp_label, self.hp_how = an.boss_hp(c, key, self.total, self.killed, self.end - self.start)
+        self.hp_table = bool(an.hp_levels(c, key))
+        # clímax: depois que o chefe perdeu 10% do HP (todas as fases são uma barra só). Sem tabela de
+        # dificuldade, o HP só é conhecido quando ele morre (= dano total); antes disso conta o dano feito até agora
+        base = self.hp if self.hp_table or self.killed else self.total
+        goal, acc, self.climax = CLIMAX_HP * base, 0, self.end
         for h in hits:
             acc += h.dmg
             if acc >= goal:
@@ -376,7 +391,12 @@ class Ctx:
             e = last[a] if i + 1 < len(order) else self.end
             cs = max(s, self.climax)
             win = _intersect([(cs, e)], self.active) if cs < e else []
-            self.phases.append(dict(n=i + 1, aid=a, start=s, end=e, climax_start=cs if cs < e else None, win=win))
+            # a fase começa quando o monstro dela aparece (ele já pode agir antes do primeiro golpe); um
+            # chefe visto muito antes de a luta começar conta do primeiro golpe
+            seen = c.spawned.get(a)
+            appear = seen if seen is not None and s - APPEAR_MS <= seen <= s else s
+            self.phases.append(dict(n=i + 1, aid=a, start=s, appear=appear, end=e,
+                                    climax_start=cs if cs < e else None, win=win))
         self.multi = len(self.phases) > 1
         self.whole = _("Todas as fases") if self.multi else _("Luta inteira")
         self.st = collections.defaultdict(list)        # aid -> [(efst, início, fim)]
@@ -621,7 +641,8 @@ def _class_buffs(x, alerts):
         tree = JOB_SKILLS.get(x.jobs[a], set())
         seen = {}
         for efst, _s, _e in x.st.get(a, ()):
-            if efst in _KNOWN or efst in seen or efst in ENDOW_IDS or meter.status_kind(efst) in _SKIP_KINDS:
+            if (efst in _KNOWN or efst in seen or efst in ENDOW_IDS or efst == ELO
+                    or meter.status_kind(efst) in _SKIP_KINDS):
                 continue
             if _sources([efst]) & tree:
                 rule = Rule([efst])
@@ -891,6 +912,110 @@ def _claw(x, alerts, refl, aids, party):
     return rows, execs
 
 
+def claw_start(x, p):
+    """Quando a Garra Sombria chegou no monstro da fase (None = não chegou)."""
+    spans = [s for s, e in x.boss_spans({DARK_CLAW}, p["aid"]) if e >= p["start"]]
+    casts = [h.t for h in x.hits if h.dst_raw == p["aid"] and h.skill in DARK_CLAW_SKILLS]
+    return min(spans + casts, default=None)
+
+
+def _before_claw(x, alerts, refl, aids):
+    """Quem bateu forte no chefe antes da Garra Sombria da fase. Cada fase é um monstro novo, que chega
+    sem a Garra; contra Dor Máxima esse dano volta para o grupo inteiro."""
+    c = x.c
+    if not any(JOB_SKILLS.get(job_id(c, a), set()) & DARK_CLAW_SKILLS for a in x.party + x.others):
+        return
+    limit = STRONG_HIT * x.hp
+    if limit <= 0:
+        return
+    aids = set(aids)
+    for p in x.phases:
+        first = claw_start(x, p)
+        if first is None:
+            continue                          # a fase sem Garra nenhuma já aparece nos buracos da Garra
+        dmg, top = collections.Counter(), {}
+        for h in x.hits:
+            if (h.dst_raw == p["aid"] and p["start"] <= h.t < first and h.src in aids
+                    and h.skill not in DARK_CLAW_SKILLS):
+                dmg[h.src] += h.dmg
+                if h.dmg > top.get(h.src, (0,))[0]:
+                    top[h.src] = (h.dmg, h.skill, h.t)
+        bad = sorted((a for a, v in dmg.items() if v >= limit), key=lambda a: -dmg[a])
+        if not bad:
+            continue
+        pain = [s for s, e in x.boss_spans({MAX_PAIN}, p["aid"]) if s < first and e > p["start"]]
+        detail = [_("dano no chefe antes da Garra Sombria (limite: %s do HP, %s)") % (
+                      dec("%.1f%%" % (STRONG_HIT * 100)), num(limit)),
+                  _("a Garra só chegou em %s, %s depois do começo da fase") % (_when(first),
+                                                                                 _secs(first - p["appear"]))]
+        if pain:
+            detail.append(_("Dor Máxima no chefe desde %s: esse dano volta para o grupo") % _when(min(pain)))
+        for a in bad:
+            v, sid, t = top[a]
+            detail.append(_("maior golpe de %s: %s %s em %s") % (c.name_of(a), meter.skill_name(sid), num(v), _when(t)))
+        sev = 2 if refl["used"] else 1
+        who = ", ".join("%s %s (%s)" % (c.name_of(a), num(dmg[a]), dec("%.2f%%" % (100.0 * dmg[a] / x.hp)))
+                        for a in bad)
+        _alert(alerts, sev, x.phase_name(p) if x.multi else x.whole, _("Atacou antes da Garra Sombria"), who,
+               " · ".join(detail))
+
+
+def elo_spans(x, aid):
+    """Quando `aid` estava com o Elo Celestial: o status (dos outros só chega o fim) e cada uso da skill,
+    que todo mundo vê, até a morte seguinte."""
+    c = x.c
+    deaths = [t for t, a in c.death_log if a == aid]
+    spans = list(x.spans(aid, {ELO}))
+    for t in sorted({u[0] for u in c.uses if aid in (u[1], u[2]) and u[4] == ELO_SKILL}):
+        spans.append((t, min([d for d in deaths if d > t] + [t + ELO_MS])))
+    return _merge(spans)
+
+
+def _elo(x, alerts, aids):
+    """Mestre Celestial sem o Elo Celestial (buff dele mesmo): grave. Só conta até a primeira morte: sai ao
+    morrer e custa 120 AP, que o Mestre Celestial não tem depois de ressuscitar."""
+    c = x.c
+    name = meter.skill_name(ELO_SKILL)
+    rows = []
+    miss = collections.defaultdict(dict)      # fase -> {aid: %}
+    for a in aids:
+        if ELO_SKILL not in JOB_SKILLS.get(job_id(c, a), set()) or not x.dmg.get(a):
+            continue                      # quem bateu pouco também é cobrado (pode ser por isso); quem nem bateu, não
+        spans = elo_spans(x, a)
+        casts = [u[0] for u in c.uses if a in (u[1], u[2]) and u[4] == ELO_SKILL]
+        unk = x.unknown(a, {ELO}, ELO_MS)
+        if unk and casts:
+            unk = [(0, min(unk[0][1], min(casts)))]
+        first = next((t for t, _b, _e in x.dead.get(a, ())), None)
+
+        def up(windows):
+            win = x.alive(a, windows)
+            known = an._subtract(win, unk) if unk else win
+            if _total(win) < MIN_WINDOW_MS:
+                return None
+            return UNKNOWN if _total(known) < MIN_WINDOW_MS else _uptime(spans, known)
+
+        ups = [up(an._subtract(p["win"], [(first, x.end + 1)]) if first is not None else p["win"])
+               for p in x.phases]
+        if a in x.party:
+            note = _("buff do próprio Mestre Celestial: dura até 15 min, sai ao morrer e custa 120 AP")
+            if first is not None:
+                note = _("sai ao morrer e custa 120 AP: só conta até a 1ª morte (%s)") % an._dur(first)
+            row = dict(key="classe|%d|%d" % (ELO, a), aid=a, name=c.name_of(a), job=meter.job_name(job_id(c, a)),
+                       buff=name, kind="da classe", me=a == c.me, note=note)
+            _phase_cols(row, ups)
+            rows.append(row)
+        for p, u in zip(x.phases, ups):
+            if isinstance(u, float) and u < ALWAYS_MIN:
+                miss[p["n"]][a] = u
+    for n, who in sorted(miss.items()):
+        _alert(alerts, 2, x.phase_name(x.phases[n - 1]), _("Faltou %s") % name,
+               ", ".join("%s %s" % (c.name_of(a), _pct(u)) for a, u in sorted(who.items(), key=lambda m: m[1])),
+               _("buff do próprio Mestre Celestial: tem que ficar o tempo todo até a 1ª morte (dura até 15 min; "
+                 "depois de morrer não tem AP para usar de novo)"))
+    return rows
+
+
 def _deaths(x, aids, alerts, party):
     c = x.c
     rows = []
@@ -1124,9 +1249,11 @@ def analyze(c, key, rng=None):
     buffs = _buff_rows(x, GROUP_BUFFS, "grupo", alerts)
     buffs += _buff_rows(x, DEFENSE_BUFFS, "proteção", alerts)
     buffs += _class_buffs(x, alerts)
+    buffs += _elo(x, alerts, x.party)
     refl = reflect_info(x)
     poison_rows, poisoned = _poison(x, alerts)
     claw, claw_execs = _claw(x, alerts, refl, x.party, True)
+    _before_claw(x, alerts, refl, x.party)
     debuffs = _debuffs(x, alerts, refl, poisoned, claw)
     deaths = _deaths(x, x.party, alerts, True)
     element, flor, defense = _elements(x, alerts, set(x.party), True)
@@ -1135,6 +1262,8 @@ def analyze(c, key, rng=None):
     o_deaths = _deaths(x, x.others, o_alerts, False)
     o_element, _f, _d = _elements(x, o_alerts, set(x.others), False)
     o_claw, o_claw_execs = _claw(x, o_alerts, refl, x.others, False)
+    _before_claw(x, o_alerts, refl, x.others)
+    _elo(x, o_alerts, x.others)
     total = x.total or 1
     party_rows = [dict(key=a, aid=a, name=c.name_of(a), job=meter.job_name(x.jobs[a]), me=a == c.me,
                        dmg=x.dmg.get(a, 0), share=x.dmg.get(a, 0) / total,
@@ -1153,6 +1282,7 @@ def analyze(c, key, rng=None):
         for i, r in enumerate(lst):
             r["key"] = i
     return dict(key=key, name=c.target_name(key), start=x.start, end=x.end, killed=x.killed, total=x.total,
+                hp=x.hp, hp_label=x.hp_label, hp_how=x.hp_how, hp_table=x.hp_table,
                 climax=x.climax, phases=x.phases, multi=x.multi, party=party_rows, others=others,
                 alerts=alerts, buffs=buffs, debuffs=debuffs, deaths=deaths, element=element, poison=poison_rows,
                 o_alerts=o_alerts, o_deaths=o_deaths, o_element=o_element, reflect=refl, florescer=flor,
@@ -1161,7 +1291,12 @@ def analyze(c, key, rng=None):
 
 
 def climax_text(r):
-    how = _("o chefe morreu: HP = dano total") if r["killed"] else _("estimado: o chefe não morreu, conta o dano feito até agora")
+    if r.get("hp_table"):
+        how = _("HP %s, %s — %s") % (num(r["hp"]), r["hp_label"], r["hp_how"])
+    elif r["killed"]:
+        how = _("o chefe morreu: HP = dano total")
+    else:
+        how = _("estimado: o chefe não morreu, conta o dano feito até agora")
     return _("Clímax a partir de %s, depois dos primeiros %d%% do HP (%s)") % (an._dur(r["climax"]),
                                                                           round(CLIMAX_HP * 100), how)
 

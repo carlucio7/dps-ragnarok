@@ -2,6 +2,39 @@
 
 Português · [English](#english) · [Español](#español)
 
+## [1.1.0] — 2026-10-28
+
+- **Linha do tempo** (nova aba na análise): uma luta contra chefe no tempo, com
+  gráficos e marcações sobrepostos. Curvas de DPS do grupo e de cada jogador, HP
+  estimado do chefe e dano recebido; faixas com a Garra Sombria, o Pólen, o
+  Avanço Sísmico (Quake), a Dor Máxima e os outros debuffs no chefe; o Alívio
+  do chefe com a redução de dano de cada trecho (sobe 10% por Alma viva); mortes e
+  ressurreições, skills do chefe, dano refletido, usos da Garra, golpes fortes e
+  Elo Celestial. Dá para aproximar até décimos de segundo e passar o mouse para
+  ver o que acontecia em cada instante, inclusive quanto tempo depois do começo
+  da fase (que conta de quando o monstro da fase aparece).
+- **DPS ativo:** além do dano total e do DPS em combate, o DPS de cada um só no
+  tempo em que estava de fato batendo (sem o tempo morto, esperando ou
+  correndo). No widget (botão direito › DPS), no Resumo e na tabela de
+  Jogadores.
+- **HP do chefe pela dificuldade:** o replay não diz a dificuldade, então o
+  medidor deduz pelo dano (Betelgeuse: de Selado, 500M, a Nível 5, 2B, pela
+  calculadora da LATAM Tools). Morto, o nível que bate com o dano; vivo, o
+  Nível 1 ou o mínimo que comporta o dano visto. A conta inclui a regeneração
+  que os abates mostram (~6% do HP por minuto), então luta longa não vira nível
+  mais alto. Se a gravação começou com a luta em andamento (o chefe já estava na
+  tela), o abate só diz o mínimo do HP. Dá para escolher a dificuldade
+  no Dedo Duro e na Linha do tempo. O HP vale para o clímax (10%), os golpes
+  antes da Garra (0,5%), a curva de HP e a tabela de Monstros (antes, o
+  Betelgeuse aparecia sempre com 2B).
+- **Dedo Duro:**
+  - Atacou antes da Garra Sombria: quem fez, somando os golpes, 0,5% ou mais do
+    HP do chefe numa fase antes de a Garra chegar (o pouco de um Cometa ou de um
+    Avanço Sísmico não chega lá). Grave quando o chefe usa Dor Máxima.
+  - Elo Celestial: Mestre Celestial sem o Elo é grave (começar a luta sem ele,
+    ou deixar acabar). Só conta até a primeira morte: depois de morrer ele não tem
+    os 120 AP para usar de novo.
+
 ## [1.0.3] — 2026-10-26
 
 - Corrige o erro "Não foi possível localizar o número ordinal 380", que impedia o
@@ -47,6 +80,38 @@ inglês e espanhol.
 
 ## English
 
+### [1.1.0] — 2026-10-28
+
+- **Timeline** (new analysis tab): a boss fight over time, with overlaid charts
+  and markers. Curves for party DPS and each player's DPS, estimated boss HP and
+  damage taken; lanes for Dark Claw, All Bloom, Quake, Max Pain and the other
+  debuffs on the boss; the boss's Relieve with each stretch's damage reduction
+  (10% more per living Soul); deaths and resurrections, boss skills, reflected damage,
+  Dark Claw uses, strong hits and Enchanting Sky. You can zoom down to tenths of
+  a second and hover to see what was happening at each moment, including how long
+  after the phase started (counted from when the phase's monster appears).
+- **Active DPS:** besides total damage and combat DPS, each player's DPS only
+  over the time they were actually attacking (without time dead, waiting or
+  running). In the widget (right-click › DPS), the Summary and the Players
+  table.
+- **Boss HP by difficulty:** the replay doesn't say the difficulty, so the meter
+  infers it from the damage (Betelgeuse: from Sealed, 500M, to Level 5, 2B, from
+  the LATAM Tools calculator). Killed, the level that matches the damage; alive,
+  Level 1 or the lowest level that fits the damage seen. It accounts for the
+  regeneration the kills show (~6% of HP per minute), so a long fight doesn't
+  turn into a higher level. If the recording started with the fight underway
+  (the boss was already on screen), a kill only gives the minimum HP. You can pick the
+  difficulty in the Snitch and the Timeline. The HP is used for the climax
+  (10%), hits before Dark Claw (0.5%), the HP curve and the Monsters table
+  (before, Betelgeuse always showed 2B).
+- **Snitch:**
+  - Attacked before Dark Claw: whoever dealt, adding up their hits, 0.5% or more
+    of the boss's HP in a phase before Dark Claw landed (the little from a Comet
+    or a Quake doesn't get there). Serious when the boss uses Max Pain.
+  - Enchanting Sky: a Sky Emperor without it is serious (starting the fight
+    without it, or letting it run out). It only counts until the first death:
+    after dying there aren't 120 AP to use it again.
+
 ### [1.0.3] — 2026-10-26
 
 - Fixes the "The ordinal 380 could not be located" error that kept the program
@@ -91,6 +156,40 @@ and Spanish.
 ---
 
 ## Español
+
+### [1.1.0] — 2026-10-28
+
+- **Línea de tiempo** (nueva pestaña del análisis): una pelea contra un jefe en
+  el tiempo, con gráficos y marcas superpuestos. Curvas de DPS del grupo y de
+  cada jugador, HP estimado del jefe y daño recibido; franjas con la Garra
+  Tenebrosa, el Polen, el Sismo, la Dolor Máxima y los otros debuffs en el
+  jefe; el Alivio del jefe con la reducción de daño de cada tramo (10% más por
+  Alma viva); muertes y resurrecciones, skills del jefe, daño reflejado, usos de la
+  Garra, golpes fuertes y Vínculo Celestial. Se puede acercar hasta décimas de
+  segundo y pasar el ratón para ver qué pasaba en cada momento, incluso cuánto
+  tiempo después del inicio de la fase (que cuenta desde que aparece el monstruo
+  de la fase).
+- **DPS activo:** además del daño total y del DPS en combate, el DPS de cada uno
+  solo en el tiempo en que estaba atacando de verdad (sin el tiempo muerto,
+  esperando o corriendo). En el widget (clic derecho › DPS), el Resumen y la
+  tabla de Jugadores.
+- **HP del jefe por dificultad:** el replay no dice la dificultad, así que el
+  medidor la deduce por el daño (Betelgeuse: de Sellado, 500M, a Nivel 5, 2B,
+  según la calculadora de LATAM Tools). Muerto, el nivel que coincide con el
+  daño; vivo, el Nivel 1 o el mínimo que soporta el daño visto. La cuenta incluye
+  la regeneración que muestran los abates (~6% del HP por minuto), así que una
+  pelea larga no se vuelve un nivel más alto. Si la grabación empezó con la pelea
+  en curso (el jefe ya estaba en pantalla), el abate solo da el HP mínimo. Se puede elegir
+  la dificultad en el Soplón y en la Línea de tiempo. El HP vale para el clímax
+  (10%), los golpes antes de la Garra (0,5%), la curva de HP y la tabla de
+  Monstruos (antes, el Betelgeuse aparecía siempre con 2B).
+- **Soplón:**
+  - Atacó antes de la Garra Tenebrosa: quien hizo, sumando sus golpes, 0,5% o
+    más del HP del jefe en una fase antes de que llegara la Garra (lo poco de un
+    Cometa o de un Sismo no llega). Grave cuando el jefe usa Dolor Máxima.
+  - Vínculo Celestial: Emperador Celestial sin el Vínculo es grave (empezar la
+    pelea sin él, o dejar que se acabe). Solo cuenta hasta la primera muerte:
+    después de morir no tiene los 120 AP para usarlo de nuevo.
 
 ### [1.0.3] — 2026-10-26
 

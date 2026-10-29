@@ -6,6 +6,7 @@ e devolvem listas de dicts prontas para tabela/grafico.
 """
 
 import collections
+import math
 
 import meter
 import rrf
@@ -72,7 +73,8 @@ def players(c, rng, dur_ms):
     for h in out_hits(c, rng):
         a = agg.get(h.src)
         if a is None:
-            a = agg[h.src] = dict(aid=h.src, total=0, hits=0, crits=0, misses=0, max_hit=0, mobs=set())
+            a = agg[h.src] = dict(aid=h.src, total=0, hits=0, crits=0, misses=0, max_hit=0, mobs=set(), times=[])
+        a["times"].append(h.t)
         a["total"] += h.dmg
         a["hits"] += 1
         a["crits"] += h.crit
@@ -86,6 +88,7 @@ def players(c, rng, dur_ms):
     for a in agg.values():
         rows.append(dict(aid=a["aid"], name=c.name_of(a["aid"]), job=job_of(c, a["aid"]), me=a["aid"] == c.me,
                          total=a["total"], dps=a["total"] * 1000.0 / max(1, dur_ms), share=a["total"] / total,
+                         adps=a["total"] * 1000.0 / meter.active_ms(sorted(a["times"])),
                          hits=a["hits"], crits=a["crits"], misses=a["misses"], max_hit=a["max_hit"],
                          mobs=len(a["mobs"]), kills=kills.get(a["aid"], 0)))
     rows.sort(key=lambda r: -r["total"])
@@ -126,6 +129,89 @@ def player_skills(c, rng, aid, dur_ms):
     return rows
 
 
+# HP dos chefes por dificuldade (calculadora da LATAM Tools; a base do medidor tem só o da dificuldade
+# máxima). O replay não diz a dificuldade: ela é deduzida do dano (ver boss_hp) ou escolhida na análise.
+BOSS_LEVELS = {20994: [(_("Selado"), 500000000), (_("Nível 1"), 800000000), (_("Nível 2"), 1100000000),
+                       (_("Nível 3"), 1400000000), (_("Nível 4"), 1700000000), (_("Nível 5"), 2000000000)]}
+BOSS_USUAL = {20994: 1}       # o nível que os grupos costumam fazer (Betelgeuse: todos os abates dos replays)
+# Regeneração (fração do HP máx. por segundo). O replay não mostra o HP, mas nos abates o dano além do HP
+# cresce com a duração da luta: ~0,8M/s no Nível 1 (~6% do HP por minuto), mais ~18M de overkill.
+BOSS_REGEN = {20994: 0.001}
+LEVEL_SLACK = 0.05            # folga do dano: overkill de cada fase, ou a morte que o replay não mostrou
+HP_CHOICE = {}                # (gravação, chave do chefe) -> nível escolhido na análise
+
+
+def _choice_key(c, key):
+    return (tuple(c.session.recorded_at), c.session.player, key)
+
+
+def caught_midway(c, key):
+    """A gravação começou com o chefe já na tela (o pacote de aparecimento dele não está no replay): o dano de
+    antes não aparece, então mesmo um abate só diz o mínimo do HP. Nos replays, a 1ª fase sempre aparece de 0 a
+    3 s antes do 1º golpe; sem isso, a luta já estava em andamento."""
+    return key not in c.spawned
+
+
+def boss_hp(c, key, total, killed, dur_ms=0):
+    """(HP, rótulo, como) do chefe para as contas (clímax, golpes fortes, curva de HP).
+
+    Com tabela de dificuldades, o dano esperado de um nível é o HP mais o que ele regenera em `dur_ms`. Morto, o
+    nível cujo dano esperado mais se aproxima do dano feito; vivo (ou gravado com a luta em andamento), o nível de
+    costume, ou o menor que comporta o dano visto se ele passou disso. Sem tabela: o HP que o servidor manda, o
+    dano total se morreu, ou a base."""
+    e = c.entities.get(key)
+    midway = caught_midway(c, key)
+    mob_id = e.job if e is not None else 0
+    levels = BOSS_LEVELS.get(mob_id)
+    if levels:
+        pick = HP_CHOICE.get(_choice_key(c, key))
+        if pick is not None:
+            return levels[pick][1], levels[pick][0], _("escolhido")
+        grow = 1 + BOSS_REGEN.get(mob_id, 0) * dur_ms / 1000.0      # HP + o que regenerou na luta
+        when = _dur(dur_ms)
+        if killed and not midway:
+            i = min(range(len(levels)), key=lambda k: abs(math.log(max(1, total) / (levels[k][1] * grow))))
+            return levels[i][1], levels[i][0], _("deduzido: morreu com %s de dano em %s de luta") % (
+                _full(total), when)
+        fit = [i for i, (_n, hp) in enumerate(levels) if hp * grow >= total * (1 - LEVEL_SLACK)]
+        least = fit[0] if fit else len(levels) - 1
+        usual = BOSS_USUAL.get(mob_id, 0)
+        why = _("a gravação começou com a luta em andamento") if midway else _("não morreu")
+        if least <= usual:
+            return levels[usual][1], levels[usual][0], _("deduzido: %s, %s de dano visto em %s de luta "
+                                                         "(o nível mais comum)") % (why, _full(total), when)
+        return levels[least][1], levels[least][0], _("deduzido: %s, %s de dano visto em %s de luta (no "
+                                                     "mínimo este nível)") % (why, _full(total), when)
+    _mob, max_hp, _boss = monster_info(c, key)
+    if e is not None and e.max_hp and e.max_hp > 0:
+        return e.max_hp, "", _("informado pelo servidor")
+    if killed and midway:
+        return total, "", _("no mínimo o dano visto (a gravação começou com a luta em andamento)")
+    if killed:
+        return total, "", _("dano até morrer")
+    if max_hp >= total:
+        return max_hp, "", _("da base de dados")
+    return total, "", _("no mínimo o dano visto")
+
+
+def hp_levels(c, key):
+    """[(rótulo, HP)] das dificuldades do chefe (vazio se não há tabela)."""
+    e = c.entities.get(key)
+    return BOSS_LEVELS.get(e.job if e is not None else 0, [])
+
+
+def choose_hp(c, key, index):
+    """Fixa a dificuldade (índice em hp_levels) ou volta para a dedução (None)."""
+    if index is None:
+        HP_CHOICE.pop(_choice_key(c, key), None)
+    else:
+        HP_CHOICE[_choice_key(c, key)] = index
+
+
+def hp_choice(c, key):
+    return HP_CHOICE.get(_choice_key(c, key))
+
+
 def monster_info(c, key):
     e = c.entities.get(key)
     mob_id = e.job if e is not None else 0
@@ -157,6 +243,9 @@ def monsters(c, rng, group=True):
         for m in a["members"]:
             if m in blows and (death is None or blows[m][1] > death):
                 killer, death = blows[m]
+        if hp_levels(c, a["key"]):
+            max_hp = boss_hp(c, a["key"], a["total"], death is not None,
+                             (death if death is not None else a["last"]) - a["first"])[0]     # pela dificuldade
         phases = c.phases.get(a["key"], 0) if group else 0
         name = c.name_of(a["key"]) + (" ★" if boss or phases > 1 else "")
         if phases > 1:
@@ -356,9 +445,11 @@ def summary(c, rng, dur_ms, aid=None):
     kills = [k for k, (who, _t) in blows.items() if who == aid]
     boss_kills = sum(1 for k in kills if c.entities.get(k) is not None and c.entities[k].boss)
     span = (mine[-1].t - mine[0].t) if len(mine) > 1 else 0
+    active = meter.active_ms(sorted(h.t for h in mine)) if mine else 0
     return dict(
         dealt=dealt, share=dealt / group if group else 0, group=group,
         dps=dealt * 1000.0 / max(1, dur_ms), effective_dps=(dealt * 1000.0 / span) if span else 0,
+        active_ms=active, active_dps=(dealt * 1000.0 / active) if active else 0,
         hits=len(mine), misses=sum(h.miss for h in mine), crits=sum(h.crit for h in mine),
         best=dict(dmg=best.dmg, skill=source_label(c, best), target=c.target_name(best.dst), t=best.t) if best else None,
         top_skill=meter.skill_name(top_skill) if top_skill is not None else "", top_count=top_count,

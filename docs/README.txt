@@ -3,8 +3,8 @@ DPS Ragnarok {VERSION} — DPS meter for Ragnarok Online (ROLatam)
 
 A small widget that shows your DPS and the party's damage ranking in real time
 by reading the game's own replay recording. It also has a full analysis window
-(per player, per monster, buffs, deaths, build tests) and the "Snitch" tab,
-which points out what was missing in boss fights.
+(per player, per monster, timeline, buffs, deaths, build tests) and the "Snitch"
+tab, which points out what was missing in boss fights.
 
 Languages: português, English, español (right-click › Language).
 

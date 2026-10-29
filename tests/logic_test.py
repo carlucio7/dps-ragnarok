@@ -3,6 +3,7 @@
 uso: python tests\\logic_test.py
 """
 
+import collections
 import json
 import os
 os.environ.setdefault("RODPS_LANG", "pt")      # os testes conferem os textos em português
@@ -305,8 +306,8 @@ pl = an.players(c, rng, dur_ms)
 check([(p["name"], p["total"], p["hits"], p["kills"]) for p in pl] == [("Outro", 9000, 1, 1), ("Tester", 5000, 3, 0)],
       "jogadores: dano, acertos (com o de dano 0) e golpe fatal")
 mob = an.monsters(c, rng)[0]
-check(mob["killer"] == "Outro" and mob["ttk"] == 9500 - 3000 and mob["max_hp"] == 2000000000,
-      "monstro: abatido por, tempo ate abate, HP da tabela")
+check(mob["killer"] == "Outro" and mob["ttk"] == 9500 - 3000 and mob["max_hp"] == 500000000,
+      "monstro: abatido por, tempo até abate, HP pela dificuldade (morreu com pouco dano: Selado)")
 sk = {s["skill"]: s for s in an.monster_skills(c, rng, mob["key"])}
 check(sk[2217]["hits"] == 2 and sk[2217]["total"] == 8000 and sk[2217]["targets"] == 2 and sk[2217]["cast"] == 1000,
       "habilidades do monstro: acertos, alvos e conjuracao (sem repetida)")
@@ -462,9 +463,9 @@ ev += [(500, fr.status(ME, 10, True)), (500, fr.status(EXE, 10, True)), (20000, 
        (30000, fr.status(BOSS, 713, True)), (40000, fr.status(BOSS, 713, False)),   # Dor Máxima
        (30000, fr.status(CARD, 15, False)), (30001, fr.status(CARD, 15, False))]    # Impositio de antes da gravação
 ev += [(32000 + i * 1000, fr.skill_damage(BOSS, ME, 500, skill=717, hits=1)) for i in range(2)]   # dano refletido
-ev += [(1000 + i * 500, fr.auto_attack(ME, BOSS, 1000)) for i in range(121)]
-ev += [(1000 + i * 1000, fr.auto_attack(EXE, BOSS, 1000)) for i in range(61) if not 45 <= i <= 47]
-ev += [(1000 + i * 1000, fr.auto_attack(FORA, BOSS, 1000)) for i in range(50)]
+ev += [(1000 + i * 500, fr.auto_attack(ME, BOSS, 3000000)) for i in range(121)]
+ev += [(1000 + i * 1000, fr.auto_attack(EXE, BOSS, 3000000)) for i in range(61) if not 45 <= i <= 47]
+ev += [(1000 + i * 1000, fr.auto_attack(FORA, BOSS, 3000000)) for i in range(50)]
 ev += [(45000, fr.vanish(EXE)), (48500, fr.resurrect(EXE)), (50500, fr.vanish(FORA)), (54500, fr.resurrect(FORA)),
        (52000, fr.vanish(CARD)), (60000, fr.resurrect(CARD))]                # 8 s morto: provável wipe
 c = combat_of(fr.build(ME, sorted(ev, key=lambda e: e[0]), player="Eu")[0], gap_ms=15000)
@@ -480,7 +481,8 @@ check(sorted(p["name"] for p in r["party"]) == ["Card", "Eu", "Exec", "Mago"] an
       [p["name"] for p in r["others"]] == ["Fora"], "grupo e fora do grupo separados")
 check(all("Fora" not in a["who"] + a["detail"] for a in r["alerts"]) and "Demorou para ressuscitar" in o_al,
       "quem está fora do grupo só aparece na lista de fora: %s" % list(o_al))
-check(5000 < r["climax"] < 8000, "clímax depois de 10%% do HP (dano): %d ms" % r["climax"])
+check(5000 < r["climax"] < 8000 and r["hp"] == 800000000 and r["hp_table"],
+      "clímax depois de 10%% do HP (Nível 1, deduzido do dano): %d ms" % r["climax"])
 check("Faltou Bênção" in al and "Exec" in al["Faltou Bênção"]["who"] and "Card" in al["Faltou Bênção"]["detail"],
       "faltou Bênção no Exec (o Cardeal está no grupo)")
 check("Demorou para ressuscitar" in al and "3,5 s" in al["Demorou para ressuscitar"]["detail"],
@@ -511,6 +513,86 @@ check("Mago estava com Clímax" in pol.get("detail", ""), "Pólen curto com o Cl
 txt = dd.report_text(c, r)
 head, _sep, tail = txt.partition("Fora do grupo:")
 check("· Fora —" in tail and "· Fora —" not in head, "relatório separa quem está fora")
+
+# --- Dedo Duro: bater antes da Garra Sombria e Elo Celestial -------------------------
+SKY, SKY2, SKY3, EXE2, BOSS2 = 2101, 2102, 2103, 2104, 60002
+ev = [(0, fr.spawn(SKY, "pc", 4302, "Ceu")), (0, fr.spawn(SKY2, "pc", 4302, "Nuvem")),
+      (0, fr.spawn(SKY3, "pc", 4302, "Estrela")), (0, fr.spawn(EXE2, "pc", 4254, "Garra")),
+      (0, fr.spawn(BOSS2, "mob", BETEL, "Betelgeuse", boss=2))]
+ev += [(100, fr.party_hp(a, 50000, 50000)) for a in (SKY, SKY2, SKY3, EXE2)]
+ev += [(500, fr.skill_use(SKY, SKY, dd.ELO_SKILL)),                       # Elo Celestial: some ao morrer
+       (5000, fr.status(SKY3, dd.ELO, False)),                            # o Elo de antes da gravação acabou
+       (1000, fr.status(BOSS2, dd.MAX_PAIN, True)), (3000, fr.status(BOSS2, dd.MAX_PAIN, False)),
+       (3000, fr.skill_use(EXE2, BOSS2, 5001)), (3000, fr.status(BOSS2, dd.DARK_CLAW, True)),
+       (60000, fr.status(BOSS2, dd.DARK_CLAW, False)),
+       (1500, fr.skill_damage(SKY, BOSS2, 6000000)), (2500, fr.skill_damage(SKY, BOSS2, 6000000)),
+       (2000, fr.skill_damage(SKY2, BOSS2, 1000000)), (10000, fr.skill_damage(SKY2, BOSS2, 15000000)),
+       (30000, fr.vanish(SKY)), (40000, fr.resurrect(SKY))]
+ev += [(3500 + i * 500, fr.skill_damage(a, BOSS2, 2000000)) for i in range(100) for a in (SKY, SKY2, SKY3)
+       if not (a == SKY and 30000 <= 3500 + i * 500 < 40000)]
+c2 = combat_of(fr.build(ME, sorted(ev, key=lambda e: e[0]), player="Eu")[0], gap_ms=15000)
+r2 = dd.analyze(c2, BOSS2)
+al2 = {a["what"]: a for a in r2["alerts"]}
+early = al2.get("Atacou antes da Garra Sombria", {})
+check(early.get("sev") == 2 and "Ceu 12,0M" in early.get("who", "") and "Nuvem" not in early.get("who", "")
+      and "Dor Máxima no chefe desde 00:01,0" in early.get("detail", ""),
+      "bateu forte antes da Garra Sombria (contra Dor Máxima): grave: %s · %s" % (early.get("who"), early.get("detail")))
+elo = meter.skill_name(dd.ELO_SKILL)
+forgot = al2.get("Faltou %s" % elo, {})
+check(forgot.get("sev") == 2 and forgot.get("who", "").startswith("Estrela"),
+      "%s acabou e não foi renovado: grave (%s)" % (elo, forgot.get("who")))
+elo_rows = {b["name"]: b for b in r2["buffs"] if b["buff"] == elo}
+check(not any("Ceu" in a["who"] for a in r2["alerts"] + r2["o_alerts"] if elo in a["what"])
+      and elo_rows.get("Ceu", {}).get("p1") == "100%" and "1ª morte" in elo_rows.get("Ceu", {}).get("note", ""),
+      "%s depois de morrer não é cobrado (sem AP): só conta até a 1ª morte" % elo)
+check(not any("Nuvem" in a["who"] for a in r2["alerts"] if elo in a["what"]),
+      "sem nenhum sinal do %s: desconhecido, não acusa" % elo)
+check(len(elo_rows) == 3, "%s na tabela de buffs da classe" % elo)
+
+# --- HP do chefe pela dificuldade (o replay não diz a dificuldade) ----------------
+hp_of = lambda total, killed: an.boss_hp(c2, BOSS2, total, killed)[:2]
+check(hp_of(844e6, True) == (800000000, "Nível 1") and hp_of(480e6, True) == (500000000, "Selado")
+      and hp_of(300e6, False) == (800000000, "Nível 1") and hp_of(1041e6, False) == (1100000000, "Nível 2")
+      and hp_of(805e6, False) == (800000000, "Nível 1"),
+      "HP do Betelgeuse: morto, o nível do dano; vivo, o nível de costume ou o mínimo que comporta o dano")
+regen = lambda total, killed, secs: an.boss_hp(c2, BOSS2, total, killed, secs * 1000)[1]
+check(regen(1058e6, True, 300) == "Nível 1" and regen(924e6, False, 486) == "Nível 1"
+      and regen(1041e6, False, 58) == "Nível 2",
+      "dedução conta a regeneração do chefe: luta longa pede mais dano para o mesmo nível")
+seen = c2.spawned.pop(BOSS2)              # como se a gravação começasse com o chefe já na tela
+check(hp_of(580e6, True) == (800000000, "Nível 1") and an.caught_midway(c2, BOSS2),
+      "gravação que pegou a luta no meio: o abate só diz o mínimo do HP")
+c2.spawned[BOSS2] = seen
+an.choose_hp(c2, BOSS2, 3)
+check(hp_of(300e6, False) == (1400000000, "Nível 3") and dd.analyze(c2, BOSS2)["hp"] == 1400000000,
+      "dificuldade escolhida na análise vale para o Dedo Duro")
+an.choose_hp(c2, BOSS2, None)
+
+# --- DPS ativo -------------------------------------------------------------------
+check(meter.active_ms([0, 1000, 2000, 10000]) == 4000 and meter.active_ms([]) == 1000,
+      "tempo batendo: pausas de mais de 5 s não contam, cada sequência ganha 1 s")
+st = meter.Stat()
+for t in (0, 1000, 2000, 10000):
+    st.add(100, t)
+check(st.active_ms() == 4000, "tempo batendo calculado na hora da leitura (%d)" % st.active_ms())
+snap2 = c2.snapshot(session=True)
+ceu = next(p for p in snap2["players"] if p["name"] == "Ceu")
+check(ceu["adps"] > ceu["dps"] and ceu["active_ms"] < snap2["duration_ms"],
+      "DPS ativo: sem o tempo morto, maior que o DPS em combate")
+
+# --- linha do tempo ----------------------------------------------------------------
+import timeline as tl  # noqa: E402
+d2 = tl.build(c2, BOSS2)
+lanes = {l["key"]: l for l in d2["lanes"]}
+check(lanes["st%d" % dd.MAX_PAIN]["items"] == [(1000, 3000)] and lanes["st%d" % dd.DARK_CLAW]["on"],
+      "linha do tempo: Dor Máxima e Garra Sombria como faixas no chefe")
+check(d2["starts"] == [(0, None)] and "3,0 s depois do começo da fase" in early.get("detail", ""),
+      "a luta começa quando o chefe aparece (não no 1º golpe): %s" % d2["starts"])
+kinds = collections.Counter(e["kind"] for e in d2["events"])
+check(kinds["death"] == 1 and kinds["res"] == 1 and kinds["claw"] == 1 and kinds["strong"] == 3 and kinds["elo"] == 1,
+      "linha do tempo: morte, ressurreição, Garra, golpes fortes e Elo Celestial: %s" % dict(kinds))
+ts2, vals = tl.series([(1000, 500), (1500, 500), (9000, 1000)], 0, 10000, 1000, 1000)
+check(vals[1] == 1000.0 and vals[9] == 1000.0 and sum(vals) == 2000.0, "curva: dano por segundo por balde")
 
 # --- replays reais do usuario (se existirem) ----------------------------------
 for path, who, expected in LOCAL.get("totals", []):

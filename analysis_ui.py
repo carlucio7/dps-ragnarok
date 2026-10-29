@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Janela de análise completa (Resumo, Jogadores, Monstros, Análise de DPS, Buffs, Mortes, Testes e
-Dedo Duro), atualizada ao vivo.
+"""Janela de análise completa (Resumo, Jogadores, Monstros, Análise de DPS, Linha do tempo, Buffs, Mortes,
+Testes e Dedo Duro), atualizada ao vivo.
 
 Ctrl + roda (ou Ctrl + / −) muda o tamanho de tudo; o layout se reorganiza com a largura.
 """
@@ -25,6 +25,9 @@ OTHERS = "#7c7f8a"
 BUCKETS = [(1000, "1 s"), (2000, "2 s"), (5000, "5 s"), (10000, "10 s")]
 SESSION, LATEST = _("Sessão inteira"), _("Último encontro (acompanha)")
 ZOOMS = (0.8, 0.9, 1.0, 1.1, 1.25, 1.4, 1.6)
+# abas pelo nome (a configuração antiga guardava a posição, na ordem de OLD_TABS)
+TABS = ["resumo", "jogadores", "monstros", "dps", "linha", "buffs", "mortes", "testes", "dedo"]
+OLD_TABS = ["resumo", "jogadores", "monstros", "dps", "buffs", "mortes", "testes", "dedo"]
 FONT_PT = dict(text=10, small=9, head=10, title=13, big=15, tile=17)
 
 
@@ -496,6 +499,47 @@ class Chart(tk.Canvas):
             self.on_select(self.sel)
 
 
+class HpPicker:
+    """Dificuldade do chefe (e com ela o HP), para os chefes com tabela de dificuldades: deduzida do dano
+    ou escolhida aqui. Vale para o Dedo Duro, a Linha do tempo e a tabela de Monstros."""
+
+    def __init__(self, parent, win):
+        self.win = win
+        self.c = self.key = None
+        self.shown = False
+        self.frame = tk.Frame(parent, bg=win.c["panel"])
+        win.label(self.frame, _("Dificuldade:"), color="muted", bg="panel").pack(side="left")
+        self.var = tk.StringVar(win.top, "")
+        self.box = ttk.Combobox(self.frame, textvariable=self.var, state="readonly", width=20,
+                                style="An.TCombobox", font=win.f["text"])
+        self.box.pack(side="left", padx=6)
+        self.box.bind("<<ComboboxSelected>>", lambda e: self.picked())
+
+    def sync(self, c, key):
+        self.c, self.key = c, key
+        levels = an.hp_levels(c, key) if c is not None and key is not None else []
+        if not levels:
+            if self.shown:
+                self.frame.pack_forget()
+                self.shown = False
+            return
+        values = [_("deduzir pelo dano")] + ["%s — %s" % (name, num(hp)) for name, hp in levels]
+        if list(self.box["values"]) != values:
+            self.box["values"] = values
+        i = an.hp_choice(c, key)
+        self.var.set(values[0 if i is None else i + 1])
+        if not self.shown:
+            self.frame.pack(side="left", padx=(12, 0))
+            self.shown = True
+
+    def picked(self):
+        values = list(self.box["values"])
+        if self.var.get() in values and self.c is not None:
+            i = values.index(self.var.get())
+            an.choose_hp(self.c, self.key, None if i == 0 else i - 1)
+            self.win.refresh(force=True)
+
+
 class HBars(tk.Canvas):
     """Barras horizontais: um jogador por linha (como "Dano total por jogador" do site)."""
 
@@ -735,14 +779,26 @@ class AnalysisWindow:
         self.build_players()
         self.build_monsters()
         self.build_dps()
+        import timeline_ui
+        self.timeline = timeline_ui.TimelineTab(self, self.nb)
         self.build_buffs()
         self.build_deaths()
         self.build_tests()
         self.build_dedo()
+        saved = self.app.cfg.get("an_tab", 0)
+        if isinstance(saved, int) and 0 <= saved < len(OLD_TABS):
+            saved = OLD_TABS[saved]
+        if saved in TABS:
+            self.select_tab(saved)
+
+    def tab_name(self):
         try:
-            self.nb.select(int(self.app.cfg.get("an_tab", 0)))
-        except (tk.TclError, ValueError):
-            pass
+            return TABS[self.nb.index(self.nb.select())]
+        except (tk.TclError, IndexError):
+            return TABS[0]
+
+    def select_tab(self, name):
+        self.nb.select(TABS.index(name))
 
     def section(self, parent, text, bg="panel"):
         lbl = self.label(parent, text, "head", bg=bg, anchor="w")
@@ -755,8 +811,8 @@ class AnalysisWindow:
         tab = ScrollFrame(outer, self).inner
         self.sum_title = self.section(tab, "")
         self.sum_tiles = Tiles(tab, self, [
-            ("dealt", _("Seu dano")), ("dps", _("Seu DPS (em combate)")), ("eff", _("DPS do 1º ao último golpe")),
-            ("hits", _("Acertos")), ("best", _("Maior golpe")), ("top", _("Skill mais usada")),
+            ("dealt", _("Seu dano")), ("dps", _("Seu DPS (em combate)")), ("adps", _("Seu DPS ativo")),
+            ("eff", _("DPS do 1º ao último golpe")), ("hits", _("Acertos")), ("best", _("Maior golpe")), ("top", _("Skill mais usada")),
             ("kills", _("Abates (golpe fatal)")), ("taken", _("Dano recebido")), ("deaths", _("Mortes"))], min_w=165,
             dense=True)
         self.sum_tiles.pack(fill="x", padx=10)
@@ -793,7 +849,8 @@ class AnalysisWindow:
         self.section(upper, _("Jogadores — dano de invocações e skills de chão conta para o dono"))
         self.t_players = Table(upper, self, [
             ("name", _("Jogador"), 170, "w", "text"), ("job", _("Classe"), 130, "w", "text"),
-            ("total", _("Dano"), 120, "e", "big"), ("dps", "DPS", 105, "e", "big"), ("share", "%", 60, "e", "pct"),
+            ("total", _("Dano"), 120, "e", "big"), ("dps", "DPS", 105, "e", "big"),
+            ("adps", _("DPS ativo"), 105, "e", "big"), ("share", "%", 60, "e", "pct"),
             ("hits", _("Acertos"), 70, "e", "int"), ("misses", _("Erros"), 55, "e", "int"),
             ("max_hit", _("Maior golpe"), 110, "e", "big"), ("mobs", _("Monstros"), 75, "e", "int"),
             ("kills", _("Abates"), 60, "e", "int")], height=7, on_select=self.player_selected, swatch=True)
@@ -997,7 +1054,7 @@ class AnalysisWindow:
 
     def tab_changed(self):
         try:
-            self.app.cfg["an_tab"] = self.nb.index(self.nb.select())
+            self.app.cfg["an_tab"] = self.tab_name()
         except tk.TclError:
             pass
         self.refresh(force=True)
@@ -1025,8 +1082,8 @@ class AnalysisWindow:
         if self.mvp_var.get() != (self.app.cfg.get("targets") == "mvp"):
             self.mvp_var.set(self.app.cfg.get("targets") == "mvp")       # mudou pelo menu do widget
         self.update_scope_list(c)
-        tab = self.nb.index(self.nb.select())
-        if tab == 6:
+        tab = self.tab_name()
+        if tab == "testes":
             self.refresh_tests()              # o histórico não depende do replay aberto
         if c is None:
             self.title_lbl.configure(text=_("Análise"))
@@ -1055,19 +1112,21 @@ class AnalysisWindow:
         ht.put("players", "%d" % len(self.players_rows))
         ht.put("events", "%d" % len(hs))
         ht.put("recorded", dur(c.now))
-        if tab == 0:
+        if tab == "resumo":
             self.refresh_summary(c)
-        elif tab == 1:
+        elif tab == "jogadores":
             self.refresh_players(c)
-        elif tab == 2:
+        elif tab == "monstros":
             self.refresh_monsters(c)
-        elif tab == 3:
+        elif tab == "dps":
             self.refresh_dps(c)
-        elif tab == 4:
+        elif tab == "linha":
+            self.timeline.refresh(c)
+        elif tab == "buffs":
             self.refresh_buffs(c)
-        elif tab == 5:
+        elif tab == "mortes":
             self.refresh_deaths(c)
-        elif tab == 7:
+        elif tab == "dedo":
             self.refresh_dedo(c)
 
     def refresh_summary(self, c):
@@ -1077,6 +1136,8 @@ class AnalysisWindow:
         t = self.sum_tiles
         t.put("dealt", full(sm["dealt"]), _("%s do grupo") % _fmt("pct", sm["share"]), self.c["accent"])
         t.put("dps", full(round(sm["dps"])), _("tempo em combate %s") % dur(sm["combat_ms"]))
+        t.put("adps", full(round(sm["active_dps"])) if sm["active_dps"] else "—",
+              _("só o tempo batendo: %s") % dur(sm["active_ms"]) if sm["active_ms"] else "")
         t.put("eff", full(round(sm["effective_dps"])) if sm["effective_dps"] else "—", _("como no Ragna Recap"))
         t.put("hits", "%d" % sm["hits"], _("%d erros · %d críticos") % (sm["misses"], sm["crits"]))
         if sm["best"]:
@@ -1456,6 +1517,7 @@ class AnalysisWindow:
         self.dd_box.bind("<<ComboboxSelected>>", lambda e: self.dd_pick())
         self.dd_copy = ttk.Button(bar, text=_("Copiar relatório"), style="An.TButton", command=self.copy_dedo)
         self.dd_copy.pack(side="right")
+        self.dd_hp = HpPicker(bar, self)
         self.dd_fights = {}
         # o chefe em destaque
         band = _mix(c["tile"], c["accent"], 0.16)
@@ -1588,6 +1650,7 @@ class AnalysisWindow:
             self.dd_var.set(label)
         if self.dd_key is None:
             self.dd_result = None
+            self.dd_hp.sync(c, None)
             self.dd_title.configure(text=_("Nenhuma luta contra chefe neste recorte"))
             self.dd_sub.configure(text=_("O Dedo Duro olha as lutas contra MVPs, chefes de instância e bonecos de treino."))
             self.dd_counts.configure(text="")
@@ -1599,7 +1662,8 @@ class AnalysisWindow:
                 for t in side["tables"].values():
                     t.set_rows([], lambda r: 0)
             return
-        sig = (id(c), c.version, self.dd_key, self.rng)
+        self.dd_hp.sync(c, self.dd_key)
+        sig = (id(c), c.version, self.dd_key, self.rng, an.hp_choice(c, self.dd_key))
         if self.dd_cache[0] != sig:
             self.dd_cache = (sig, dd.analyze(c, self.dd_key, self.rng))
         r = self.dd_result = self.dd_cache[1]

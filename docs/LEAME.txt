@@ -3,8 +3,9 @@ DPS Ragnarok {VERSION} — medidor de DPS para Ragnarok Online (ROLatam)
 
 Un widget pequeño que muestra tu DPS y el ranking de daño del grupo en tiempo
 real, leyendo la grabación de replay del propio juego. También tiene una ventana
-de análisis completo (por jugador, por monstruo, buffs, muertes, pruebas de
-build) y la pestaña "Soplón", que señala qué faltó en las peleas contra jefes.
+de análisis completo (por jugador, por monstruo, línea de tiempo, buffs, muertes,
+pruebas de build) y la pestaña "Soplón", que señala qué faltó en las peleas
+contra jefes.
 
 Idiomas: português, English, español (clic derecho › Idioma).
 

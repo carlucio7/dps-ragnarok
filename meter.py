@@ -30,6 +30,22 @@ FUSION_REARM = 0.32
 DEDUP_MS = 200
 FRIENDLY_KINDS = {"pc", "homun", "merc", "elem", "abr", "bionic", "pet"}
 NOW_WINDOW_MS = 5000          # janela do "DPS agora"
+ACTIVE_GAP_MS = 5000          # DPS ativo: pausa maior que isso sem bater não conta (morto, esperando, correndo)
+ACTIVE_TAIL_MS = 1000         # cada sequência de golpes ganha 1 s (o último golpe também levou tempo)
+
+
+def active_ms(times):
+    """Tempo em que alguém estava de fato batendo, com os tempos dos golpes em ordem."""
+    total, run0, run1 = 0, None, None
+    for t in times:
+        if run1 is None or t - run1 > ACTIVE_GAP_MS:
+            if run1 is not None:
+                total += run1 - run0 + ACTIVE_TAIL_MS
+            run0 = t
+        run1 = max(run1, t) if run1 is not None else t
+    if run1 is not None:
+        total += run1 - run0 + ACTIVE_TAIL_MS
+    return max(1000, total)
 
 
 def _load(name):
@@ -61,7 +77,8 @@ def game_name(kind, ident, pt=None):
 # Nomes do jogo citados nos textos da tela (em português no catálogo do i18n): em inglês e espanhol
 # viram o nome que o jogador vê no jogo dele. (texto em português, tipo, id)
 TERMS = [("União Solar, Lunar e Estelar", "skill", 444), ("União Solar", "skill", 444), ("União", "skill", 444),
-         ("Mestre Taekwon", "job", 4047), ("Executor", "job", 4254), ("Engenheiro", "job", 4253),
+         ("Mestre Taekwon", "job", 4047), ("Mestre Celestial", "job", 4302), ("Executor", "job", 4254),
+         ("Engenheiro", "job", 4253),
          ("Magus", "job", 4255), ("Cardeal", "job", 4256), ("Asceta", "job", 4303),
          ("Garra Sombria", "skill", 5001), ("Dor Máxima", "skill", 716), ("Florescer", "skill", 5222),
          ("Pólen", "status", 1183), ("Clímax", "skill", 5232), ("Potencializar Veneno", "skill", 2021),
@@ -319,11 +336,13 @@ def job_name(jid):
 
 
 class Stat:
-    __slots__ = ("total", "hits", "max_hit", "crits", "first", "last")
+    __slots__ = ("total", "hits", "max_hit", "crits", "first", "last", "active", "run0", "run1")
 
     def __init__(self):
         self.total = self.hits = self.max_hit = self.crits = 0
         self.first = self.last = None
+        self.active = 0                   # tempo batendo das sequências já fechadas (ver active_ms)
+        self.run0 = self.run1 = None
 
     def add(self, dmg, t, crit=False):
         self.total += dmg
@@ -335,6 +354,16 @@ class Stat:
         if self.first is None:
             self.first = t
         self.last = t
+        if self.run1 is None or t - self.run1 > ACTIVE_GAP_MS:
+            if self.run1 is not None:
+                self.active += self.run1 - self.run0 + ACTIVE_TAIL_MS
+            self.run0 = t
+        if self.run1 is None or t > self.run1:
+            self.run1 = t
+
+    def active_ms(self):
+        open_run = self.run1 - self.run0 + ACTIVE_TAIL_MS if self.run1 is not None else 0
+        return max(1000, self.active + open_run)
 
 
 class Hit:
@@ -381,6 +410,7 @@ class Combat:
         self.effect_log = collections.defaultdict(list)   # aid aliado -> [(t, id do efeito)]
         self.party = set()            # membros do grupo (quem recebe 0x080e) — você entra à parte
         self.res_log = []             # (t, aid) de cada ressurreição
+        self.spawned = {}             # AID -> quando apareceu pela primeira vez (começo de cada fase de um MVP)
         self.status_val = {}          # (aid, efst, início) -> val1 (nível/força do efeito)
         self.status_first = {}        # (aid, efst) -> (t, ligou) do primeiro aviso visto na gravação
         self.status_total = {}        # efst -> maior duração (ms) que o servidor mandou
@@ -511,6 +541,7 @@ class Combat:
         elif pid in rrf.SPAWN_PACKETS:
             e = rrf.parse_spawn(pid, d)
             if e is not None:
+                self.spawned.setdefault(e.aid, t)
                 self.add_entity(e)
                 if e.kind == "pc":
                     self.set_option(e.aid, t, e.option)
@@ -887,9 +918,11 @@ class Combat:
         group_total = sum(s.total for _, s in rows) or 1
         players = [dict(aid=a, name=self.name_of(a), me=a == self.me, total=s.total,
                         dps=s.total * 1000.0 / dur, share=s.total / group_total,
+                        adps=s.total * 1000.0 / s.active_ms(), active_ms=s.active_ms(),
                         hits=s.hits, max_hit=s.max_hit) for a, s in rows]
         mine = enc.by_source.get(self.me)
         my_total = mine.total if mine else 0
+        my_active = mine.active_ms() if mine else 0
         skills = sorted(enc.by_skill.items(), key=lambda kv: -kv[1].total)
         skill_rows = []
         for (label, sid), s in skills:
@@ -903,6 +936,7 @@ class Combat:
         return dict(
             live=live, duration_ms=dur, start=enc.start,
             my_total=my_total, my_dps=my_total * 1000.0 / dur,
+            my_active_ms=my_active, my_adps=my_total * 1000.0 / my_active if my_active else 0.0,
             my_hits=mine.hits if mine else 0, my_max=mine.max_hit if mine else 0,
             my_crits=mine.crits if mine else 0,
             dps_now=self.dps_now() if live else 0.0,

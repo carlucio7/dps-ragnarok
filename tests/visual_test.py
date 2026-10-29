@@ -60,20 +60,20 @@ app.set_scale(1.0)
 app.open_analysis()
 an_win = app.analysis
 an_win.top.geometry("1120x820+60+40")
-an_win.nb.select(0)
+an_win.select_tab("resumo")
 an_win.refresh(force=True)
 s.shot_window(an_win.top, "11_analise_resumo")
-an_win.nb.select(1)
+an_win.select_tab("jogadores")
 for i, name in enumerate(["habilidades", "monstros", "linha_do_tempo"]):
     an_win.player_nb.select(i)
     an_win.refresh(force=True)
     s.shot_window(an_win.top, "12_analise_jogadores_%d_%s" % (i, name))
-an_win.nb.select(2)
+an_win.select_tab("monstros")
 for i, name in enumerate(["dano_por_jogador", "linha_do_tempo", "skills_contra", "skills_do_monstro"]):
     an_win.mob_nb.select(i)
     an_win.refresh(force=True)
     s.shot_window(an_win.top, "13_analise_monstro_%d_%s" % (i, name))
-an_win.nb.select(3)
+an_win.select_tab("dps")
 an_win.refresh(force=True)
 s.shot_window(an_win.top, "14_analise_dps")
 ts = an_win.dps_chart.data[0]
@@ -83,23 +83,42 @@ s.shot_window(an_win.top, "15_analise_dps_trecho")
 an_win.top.geometry("760x560+60+40")
 an_win.refresh(force=True)
 s.shot_window(an_win.top, "16_analise_pequena")
-an_win.nb.select(0)
+an_win.select_tab("resumo")
 an_win.refresh(force=True)
 s.shot_window(an_win.top, "17_analise_pequena_resumo")
 an_win.top.geometry("1400x900+60+40")
 an_win.set_zoom(2)
-an_win.nb.select(3)
+an_win.select_tab("dps")
 an_win.refresh(force=True)
 s.shot_window(an_win.top, "18_analise_zoom")
 an_win.set_zoom(0)
 an_win.top.geometry("1180x860+60+40")
-for i, name in ((4, "buffs"), (5, "mortes"), (6, "testes")):
-    an_win.nb.select(i)
+for name in ("buffs", "mortes", "testes"):
+    an_win.select_tab(name)
     an_win.refresh(force=True)
-    s.shot_window(an_win.top, "18_analise_%d_%s" % (i, name))
+    s.shot_window(an_win.top, "18_analise_%s" % name)
+# linha do tempo: a luta toda, um trecho aproximado e com tudo ligado
+an_win.select_tab("linha")
+an_win.refresh(force=True)
+s.shot_window(an_win.top, "22_linha_do_tempo")
+tl_tab = an_win.timeline
+if tl_tab.data:
+    d = tl_tab.data
+    first = next((e["t"] for e in d["events"] if e["kind"] in ("reflect", "death")), d["start"])
+    tl_tab.chart.view = (first - 2500, first + 2500)
+    tl_tab.chart.redraw()
+    s.shot_window(an_win.top, "23_linha_do_tempo_zoom")
+    for lane in d["lanes"]:
+        tl_tab.on[lane["key"]] = True
+    tl_tab.on["taken"] = True
+    tl_tab.players_on.update(d["players"][:4])
+    tl_tab.panel_sig = None
+    an_win.refresh(force=True)
+    tl_tab.chart.reset_view()
+    s.shot_window(an_win.top, "24_linha_do_tempo_tudo")
 # Dedo Duro: grupo (alertas e cada detalhe) e fora do grupo
 an_win.top.geometry("1180x860+60+40")
-an_win.nb.select(7)
+an_win.select_tab("dedo")
 an_win.refresh(force=True)
 s.shot_window(an_win.top, "19_dedo_duro")
 sub = an_win.dd_group["sub"]

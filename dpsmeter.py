@@ -90,6 +90,7 @@ CONFIG_VERSION = 2
 DEFAULTS = {
     "theme": "Grafite", "scale": 1.0, "alpha": 0.92, "pinned": True,
     "rows": 6, "gap_s": 15, "tab": "group", "session": True, "show_pct": False,
+    "rate": "combat",      # DPS: "combat" = dano / tempo da luta; "active" = dano / tempo em que cada um bateu
     "folder": None, "x": None, "y": None, "v": CONFIG_VERSION, "width": BASE_W,
     "an_geometry": None, "an_tab": 0, "an_zoom": 1.0,
     "auto_tests": True, "alert_buffs": True, "alert_death": True, "alert_fusion": True, "targets": "all",
@@ -503,15 +504,19 @@ class DpsApp:
 
         # número grande; as linhas da direita têm prioridade, o número encolhe se precisar
         rx = W - 12 * s
+        active = self.cfg["rate"] == "active"
         lines = []
         if snap:
             if snap["live"]:
                 lines.append((_("agora %s/s") % num(snap["dps_now"]), t["accent"]))
             lines.append((_("total %s") % num(snap["my_total"]), t["fg"]))
-            label = _("em combate") if session else (_("ao vivo") if snap["live"] else _("duração"))
-            lines.append((_("%s %s") % (label, dur(snap["duration_ms"])), t["muted"]))
+            if active:
+                lines.append((_("batendo %s") % dur(snap["my_active_ms"]), t["muted"]))
+            else:
+                label = _("em combate") if session else (_("ao vivo") if snap["live"] else _("duração"))
+                lines.append((_("%s %s") % (label, dur(snap["duration_ms"])), t["muted"]))
         lines_w = max([self.fonts["small"].measure(txt) for txt, _c in lines] + [0])
-        big_text = num(snap["my_dps"]) if snap else "—"
+        big_text = num(snap["my_adps"] if active else snap["my_dps"]) if snap else "—"
         room = rx - lines_w - 10 * s - 12 * s
         unit_w = self.fonts["unit"].measure("DPS") + 4 * s
         big_font, show_unit = self.fonts["big"], True
@@ -627,12 +632,13 @@ class DpsApp:
             for p in shown:
                 rank = players.index(p) + 1
                 pct = "%.0f%%" % (p["share"] * 100)
+                rate = p["adps"] if self.cfg["rate"] == "active" else p["dps"]
                 if self.cfg["show_pct"]:
                     right = pct
                 elif self.base_w() >= 340:
-                    right = "%s/s · %s" % (num(p["dps"]), pct)
+                    right = "%s/s · %s" % (num(rate), pct)
                 else:
-                    right = "%s/s" % num(p["dps"])
+                    right = "%s/s" % num(rate)
                 rows.append(dict(label="%d. %s" % (rank, p["name"]), value=num(p["total"]), right=right,
                                  frac=p["total"] / (top or 1), me=p["me"]))
             if not players:
@@ -891,6 +897,22 @@ class DpsApp:
         self.enc_back = 0
         self.reload()
 
+    def rate_menu(self, parent):
+        rm = self.new_menu(parent)
+        var = self.keep(tk.StringVar(self.root, self.cfg["rate"]))
+        for value, label in (("combat", _("Em combate (dano ÷ tempo da luta)")),
+                             ("active", _("Ativo (dano ÷ tempo em que cada um estava batendo)"))):
+            rm.add_radiobutton(label=label, variable=var, value=value, command=lambda v=value: self.set_rate(v))
+        rm.add_separator()
+        rm.add_command(label=_("Ativo: pausas de mais de 5 s sem bater não contam (morto, esperando, correndo)"),
+                       state="disabled")
+        return rm
+
+    def set_rate(self, value):
+        self.cfg["rate"] = value
+        self.save()
+        self.dirty = True
+
     def toggle_pct(self):
         self.cfg["show_pct"] = not self.cfg["show_pct"]
         self.save()
@@ -1010,6 +1032,7 @@ class DpsApp:
         m.add_cascade(label=_("Contar dano em"), menu=self.targets_menu(m))
         pct = self.keep(tk.BooleanVar(self.root, cfg["show_pct"]))
         m.add_checkbutton(label=_("Grupo: mostrar % em vez de DPS"), variable=pct, command=self.toggle_pct)
+        m.add_cascade(label=_("DPS"), menu=self.rate_menu(m))
         m.add_command(label=_("Zerar"), command=self.reset)
         m.add_separator()
         m.add_command(label=_("Análise completa…"), command=self.open_analysis)

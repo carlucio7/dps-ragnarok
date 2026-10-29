@@ -3,8 +3,9 @@ DPS Ragnarok {VERSION} — medidor de DPS para Ragnarok Online (ROLatam)
 
 Um widget pequeno que mostra o seu DPS e o ranking de dano do grupo em tempo
 real, lendo a gravação de replay do próprio jogo. Tem também uma janela de
-análise completa (por jogador, por monstro, buffs, mortes, testes de build) e a
-aba "Dedo Duro", que aponta o que faltou nas lutas contra chefes.
+análise completa (por jogador, por monstro, linha do tempo, buffs, mortes,
+testes de build) e a aba "Dedo Duro", que aponta o que faltou nas lutas contra
+chefes.
 
 Idiomas: português, English, español (botão direito › Idioma).
 
