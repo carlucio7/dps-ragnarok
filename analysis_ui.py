@@ -1189,9 +1189,11 @@ class AnalysisWindow:
         self.t_drop_ground.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         f, _lbl = box(1, 1, _("Por item"))
         self.t_drop_items = Table(f, self, [
-            ("name", _("Item"), 210, "w", "text"), ("fell", _("Caíram"), 70, "e", "int"),
-            ("mine", _("Você pegou"), 90, "e", "int"), ("mvp", _("MVP"), 50, "e", "int")], height=6)
+            ("star", "★", 34, "center", "text"), ("name", _("Item"), 200, "w", "text"),
+            ("fell", _("Caíram"), 70, "e", "int"), ("mine", _("Você pegou"), 90, "e", "int"),
+            ("mvp", _("MVP"), 50, "e", "int")], height=6)
         self.t_drop_items.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        self.t_drop_items.tree.bind("<Button-1>", self.drop_star_click, add="+")
 
     def refresh_drops(self, c):
         rng = self.rng
@@ -1231,7 +1233,34 @@ class AnalysisWindow:
         self.t_drop_mine.set_rows(mine_rows, lambda r: r["key"])
         self.t_drop_others.set_rows(other_rows, lambda r: r["key"])
         self.t_drop_ground.set_rows(ground_rows, lambda r: r["key"])
+        favs = set(self.app.cfg.get("drop_favs") or [])
+        for r in items:
+            r["star"] = "★" if r["item"] in favs else "☆"
+        items.sort(key=lambda r: r["item"] not in favs)        # favoritos sempre no topo (mesma ordem no resto)
         self.t_drop_items.set_rows(items, lambda r: r["item"], lambda r: ["me"] if r["mine"] else [])
+
+    def drop_star_click(self, e):
+        """Clique na estrela de "Por item": marca/desmarca o favorito (o widget usa a mesma lista)."""
+        tree = self.t_drop_items.tree
+        if tree.identify_column(e.x) != "#1":
+            return None
+        row = tree.identify_row(e.y)
+        if not row:
+            return None
+        try:
+            item = int(row)
+        except ValueError:
+            return None
+        favs = list(self.app.cfg.get("drop_favs") or [])
+        if item in favs:
+            favs.remove(item)
+        else:
+            favs.append(item)
+        self.app.cfg["drop_favs"] = favs
+        self.app.save()
+        self.app.dirty = True
+        self.refresh(force=True)
+        return "break"
 
     # ------------------------------------------------------------ XP
 
@@ -1274,6 +1303,7 @@ class AnalysisWindow:
             self.xp_mode_btns[key] = rb
             if key == "fixo":
                 self.xp_fixed = tk.StringVar(self.top, "")
+                self.xp_fixed.trace_add("write", lambda *_a: self.xp_save_soon())
                 ent = tk.Entry(row, textvariable=self.xp_fixed, width=6, font=self.f["text"], bg=c["btn"],
                                fg=c["fg"], insertbackground=c["fg"], relief="flat")
                 ent.pack(side="left", padx=6, ipady=2)
@@ -1307,7 +1337,8 @@ class AnalysisWindow:
             seen = self.label(lst, "", "small", "muted", "tile", anchor="w")
             seen.grid(row=i, column=3, sticky="w", padx=(10, 0))
             self.xp_on[bdef["key"]], self.xp_pct[bdef["key"]], self.xp_seen[bdef["key"]] = var, pv, seen
-            if bdef["key"] == "gear":                 # o % vem do texto dos itens vestidos
+            pv.trace_add("write", lambda *_a: self.xp_save_soon())     # o % digitado vale sem precisar de Enter
+            if bdef["key"] in ("gear", "gear_event"):  # o % vem do texto dos itens vestidos
                 pv.set(_("auto"))
                 ent.configure(state="disabled", disabledbackground=c["tile"], disabledforeground=c["muted"])
         lst.columnconfigure(3, weight=1)
@@ -1342,7 +1373,7 @@ class AnalysisWindow:
         sets = xp.settings(cfg)
         for key, st in sets.items():
             self.xp_on[key].set(st["on"])
-            if key != "gear":
+            if key not in ("gear", "gear_event"):
                 self.xp_pct[key].set("%g" % st["pct"])
         self.xp_mode.set(cfg.get("xp_mode") if cfg.get("xp_mode") in xp.MODES else "lista")
         if isinstance(cfg.get("xp_fixed"), (int, float)):
@@ -1350,6 +1381,17 @@ class AnalysisWindow:
         pct = sets["manual"]["pct"]
         self.xp_manual.set(next(("%s (+%d%%)" % (_(n), p) for n, p in xp.MANUALS if p == pct), ""))
         self.xp_loaded = True
+
+    def xp_save_soon(self):
+        """Salva o que foi digitado meio segundo depois da última tecla (o widget acompanha)."""
+        if not getattr(self, "xp_loaded", False):
+            return
+        if getattr(self, "_xp_after", None):
+            try:
+                self.top.after_cancel(self._xp_after)
+            except tk.TclError:
+                pass
+        self._xp_after = self.top.after(600, self.xp_save)
 
     def xp_save(self):
         def number(text):
@@ -1425,9 +1467,15 @@ class AnalysisWindow:
                 else ("+" if nxt["gain"] >= 0 else "") + full(nxt["gain"]), when)
         # bônus detectados nesta gravação
         seen = xp.detected(c, cfg)
-        event_on = xp.settings(cfg)["server"]["on"]
+        event_on = xp.settings(cfg)["gear_event"]["on"]
+        worn = c.worn_at(self.rng[1] if self.rng else c.now)
         for b in xp.BONUSES:
-            if b["status"] is None:
+            if b["key"] == "gear_event":
+                with_ev, who = xp.gear_bonus(worn, True)
+                without = xp.gear_bonus(worn, False)[0]
+                text = (_("+%d%% se o evento dos itens ainda vale: %s") % (with_ev - without, ", ".join(
+                    meter.item_name(i) for i in who)) if with_ev > without else _("nenhum item vestido tem bônus de evento"))
+            elif b["status"] is None:
                 text = _("marque se valia")
             elif b["key"] == "gear":
                 pct, who = xp.gear_bonus(c.worn_at(self.rng[1] if self.rng else c.now), event_on)
@@ -1438,6 +1486,9 @@ class AnalysisWindow:
                     text = _("+%d%%: %s") % (pct, ", ".join(meter.item_name(i) for i in who))
                 else:
                     text = _("nenhum item vestido dá XP")
+            elif b["key"] == "miracle" and seen.get(b["key"]) and any(m[3] is not None for m in c.miracles):
+                text = _("detectado (%s); a confirmar depois de morte ou troca de mapa") % dec(
+                    "%.0f%%" % (100 * seen[b["key"]]))
             elif seen.get(b["key"]):
                 text = _("detectado (%s da gravação)") % dec("%.0f%%" % (100 * seen[b["key"]]))
             else:

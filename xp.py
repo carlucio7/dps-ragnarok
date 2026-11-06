@@ -143,6 +143,9 @@ BONUSES = [
     dict(key="miracle", name="Milagre Solar, Lunar e Estelar (alvos estelares)", pct=100, status="milagre", on=True),
     dict(key="gear", name="Equipamentos, visuais e cartas (texto dos itens)", pct=0, status="equipamento", on=True,
          val=True),
+    # bônus "[Durante o Evento]" do texto dos itens (ex.: Carta Baby Shark): o evento do item costuma acabar antes
+    # do item sair do jogo, então fica desligado até a pessoa marcar
+    dict(key="gear_event", name="Bônus de evento dos itens ([Durante o Evento])", pct=0, status=None, on=False),
     dict(key="other", name="Outros (equipamentos, cartas, alvos do ódio...)", pct=0, status=None, on=False),
 ]
 # manuais de XP (consumíveis; não acumulam entre si), com o bônus do texto do item na LATAM (Divine Pride)
@@ -164,8 +167,8 @@ def settings(cfg):
 
 def windows(c, cfg=None):
     """Quando cada bônus detectável esteve ativo em quem grava: {chave: [(início, fim, valor)]}.
-    cfg: para saber se o evento do servidor está marcado (bônus "[Durante o Evento]" dos itens)."""
-    event_on = settings(cfg or {})["server"]["on"]
+    cfg: para saber se os bônus "[Durante o Evento]" dos itens estão marcados."""
+    event_on = settings(cfg or {})["gear_event"]["on"]
     out = {}
     for b in BONUSES:
         if b["status"] is None:

@@ -867,6 +867,41 @@ c = combat_of(fr.build(ME, ev)[0])
 check(c.miracle_windows() == [(5000, c.now)] and any(a[2] == "miracle" for a in c.alerts)
       and c.lasting(984) == [(1000, c.now)],
       "Milagre: status 160 de 1 h vira o Milagre (com aviso); ele e o VIP não acabam com a morte -> %s" % c.miracle_windows())
+def mapmove(name, x=100, y=100):
+    return struct.pack("<H16sHH", rrf.P_MAPMOVE, name.encode() + b".gat", x, y)
+
+
+ev = [(5000, fr.status(ME, meter.MIRACLE_EFST, True, 3600000, 3600000, 1)),
+      (20000, fr.status(ME, meter.MIRACLE_EFST, True, 3600000, 3600000, 1)),     # proc de novo: mais 1 hora
+      (20300, fr.status(ME, meter.MIRACLE_EFST, True, 3600000, 3600000, 1)),     # o mesmo proc repetido
+      (30000, mapmove("prt_fild08")),                                            # teleporte no mesmo mapa
+      (40000, mapmove("aldebaran")),                                             # outro mapa: segue, a confirmar
+      (50000, fr.skill_damage(ME, 77, 1))]
+c = combat_of(fr.build(ME, ev)[0])
+check(c.miracle_windows() == [(5000, 50000)] and sum(a[2] == "miracle" for a in c.alerts) == 2
+      and c.miracle_left() is not None and c.miracle_uncertain() == 40000,
+      "Milagre: proc de novo renova (com aviso); outro mapa não tira, só deixa a confirmar -> %s %s"
+      % (c.miracle_windows(), c.miracle_uncertain()))
+c = combat_of(fr.build(ME, ev[:5] + [(45000, fr.status(ME, meter.MIRACLE_EFST, False)),
+                                     (50000, fr.skill_damage(ME, 77, 1))])[0])
+check(c.miracle_windows() == [(5000, 45000)] and c.miracle_left() is None,
+      "Milagre: quando o jogo avisa que acabou, acaba -> %s" % c.miracle_windows())
+c = combat_of(fr.build(ME, [(5000, fr.status(ME, meter.MIRACLE_EFST, True, 3600000, 3600000, 1)),
+                            (8000, fr.vanish(ME, 1)), (9000, fr.status(ME, meter.MIRACLE_EFST, True, 3600000,
+                                                                       3600000, 1)),
+                            (12000, fr.skill_damage(ME, 77, 1))])[0])
+check(c.miracle_uncertain() is None and c.miracle_windows() == [(5000, 12000)],
+      "Milagre: depois de morrer fica a confirmar até um novo proc confirmar")
+# 1.2.2: o rodapé travava em "1 min" quando a hora acabava (o jogo nunca manda o "acabou")
+c = combat_of(fr.build(ME, [(5000, fr.status(ME, meter.MIRACLE_EFST, True, 3600000, 3600000, 1)),
+                            (3606000, fr.skill_damage(ME, 77, 1))])[0])
+check(c.miracle_left() is None and c.miracle_windows() == [(5000, 3605000)],
+      "Milagre: 1 hora depois do último proc ele acaba e sai do rodapé -> %s" % c.miracle_windows())
+c = combat_of(fr.build(ME, [(5000, fr.status(ME, meter.MIRACLE_EFST, True, 3600000, 3600000, 1)),
+                            (3000000, fr.status(ME, meter.MIRACLE_EFST, True, 3600000, 3600000, 1)),
+                            (3700000, fr.skill_damage(ME, 77, 1))])[0])
+check(c.miracle_left() == 3000000 + 3600000 - 3700000,
+      "Milagre: proc aos 50 min renova a hora (não trava no fim da primeira) -> %s" % c.miracle_left())
 items = {31975: {"identifiedDisplayName": "Visual Batata-doce na Boca", "identifiedDescriptionName": {
             1: "[Durante o Evento]", 2: "EXP obtida por monstros +5%.", 3: "-", 4: "Conjunto",
             5: "[Visual] Chapéu do Festival da Colheita", 6: "Dano físico +10%.",

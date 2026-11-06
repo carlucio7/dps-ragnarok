@@ -111,6 +111,7 @@ DEFAULTS = {
     "xp_bonuses": {},      # {bônus: {"on", "pct"}} da lista de bônus de XP (xp.BONUSES)
     "xp_mode": "lista",    # "lista" (bônus marcados), "medido" ou "fixo"
     "xp_fixed": None,      # bônus fixo (%) do modo "fixo"
+    "drop_favs": [],       # itens favoritos (ficam no topo da aba Drops)
 }
 
 
@@ -274,6 +275,8 @@ class DpsApp:
         self.miracle_at = -1e9                 # quando o Milagre ativou (o widget brilha por uns segundos)
         self.press_xy = None
         self.enc_back = 0                   # 0 = encontro atual, 1 = anterior...
+        self.drop_scroll = 0                # primeira linha mostrada na aba Drops (roda do mouse)
+        self.drop_view = (0, 0, 0)          # (primeira, linhas, total) para a barra de rolagem
         self.hover = self.pressed = self.drag = self.resize = None
         self.hwnd = None
         self.menu = None
@@ -672,7 +675,10 @@ class DpsApp:
             text, color = hint, t["fg"]
         elif not self.alert and cb is not None and cb.miracle_left() is not None:
             left = cb.miracle_left()
-            text, color = _("★ Milagre · %d min") % max(1, round(left / 60000.0)), "#fbbf24"
+            doubt = cb.miracle_uncertain() is not None        # depois de morrer ou trocar de mapa
+            text = (_("★ Milagre? · %d min (a confirmar)") if doubt else _("★ Milagre · %d min")) % max(
+                1, round(left / 60000.0))
+            color = "#fbbf24"
             live = True
         if self.alert:
             # aviso (buff que acabou, morte) no lugar do status, piscando
@@ -793,12 +799,16 @@ class DpsApp:
             cb = self.combat()
             enc = None if self.cfg["session"] else cb.encounter(self.enc_back)
             rng = None if enc is None else (enc.start - 2000, enc.last + 30000)
+            favs = set(self.cfg.get("drop_favs") or [])
             items = [r for r in cb.drop_summary(rng) if r["mine"] or r["mvp"]]
+            items.sort(key=lambda r: (r["item"] not in favs, -(r["mine"] + r["mvp"]), r["name"]))
             top = max([r["mine"] + r["mvp"] for r in items] + [1])
-            for r in items[:n]:
+            first = max(0, min(self.drop_scroll, len(items) - n))
+            self.drop_scroll, self.drop_view = first, (first, n, len(items))
+            for r in items[first:first + n]:
                 rows.append(dict(label=r["name"], value="×%d" % (r["mine"] + r["mvp"]),
                                  right=_("prêmio de MVP") if r["mvp"] else "", frac=(r["mine"] + r["mvp"]) / float(top),
-                                 me=True))
+                                 me=True, item=r["item"], fav=r["item"] in favs))
             if not items:
                 msg = (_("Você não pegou nenhum item aqui."),
                        _("O que caiu no chão e o que outros pegaram fica na análise (aba Drops)."))
@@ -810,11 +820,16 @@ class DpsApp:
             kind, _info = est["source"]
             how = {"medido": _("×%s medido"), "fixo": _("×%s fixo")}.get(kind, _("×%s pela lista")) % dec(
                 "%.2f" % est["factor"])
-            rows.append(dict(label=_("XP estimada"), value=num(est["xp"]), right=how, frac=1.0, me=True))
+            # "Luta atual" conta só a luta; a análise em "Sessão inteira" conta a gravação toda
+            rows.append(dict(label=_("XP estimada") if enc is None else _("XP nesta luta"), value=num(est["xp"]),
+                             right=how, frac=1.0, me=True))
             if est["per_min"] is not None:
                 rows.append(dict(label=_("XP por minuto"),
                                  value=dec("%.3f%%" % est["per_min_pct"]) if est["per_min_pct"] is not None
-                                 else num(est["per_min"]), right=_("%s/h") % num(est["per_hour"]), frac=1.0, me=True))
+                                 else num(est["per_min"]),
+                                 right=(_("do nível · %s/min") % num(est["per_min"])) if est["per_min_pct"] is not None
+                                 else "", frac=1.0, me=True))
+                rows.append(dict(label=_("XP por hora"), value=num(est["per_hour"]), right="", frac=1.0, me=True))
             rows.append(dict(label=_("Abates"), value="%d" % est["kills"],
                              right=(_("%d sem XP conhecida") % est["unknown"]) if est["unknown"] else "",
                              frac=0.0, me=False))
@@ -859,9 +874,23 @@ class DpsApp:
             c.create_text(x1 - 6 * s, cy, anchor="e", text=r["right"], font=self.fonts["small"],
                           fill=mix(fg, t["muted"], 0.35))
             vid = c.create_text(value_x, cy, anchor="e", text=r["value"], font=self.fonts["num"], fill=fg)
-            lid = c.create_text(x0 + 7 * s, cy, anchor="w", text=r["label"], font=self.fonts["text"], fill=fg)
+            lx = x0 + 7 * s
+            if "item" in r:                    # estrela de favorito (clique marca/desmarca)
+                star = c.create_text(lx, cy, anchor="w", text="★" if r["fav"] else "☆", font=self.fonts["text"],
+                                     fill="#fbbf24" if r["fav"] else mix(fg, t["muted"], 0.4))
+                bx = c.bbox(star)
+                self.hits.append((("fav", r["item"]), (bx[0] - 3 * s, y, bx[2] + 3 * s, y1)))
+                lx = bx[2] + 5 * s
+            lid = c.create_text(lx, cy, anchor="w", text=r["label"], font=self.fonts["text"], fill=fg)
             self.clip_text(lid, r["label"], c.bbox(vid)[0] - 8 * s)
             y += ROW_H * s
+        first, shown, total = self.drop_view if tab == "drops" else (0, 0, 0)
+        if total > shown > 0:                  # barrinha de rolagem: tem mais itens (roda do mouse)
+            top_y, h = ROWS_Y0 * s, shown * ROW_H * s - 3 * s
+            c.create_line(W - 4 * s, top_y, W - 4 * s, top_y + h, fill=t["track"], width=max(2, int(2 * s)))
+            a = top_y + h * first / total
+            c.create_line(W - 4 * s, a, W - 4 * s, a + max(8 * s, h * shown / total), fill=t["muted"],
+                          width=max(2, int(2 * s)))
 
     def chip(self, target, x, label, active, outline=False):
         c, s, t = self.canvas, self.s, self.t
@@ -1186,6 +1215,16 @@ class DpsApp:
         if kind == "tab":
             self.set_tab(key)
             return
+        if kind == "fav":                      # estrela na aba Drops: favorito fica sempre no topo
+            favs = list(self.cfg.get("drop_favs") or [])
+            if key in favs:
+                favs.remove(key)
+            else:
+                favs.append(key)
+            self.cfg["drop_favs"] = favs
+            self.save()
+            self.dirty = True
+            return
         actions = {
             "pin": self.toggle_pin, "min": self.minimize, "close": self.quit,
             "more": lambda: self.popup_at(target, self.main_menu),
@@ -1348,7 +1387,7 @@ class DpsApp:
     def on_press(self, e):
         self.pressed = self.drag = self.resize = None
         tgt = self.target_at(e.x, e.y)
-        if tgt and tgt[0] in ("btn", "tab"):
+        if tgt and tgt[0] in ("btn", "tab", "fav"):
             self.pressed = tgt
         elif tgt and tgt[0] == "grip":
             # arrastar o canto muda largura e número de linhas; com Shift, o zoom
@@ -1398,6 +1437,12 @@ class DpsApp:
     def on_wheel(self, e):
         if e.state & 0x4:                                   # Ctrl
             self.set_scale(self.cfg["scale"] * (1.08 if e.delta > 0 else 1 / 1.08))
+        elif self.cfg["tab"] == "drops":                    # rola a lista de itens
+            first, shown, total = self.drop_view
+            new = max(0, min(total - shown, first + (-1 if e.delta > 0 else 1)))
+            if new != first:
+                self.drop_scroll = new
+                self.dirty = True
 
 
 def main():

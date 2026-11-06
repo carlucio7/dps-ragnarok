@@ -1351,4 +1351,16 @@ CATALOG = {
     "Jogadores marcados": ("Ticked players", "Jugadores marcados"),
     "Volume do som do Milagre": ("Miracle sound volume", "Volumen del sonido del Milagro"),
     "Tocar o som agora": ("Play the sound now", "Tocar el sonido ahora"),
+    "★ MILAGRE de novo! Mais 1 hora de alvos estelares": ("★ MIRACLE again! One more hour of star targets",
+                                                           "★ ¡MILAGRO otra vez! Una hora más de objetivos estelares"),
+    "Bônus de evento dos itens ([Durante o Evento])": ("Item event bonuses ([Durante o Evento])",
+                                                       "Bonos de evento de los ítems ([Durante o Evento])"),
+    "+%d%% se o evento dos itens ainda vale: %s": ("+%d%% if the items' event still runs: %s",
+                                                  "+%d%% si el evento de los ítems sigue: %s"),
+    "nenhum item vestido tem bônus de evento": ("no worn item has an event bonus", "ningún ítem equipado tiene bono de evento"),
+    "XP nesta luta": ("XP in this fight", "XP en esta pelea"),
+    "★ Milagre? · %d min (a confirmar)": ("★ Miracle? · %d min (unconfirmed)", "★ ¿Milagro? · %d min (por confirmar)"),
+    "detectado (%s); a confirmar depois de morte ou troca de mapa": (
+        "detected (%s); unconfirmed after a death or map change",
+        "detectado (%s); por confirmar después de morir o cambiar de mapa"),
 }

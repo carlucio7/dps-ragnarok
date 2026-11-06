@@ -2,6 +2,32 @@
 
 Português · [English](#english) · [Español](#español)
 
+## [1.2.3] — 2026-11-06
+
+- **Milagre mais fiel ao jogo:** um novo proc no meio do efeito renova a hora
+  inteira (e o widget festeja de novo). Morrer ou trocar de mapa nem sempre tira
+  o Milagre (da Torre do Relógio para Al de Baran ele fica), e o jogo não manda
+  o buff de novo nessas horas: o Milagre segue contando, marcado como "a
+  confirmar" ("★ Milagre? · 42 min") até um novo proc confirmar, o jogo avisar
+  que acabou ou passar 1 hora. Corrige o rodapé da 1.2.2 que travava em "1 min"
+  no fim da hora e não renovava com um novo proc.
+- **Bônus de evento dos itens desligados por padrão:** os bônus "[Durante o
+  Evento]" do texto dos itens (ex.: Carta Baby Shark) agora têm uma opção
+  própria na lista de bônus de XP, desligada até você marcar, porque o evento
+  do item costuma acabar antes do item sair do jogo.
+- **XP:** o % digitado na lista de bônus vale na hora (sem precisar de Enter) e
+  aparece também no widget. No widget, XP por minuto e XP por hora ficam em
+  linhas separadas, e em "Luta atual" a linha diz "XP nesta luta".
+- **Drops:** estrela para marcar itens favoritos, que ficam sempre no topo (no
+  widget e na análise). No widget, a lista rola com a roda do mouse quando tem
+  mais itens do que linhas.
+- **Linha do tempo:** as skills dos jogadores marcados aparecem na lista de
+  eventos desde o início (antes a opção começava desligada), então skills como o
+  Poder Esmagador aparecem sem precisar ligar nada.
+- **Skills novas do último patch com nome mesmo sem o jogo:** Baforada
+  Draconiana, Explosão de Faíscas, Laser Triplo, Poder Esmagador, Pólen
+  Explosivo e Espinhos Furiosos.
+
 ## [1.2.2] — 2026-11-06
 
 - **XP dos monstros do episódio 19 e da Biosfera [Eco]:** os monstros novos que o
@@ -165,6 +191,32 @@ inglês e espanhol.
 
 ## English
 
+### [1.2.3] — 2026-11-06
+
+- **Miracle closer to the game:** a new proc during the effect restarts the full
+  hour (and the widget celebrates again). Dying or changing maps doesn't always
+  remove the Miracle (from the Clock Tower to Al De Baran it stays), and the game
+  doesn't resend the buff then: the Miracle keeps counting, marked "unconfirmed"
+  ("★ Miracle? · 42 min") until a new proc confirms it, the game says it ended
+  or an hour passes. Fixes 1.2.2's footer getting stuck at "1 min" at the end of
+  the hour and not renewing on a new proc.
+- **Item event bonuses off by default:** "[Durante o Evento]" bonuses in item
+  texts (e.g. Baby Shark Card) now have their own option in the XP bonus list,
+  off until you tick it, because an item's event usually ends before the item
+  leaves the game.
+- **XP:** a % typed in the bonus list applies right away (no Enter needed) and
+  shows on the widget too. On the widget, XP per minute and XP per hour are on
+  separate lines, and in "Current fight" the row says "XP in this fight".
+- **Drops:** a star to mark favorite items, which always stay on top (on the
+  widget and in the analysis). On the widget, the list scrolls with the mouse
+  wheel when there are more items than rows.
+- **Timeline:** the ticked players' skills show in the event list from the start
+  (the option used to start off), so skills like Mighty Smash appear without
+  turning anything on.
+- **Skills from the latest patch named even without the game:** Dragonic
+  Breath, Spark Blaster, Triple Laser, Mighty Smash, Explosive Powder and
+  Mayhemic Thorns.
+
 ### [1.2.2] — 2026-11-06
 
 - **XP for episode 19 and Biosphere [Eco] monsters:** new monsters rAthena doesn't
@@ -324,6 +376,33 @@ and Spanish.
 ---
 
 ## Español
+
+### [1.2.3] — 2026-11-06
+
+- **Milagro más fiel al juego:** un nuevo proc en medio del efecto renueva la
+  hora completa (y el widget lo festeja otra vez). Morir o cambiar de mapa no
+  siempre quita el Milagro (de la Torre del Reloj a Al De Baran se mantiene), y
+  el juego no vuelve a enviar el buff en esos casos: el Milagro sigue contando,
+  marcado "por confirmar" ("★ ¿Milagro? · 42 min") hasta que un nuevo proc lo
+  confirme, el juego avise que terminó o pase 1 hora. Corrige el pie de la 1.2.2
+  que se quedaba en "1 min" al final de la hora y no se renovaba con un nuevo
+  proc.
+- **Bonos de evento de los ítems apagados por defecto:** los bonos "[Durante o
+  Evento]" del texto de los ítems (ej.: Carta Baby Shark) ahora tienen su propia
+  opción en la lista de bonos de XP, apagada hasta que la marques, porque el
+  evento del ítem suele terminar antes de que el ítem salga del juego.
+- **XP:** el % escrito en la lista de bonos vale al instante (sin Enter) y
+  también aparece en el widget. En el widget, XP por minuto y XP por hora van en
+  líneas separadas, y en "Pelea actual" la línea dice "XP en esta pelea".
+- **Drops:** estrella para marcar ítems favoritos, que quedan siempre arriba (en
+  el widget y en el análisis). En el widget, la lista se desplaza con la rueda
+  del mouse cuando hay más ítems que líneas.
+- **Línea de tiempo:** las skills de los jugadores marcados aparecen en la lista
+  de eventos desde el inicio (antes la opción empezaba apagada), así que skills
+  como Poder Aplastante aparecen sin tener que activar nada.
+- **Skills nuevas del último parche con nombre incluso sin el juego:** Exhalación
+  de Dragón, Explosión de Chispas, Láser Triple, Poder Aplastante, Polen
+  Explosivo y Espinas Frenéticas.
 
 ### [1.2.2] — 2026-11-06
 

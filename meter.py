@@ -32,6 +32,7 @@ MARK_EARLY_MS = 3000
 # sem ícone no cliente; enquanto dura, todo monstro é alvo estelar (+XP com a Bênção Estelar)
 MIRACLE_EFST = 160
 MIRACLE_MIN_MS = 3000000
+MIRACLE_SAME_PROC_MS = 5000           # dois "ligou" em menos de 5 s são o mesmo proc
 LOOT_KILL_MS = 2000           # o item cai até isso depois de o monstro morrer
 LOOT_MATCH_MS = 1500          # sumiu do chão e entrou na bolsa de quem grava com essa diferença: foi ele que pegou          # a unidade marcadora aparece até isso antes do monstro da fase (Betelgeuse: ~0,9 s)
 DUMMY_MIN, DUMMY_MAX = 21060, 21099   # bonecos de treino
@@ -515,6 +516,8 @@ class Combat:
         self.hp_log = collections.defaultdict(list)   # aid -> [(t, hp, hp máx.)]
         self.alerts = collections.deque(maxlen=50)    # (nº, t, tipo, texto) para o widget mostrar
         self.miracle_starts = set()   # inícios do Milagre em quem grava
+        self.miracles = []            # [início, fim previsto, último proc, "a confirmar" desde (ou None)]
+        self._miracle = None          # o que está valendo agora
         self.status_len = {}          # (aid, efst, início) -> duração prevista (ms)
         self.alert_seq = 0
         self._alerted = {}
@@ -662,7 +665,9 @@ class Combat:
                 self.owner[r[0]] = r[1]
         elif pid == rrf.P_MAPMOVE:
             name = rrf.decode_name(d[2:18])
-            self.map = name[:-4] if name.lower().endswith(".gat") else name
+            name = name[:-4] if name.lower().endswith(".gat") else name
+            self.on_map(t, name)
+            self.map = name
             if len(d) >= 22:
                 x, y = struct.unpack_from("<HH", d, 18)
                 self.add_pos(self.me, t, (x, y), (x, y))
@@ -760,6 +765,11 @@ class Combat:
             self.on_status(0, self.me, efst, True, total, left)
 
     def on_status(self, t, aid, efst, on, total=0, left=0, val1=0):
+        if efst == MIRACLE_EFST and aid == self.me:
+            if on and max(total or 0, left or 0) >= MIRACLE_MIN_MS:
+                self.on_miracle(t, left or total)
+            elif not on:
+                self.miracle_off(t)
         key = (aid, efst)
         first = key not in self.status_first
         if first:
@@ -772,10 +782,6 @@ class Combat:
                 self.status_on[key] = [t, total, left]
                 self.status_val[(aid, efst, t)] = val1
                 self.status_len[(aid, efst, t)] = left or total     # quanto o status ia durar a partir de t
-                if efst == MIRACLE_EFST and aid == self.me and max(total or 0, left or 0) >= MIRACLE_MIN_MS:
-                    self.miracle_starts.add(t)
-                    if t > 0:
-                        self.alert(t, "miracle", _("★ MILAGRE! Todos os monstros viraram alvos estelares por 1 hora"))
             else:
                 cur[1], cur[2] = total or cur[1], left or cur[2]     # renovou
                 if val1:
@@ -813,16 +819,59 @@ class Combat:
                 merged.append((st, e))
         return merged
 
+    def on_miracle(self, t, left):
+        """Milagre ligou. Um novo proc no meio do efeito volta a contar 1 hora (e confirma que ele estava ativo).
+        O jogo não reenvia o buff depois de morrer ou trocar de mapa: aí ele segue valendo, "a confirmar" (veja
+        on_map e miracle_uncertain), até o jogo mandar o "acabou" (miracle_off) ou passar 1 hora do último proc."""
+        cur = self._miracle
+        if cur is not None and t < cur[1]:
+            renewed = t - cur[2] > MIRACLE_SAME_PROC_MS
+            cur[1], cur[2], cur[3] = t + left, t, None
+            if renewed and t > 0:
+                self.alert(t, "miracle", _("★ MILAGRE de novo! Mais 1 hora de alvos estelares"))
+            return
+        self._miracle = [t, t + left, t, None]
+        self.miracles.append(self._miracle)
+        self.miracle_starts.add(t)
+        if t > 0:
+            self.alert(t, "miracle", _("★ MILAGRE! Todos os monstros viraram alvos estelares por 1 hora"))
+        self.version += 1
+
+    def on_map(self, t, name):
+        """Trocou de mapa (teleporte no mesmo mapa não conta). Nem toda troca tira o Milagre (ex.: da Torre do
+        Relógio para Al de Baran ele fica) e o jogo não reenvia o buff: ele segue valendo, a confirmar."""
+        if name.lower() != (self.map or "").lower():
+            self.miracle_doubt(t)
+
+    def miracle_doubt(self, t):
+        cur = self._miracle
+        if cur is not None and t < cur[1] and cur[3] is None:
+            cur[3] = t
+            self.version += 1
+
+    def miracle_off(self, t):
+        """O jogo avisou que o Milagre acabou."""
+        cur = self._miracle
+        if cur is not None and t < cur[1]:
+            cur[1] = t
+            self._miracle = None
+            self.version += 1
+
+    def miracle_uncertain(self):
+        """Desde quando (ms) o Milagre ativo está "a confirmar" (depois de morrer ou trocar de mapa), ou None."""
+        cur = self._miracle
+        return cur[3] if cur is not None and self.now < cur[1] else None
+
     def miracle_windows(self):
-        """[(início, fim)] em que o Milagre esteve ativo em quem grava (não acaba com a morte)."""
-        return [(st, e) for st, e in self.lasting(MIRACLE_EFST) if st in self.miracle_starts]
+        """[(início, fim)] em que o Milagre esteve ativo em quem grava."""
+        return [(m[0], min(m[1], self.now)) for m in self.miracles if m[0] <= self.now]
 
     def miracle_left(self):
         """ms que faltam do Milagre ativo agora (None se não está ativo)."""
-        cur = self.status_on.get((self.me, MIRACLE_EFST))
-        if cur is None or cur[0] not in self.miracle_starts:
+        cur = self._miracle
+        if cur is None or self.now >= cur[1]:
             return None
-        return max(0, (cur[2] or cur[1] or MIRACLE_MIN_MS) - (self.now - cur[0]))
+        return cur[1] - self.now
 
     def end_statuses(self, aid, t):
         for key in [k for k in self.status_on if k[0] == aid]:
@@ -882,6 +931,7 @@ class Combat:
                 break
 
     def on_my_death(self, t):
+        self.miracle_doubt(t)     # morrer não tira o Milagre, mas voltar para o ponto de retorno pode tirar
         import analysis   # evita import circular
         rec = analysis.death_recap(self, self.me, t)
         text = _("Você morreu")

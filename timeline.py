@@ -180,12 +180,14 @@ def build(c, key, rng=None):
         if k in used:
             lanes.append(_lane(k, name, "point", color, k != "elo",
                                [e for e in events if e["lane"] == k]))
-    # só na lista (são muitos para o gráfico): começam desligados
-    for k, name, color in (("hits", _("Golpes dos jogadores"), None), ("pskills", _("Skills dos jogadores"), None),
-                           ("mobhits", _("Golpes dos monstros"), EVENT_COLORS["boss"]),
-                           ("mobskills", _("Skills dos monstros"), EVENT_COLORS["boss"])):
+    # só na lista (são muitos para o gráfico). As skills dos jogadores começam ligadas: a lista segue os jogadores
+    # marcados (quem gravou, de início), então dá para ver cada skill usada, inclusive as novas como Poder Esmagador
+    for k, name, color, on in (("hits", _("Golpes dos jogadores"), None, False),
+                               ("pskills", _("Skills dos jogadores"), None, True),
+                               ("mobhits", _("Golpes dos monstros"), EVENT_COLORS["boss"], False),
+                               ("mobskills", _("Skills dos monstros"), EVENT_COLORS["boss"], False)):
         if k in used:
-            lanes.append(_lane(k, name, "list", color, False, []))
+            lanes.append(_lane(k, name, "list", color, on, []))
     starts = [(p["appear"], x.phase_name(p) if x.multi else None) for p in x.phases]
     marks = [(t, label or _("Início")) for t, label in starts]
     if x.climax < x.end:
