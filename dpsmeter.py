@@ -104,6 +104,7 @@ DEFAULTS = {
     "folder": None, "x": None, "y": None, "v": CONFIG_VERSION, "width": BASE_W,
     "an_geometry": None, "an_tab": 0, "an_zoom": 1.0,
     "auto_tests": True, "alert_buffs": True, "alert_death": True, "alert_fusion": True, "alert_miracle": True, "miracle_sound": True,
+    "miracle_volume": 40,  # volume do som do Milagre (%)
     "targets": "all",
     "lang": None,          # None = idioma do Windows
     "xp_factor": {},       # {personagem: [fator, quando, arquivo]} medido com gravações seguidas
@@ -148,13 +149,16 @@ def shade(h, amount):
     return mix(h, "#ffffff" if luminance(h) < 0.5 else "#000000", amount)
 
 
-_CHIME = []
+_CHIME = {}
+CHIME_VOLUMES = (10, 25, 40, 60, 80, 100)
 
 
-def chime_wav():
-    """Arpejo curto e brilhante (dó-mi-sol-dó e um brilho no fim), WAV 16 bits mono gerado na hora."""
-    if _CHIME:
-        return _CHIME[0]
+def chime_wav(volume=40):
+    """Arpejo curto e brilhante (dó-mi-sol-dó e um brilho no fim), WAV 16 bits mono gerado na hora.
+    volume: 0–100 (100 = o volume da 1.2.0, que ficou alto demais)."""
+    volume = max(0, min(100, int(volume)))
+    if volume in _CHIME:
+        return _CHIME[volume]
     import math
     import struct as st
     rate, length = 22050, 1.25
@@ -170,22 +174,22 @@ def chime_wav():
             w = 2 * math.pi * freq * x
             buf[i] += vol * env * (math.sin(w) + 0.25 * math.sin(2 * w) + 0.1 * math.sin(3 * w))
     peak = max(abs(v) for v in buf) or 1.0
-    data = b"".join(st.pack("<h", int(32767 * 0.55 * v / peak)) for v in buf)
+    data = b"".join(st.pack("<h", int(32767 * 0.55 * volume / 100.0 * v / peak)) for v in buf)
     head = (b"RIFF" + st.pack("<I", 36 + len(data)) + b"WAVEfmt " + st.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16)
             + b"data" + st.pack("<I", len(data)))
-    _CHIME.append(head + data)
-    return _CHIME[0]
+    _CHIME[volume] = head + data
+    return _CHIME[volume]
 
 
-def play_chime():
+def play_chime(volume=40):
     """Toca o som do Milagre sem travar o widget (Windows)."""
-    if not IS_WIN:
+    if not IS_WIN or volume <= 0:
         return
 
     def run():
         try:
             import winsound
-            winsound.PlaySound(chime_wav(), winsound.SND_MEMORY | winsound.SND_NODEFAULT)
+            winsound.PlaySound(chime_wav(volume), winsound.SND_MEMORY | winsound.SND_NODEFAULT)
         except (ImportError, RuntimeError, OSError):
             pass
     threading.Thread(target=run, daemon=True).start()
@@ -513,7 +517,7 @@ class DpsApp:
                 if kind == "miracle":
                     self.miracle_at = now
                     if self.cfg["miracle_sound"]:
-                        play_chime()
+                        play_chime(self.cfg["miracle_volume"])
         if self.alert and now - self.alert[2] > (MIRACLE_FLASH_S if self.alert[1] == "miracle" else ALERT_S):
             self.alert = None
             self.dirty = True
@@ -1078,6 +1082,21 @@ class DpsApp:
                        state="disabled")
         return rm
 
+    def volume_menu(self, parent):
+        """Volume do som do Milagre, com um teste."""
+        vm = self.new_menu(parent)
+        var = self.keep(tk.IntVar(self.root, self.cfg["miracle_volume"]))
+        for v in CHIME_VOLUMES:
+            vm.add_radiobutton(label="%d%%" % v, variable=var, value=v, command=lambda v=v: self.set_volume(v))
+        vm.add_separator()
+        vm.add_command(label=_("Tocar o som agora"), command=lambda: play_chime(self.cfg["miracle_volume"]))
+        return vm
+
+    def set_volume(self, value):
+        self.cfg["miracle_volume"] = value
+        self.save()
+        play_chime(value)
+
     def set_rate(self, value):
         self.cfg["rate"] = value
         self.save()
@@ -1229,6 +1248,7 @@ class DpsApp:
                            ("auto_tests", _("Salvar testes no boneco sozinho"))):
             var = self.keep(tk.BooleanVar(self.root, cfg[key]))
             m.add_checkbutton(label=label, variable=var, command=lambda k=key: self.toggle_cfg(k))
+        m.add_cascade(label=_("Volume do som do Milagre"), menu=self.volume_menu(m))
 
         m.add_command(label=_("Abrir replay salvo…"), command=self.open_file)
         if self.watcher.pinned:

@@ -73,7 +73,7 @@ def kills(c, rng=None):
             continue
         share = mine[aid] / float(total[aid])
         data = MOB_EXP.get(e.job)
-        if not data or not data[1]:
+        if not data:                     # sem dado; XP 0 = o monstro não dá XP (instância, desafio...)
             unknown += 1
             rows.append(dict(t=t, aid=aid, mob=e.job, name=c.name_of(aid), lv=data[0] if data else None,
                              share=share, pen=None, xp=None))

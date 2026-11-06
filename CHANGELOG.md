@@ -2,6 +2,18 @@
 
 Português · [English](#english) · [Español](#español)
 
+## [1.2.2] — 2026-11-06
+
+- **XP dos monstros do episódio 19 e da Biosfera [Eco]:** os monstros novos que o
+  rAthena ainda não tem (Rgan, Dollocaris, Hallucigenia, [Eco] Golem de Lava e
+  dezenas de outros) agora têm a XP do Divine Pride, então os abates deixam de aparecer
+  como "XP desconhecida". Monstros que não dão XP (instâncias, desafios) contam
+  como 0 e não atrapalham a calibração.
+- **Evento do servidor:** escolha rápida de +50%, +100% ou +200% (ou digite outro
+  valor).
+- **Som do Milagre mais baixo:** o volume padrão caiu para 40% e dá para escolher
+  de 10% a 100% em ⋯ › Volume do som do Milagre, com um botão para ouvir.
+
 ## [1.2.1] — 2026-11-06
 
 - **Abas da análise sem nomes cortados:** com as 13 abas da 1.2.0, a janela de
@@ -153,6 +165,16 @@ inglês e espanhol.
 
 ## English
 
+### [1.2.2] — 2026-11-06
+
+- **XP for episode 19 and Biosphere [Eco] monsters:** new monsters rAthena doesn't
+  have yet (Rgan, Dollocaris, Hallucigenia, [Eco] Lava Golem and dozens more) now
+  use Divine Pride's XP, so their kills no longer show as "unknown XP". Monsters
+  that give no XP (instances, challenges) count as 0 and don't block calibration.
+- **Server event:** quick pick of +50%, +100% or +200% (or type another value).
+- **Quieter Miracle sound:** the default volume dropped to 40%, and you can pick
+  10% to 100% under ⋯ › Miracle sound volume, with a button to hear it.
+
 ### [1.2.1] — 2026-11-06
 
 - **Analysis tabs no longer cut off:** with 1.2.0's 13 tabs, the analysis window
@@ -302,6 +324,19 @@ and Spanish.
 ---
 
 ## Español
+
+### [1.2.2] — 2026-11-06
+
+- **XP de los monstruos del episodio 19 y de la Biosfera [Eco]:** los monstruos
+  nuevos que rAthena todavía no tiene (Rgan, Dollocaris, Hallucigenia, [Eco]
+  Golem de Lava y decenas más) ahora usan la XP de Divine Pride, así que sus muertes
+  ya no aparecen como "XP desconocida". Los monstruos que no dan XP (instancias,
+  desafíos) cuentan como 0 y no estorban la calibración.
+- **Evento del servidor:** elección rápida de +50%, +100% o +200% (o escribe otro
+  valor).
+- **Sonido del Milagro más bajo:** el volumen por defecto bajó a 40% y se puede
+  elegir de 10% a 100% en ⋯ › Volumen del sonido del Milagro, con un botón para
+  escucharlo.
 
 ### [1.2.1] — 2026-11-06
 

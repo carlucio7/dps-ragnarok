@@ -840,6 +840,13 @@ with tempfile.TemporaryDirectory() as tmp:
     est = xpmod.estimate(rf.combat, {"xp_bonuses": {"server": {"on": True, "pct": 100}}})
     check(round(est["xp"]) == 204 and est["source"][0] == "lista", "XP: pela lista, evento +100%% = ×2 -> %s" % est["xp"])
 
+c0 = combat_of(fr.build(ME, [(0, fr.spawn(52100, "mob", 21539, "Rgan")), (300, fr.skill_damage(ME, 52100, 5000)),
+                             (400, fr.vanish(52100, 1)), (500, fr.spawn(52101, "mob", 3445, "Esqueleto")),
+                             (600, fr.skill_damage(ME, 52101, 5000)), (700, fr.vanish(52101, 1))])[0])
+rows0, unknown0 = xpmod.kills(c0)
+check(unknown0 == 0 and [r["xp"] for r in rows0] == [729743 * 125 // 100, 0],      # nível 240 x 253: 125%
+      "XP: monstro do episódio 19 com XP do Divine Pride; o que não dá XP conta como 0, não como desconhecido -> %s"
+      % [r["xp"] for r in rows0])
 wins = {"vip": [(0, 100, 0)], "manual": [(0, 100, 0)], "njord": [(50, 100, 60)]}
 sets = xpmod.settings({"xp_bonuses": {"server": {"on": True}, "manual": {"pct": 200}}})
 check(xpmod.bonus_at(10, wins, sets) == 100 + 20 + 200 and xpmod.bonus_at(60, wins, sets) == 100 + 20 + 200 + 60,

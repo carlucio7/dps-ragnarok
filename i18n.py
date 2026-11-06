@@ -1349,4 +1349,6 @@ CATALOG = {
     "Tocar um som no Milagre": ("Play a sound on the Miracle", "Tocar un sonido en el Milagro"),
     "Fase:": ("Phase:", "Fase:"),
     "Jogadores marcados": ("Ticked players", "Jugadores marcados"),
+    "Volume do som do Milagre": ("Miracle sound volume", "Volumen del sonido del Milagro"),
+    "Tocar o som agora": ("Play the sound now", "Tocar el sonido ahora"),
 }

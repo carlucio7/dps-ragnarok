@@ -1293,8 +1293,13 @@ class AnalysisWindow:
                                 font=self.f["text"], anchor="w", highlightthickness=0)
             cb.grid(row=i, column=0, sticky="w")
             pv = tk.StringVar(self.top, "%g" % bdef["pct"])
-            ent = tk.Entry(lst, textvariable=pv, width=5, font=self.f["text"], bg=c["btn"], fg=c["fg"],
-                           insertbackground=c["fg"], relief="flat", justify="right")
+            if bdef["key"] == "server":          # o evento costuma ser +50%, +100% e às vezes +200%
+                ent = ttk.Combobox(lst, textvariable=pv, values=("50", "100", "200"), width=4, style="An.TCombobox",
+                                   font=self.f["text"], justify="right")
+                ent.bind("<<ComboboxSelected>>", lambda e: self.xp_save())
+            else:
+                ent = tk.Entry(lst, textvariable=pv, width=5, font=self.f["text"], bg=c["btn"], fg=c["fg"],
+                               insertbackground=c["fg"], relief="flat", justify="right")
             ent.grid(row=i, column=1, padx=(8, 2), ipady=1)
             ent.bind("<Return>", lambda e: self.xp_save())
             ent.bind("<FocusOut>", lambda e: self.xp_save())
