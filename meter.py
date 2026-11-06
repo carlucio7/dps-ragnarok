@@ -506,6 +506,8 @@ class Combat:
         self.drop_ids = {}            # id do item no chão -> drop (todos, para saber quem pegou)
         self.drops = []               # dict(t, item, count, x, y, fell, gone, mine, mob)
         self.pickups = []             # dict(t, item, count, used): entrou na bolsa de quem grava
+        self._pending_pickups = []    # pickups ainda sem item do chão (só os recentes)
+        self._gone_by_item = {}       # item -> drops que sumiram do chão, na ordem em que sumiram
         self.mvp_items = []           # (t, item)
         self.version = 0             # muda a cada evento novo (para a interface saber se redesenha)
         if session.pos:
@@ -705,12 +707,12 @@ class Combat:
                 drop = self.ground.pop(struct.unpack_from("<I", d, 2)[0], None)
                 if drop is not None:
                     drop["gone"] = t
+                    self._gone_by_item.setdefault(drop["item"], []).append(drop)
                     self.match_loot(t)
         elif pid == rrf.P_PICKUP:
             r = rrf.parse_pickup(d)
             if r is not None:
-                self.pickups.append(dict(t=t, item=r[0], count=r[1], used=False))
-                self.match_loot(t)
+                self.add_pickup(t, r[0], r[1])
                 self.version += 1
         elif pid == rrf.P_MVP_ITEM:
             if len(d) >= 6:
@@ -740,8 +742,7 @@ class Combat:
                 self.bag[it.slot] = it
                 r = rrf.parse_pickup(d)
                 if r is not None:
-                    self.pickups.append(dict(t=t, item=r[0], count=r[1], used=False))
-                    self.match_loot(t)
+                    self.add_pickup(t, r[0], r[1])
         elif pid in rrf.SKILL_USE_PACKETS:
             r = rrf.parse_skill_use(pid, d)
             if r is not None and self.fresh(("u",) + r, t):
@@ -1090,6 +1091,7 @@ class Combat:
         self.deaths = {}
         self.death_log = []
         self.drops, self.pickups, self.mvp_items, self.drop_ids = [], [], [], {}
+        self._pending_pickups, self._gone_by_item = [], {}
         self.was_reset = True
         self.version += 1
 
@@ -1106,17 +1108,31 @@ class Combat:
                     return self.name_of(aid)
         return None
 
+    def add_pickup(self, t, item, count):
+        p = dict(t=t, item=item, count=count, used=False)
+        self.pickups.append(p)
+        self._pending_pickups.append(p)
+        self.match_loot(t)
+
     def match_loot(self, t):
-        """Item que sumiu do chão perto da hora em que o mesmo item entrou na bolsa de quem grava: pego por ele."""
-        for p in self.pickups:
-            if p["used"] or abs(p["t"] - t) > LOOT_MATCH_MS:
+        """Item que sumiu do chão perto da hora em que o mesmo item entrou na bolsa de quem grava: pego por ele.
+        Só olha os pickups recentes e os drops do mesmo item que sumiram perto daquela hora (antes varria todos os
+        drops da sessão a cada item e deixava replays grandes lentos para abrir)."""
+        pending = [p for p in self._pending_pickups if not p["used"] and t - p["t"] <= 2 * LOOT_MATCH_MS]
+        self._pending_pickups = pending
+        for p in pending:
+            if abs(p["t"] - t) > LOOT_MATCH_MS:
                 continue
-            drop = next((dr for dr in reversed(self.drops) if not dr["mine"] and dr["gone"] is not None
-                         and dr["by"] in (None, self.me)
-                         and dr["item"] == p["item"] and abs(dr["gone"] - p["t"]) <= LOOT_MATCH_MS), None)
-            if drop is not None:
-                drop["mine"] = True
+            gone = self._gone_by_item.get(p["item"]) or ()
+            for i in range(len(gone) - 1, -1, -1):
+                dr = gone[i]
+                if dr["gone"] < p["t"] - LOOT_MATCH_MS:
+                    break                              # os de antes sumiram cedo demais
+                if dr["mine"] or dr["by"] not in (None, self.me) or abs(dr["gone"] - p["t"]) > LOOT_MATCH_MS:
+                    continue
+                dr["mine"] = True
                 p["used"] = True
+                break
 
     def drop_summary(self, rng=None):
         """Itens por nome no recorte: quantos caíram e quantos você pegou (mais os prêmios de MVP)."""

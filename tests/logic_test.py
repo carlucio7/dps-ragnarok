@@ -837,6 +837,9 @@ with tempfile.TemporaryDirectory() as tmp:
           and est["source"][0] == "medido",
           "XP: 3 Goblins a 10%% = 102, +306 na gravação seguinte = fator medido ×3 -> %s %s" % (f, est["source"]))
     check(xpmod.factor(rf.combat, {"xp_mode": "fixo", "xp_fixed": 200})[0] == 3.0, "XP: valor fixo +200% = ×3")
+    eta, left = xpmod.time_to_level(rf.combat, {"xp_mode": "fixo", "xp_fixed": 200}, 1000.0)
+    check(left == 10 ** 9 - 1000 - 306 and abs(eta - left / 1000.0 * 60000) < 1,
+          "XP: tempo até o próximo nível = XP que falta ÷ XP por minuto -> %s" % xpmod.span_text(eta))
     est = xpmod.estimate(rf.combat, {"xp_bonuses": {"server": {"on": True, "pct": 100}}})
     check(round(est["xp"]) == 204 and est["source"][0] == "lista", "XP: pela lista, evento +100%% = ×2 -> %s" % est["xp"])
 
@@ -847,6 +850,8 @@ rows0, unknown0 = xpmod.kills(c0)
 check(unknown0 == 0 and [r["xp"] for r in rows0] == [729743 * 125 // 100, 0],      # nível 240 x 253: 125%
       "XP: monstro do episódio 19 com XP do Divine Pride; o que não dá XP conta como 0, não como desconhecido -> %s"
       % [r["xp"] for r in rows0])
+check([xpmod.span_text(m * 60000) for m in (45, 200, 6000)] == ["45 min", "3 h 20 min", "4 dias 4 h"],
+      "XP: tempo em palavras (min, h, dias)")
 wins = {"vip": [(0, 100, 0)], "manual": [(0, 100, 0)], "njord": [(50, 100, 60)]}
 sets = xpmod.settings({"xp_bonuses": {"server": {"on": True}, "manual": {"pct": 200}}})
 check(xpmod.bonus_at(10, wins, sets) == 100 + 20 + 200 and xpmod.bonus_at(60, wins, sets) == 100 + 20 + 200 + 60,

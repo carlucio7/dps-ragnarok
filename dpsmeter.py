@@ -52,6 +52,7 @@ MIN_SCALE, MAX_SCALE = 0.7, 2.5
 FONT_PX = {"big": 30, "big_s": 23, "unit": 11, "title": 12, "text": 11, "small": 10, "num": 12, "icon": 11, "tab": 11}
 MIN_FONT_PX = 8
 ALERT_S = 7.0          # quanto tempo um aviso fica no rodapé
+DROP_SCROLL_ROWS = 3   # itens que a roda do mouse rola na aba Drops
 MIRACLE_FLASH_S = 9.0  # o widget brilha por esse tempo quando o Milagre ativa
 MIRACLE_BANNER_S = 6.0
 MIRACLE_COLORS = ("#fbbf24", "#fde68a", "#c084fc", "#f9a8d4", "#ffffff", "#a5b4fc")
@@ -456,6 +457,16 @@ class DpsApp:
     # ------------------------------------------------------------ dados
 
     def tick(self):
+        """Laço do widget: lê o replay, desenha e se reagenda. Um erro em qualquer parte vai para o erros.log, mas
+        nunca para o laço (antes, um erro ao desenhar congelava o DPS e os drops)."""
+        try:
+            self.step()
+        except Exception:  # noqa: BLE001
+            self.log_error(*sys.exc_info())
+        finally:
+            self.root.after(POLL_MS, self.tick)
+
+    def step(self):
         now = time.time()
         try:
             if self.watcher.poll(now):
@@ -487,13 +498,15 @@ class DpsApp:
         if now - self.miracle_at < MIRACLE_FLASH_S + 0.3:
             self.dirty = True
         if self.dirty or now - self.last_draw >= 1.0:
-            self.draw()
+            try:
+                self.draw()
+            except Exception:  # noqa: BLE001 - um erro ao desenhar não pode parar a leitura do replay
+                self.log_error(*sys.exc_info())
         if self.analysis is not None:
             try:
                 self.analysis.tick()
             except Exception:  # noqa: BLE001
                 self.log_error(*sys.exc_info())
-        self.root.after(POLL_MS, self.tick)
 
     def xp_calibrate(self, c):
         """Fator de XP do personagem: XP exata até a próxima gravação ÷ XP estimada dos abates desta."""
@@ -830,6 +843,11 @@ class DpsApp:
                                  right=(_("do nível · %s/min") % num(est["per_min"])) if est["per_min_pct"] is not None
                                  else "", frac=1.0, me=True))
                 rows.append(dict(label=_("XP por hora"), value=num(est["per_hour"]), right="", frac=1.0, me=True))
+                eta, left = xp.time_to_level(cb, self.cfg, est["per_min"])
+                if eta is not None:
+                    rows.append(dict(label=_("Até o próximo nível"),
+                                     value=xp.span_text(eta) if eta else _("já subiu"),
+                                     right=(_("faltam %s XP") % num(left)) if left else "", frac=1.0, me=True))
             rows.append(dict(label=_("Abates"), value="%d" % est["kills"],
                              right=(_("%d sem XP conhecida") % est["unknown"]) if est["unknown"] else "",
                              frac=0.0, me=False))
@@ -879,7 +897,8 @@ class DpsApp:
                 star = c.create_text(lx, cy, anchor="w", text="★" if r["fav"] else "☆", font=self.fonts["text"],
                                      fill="#fbbf24" if r["fav"] else mix(fg, t["muted"], 0.4))
                 bx = c.bbox(star)
-                self.hits.append((("fav", r["item"]), (bx[0] - 3 * s, y, bx[2] + 3 * s, y1)))
+                # área de clique generosa: do começo da linha até depois da estrela, na altura toda da linha
+                self.hits.append((("fav", r["item"]), (x0, y, bx[2] + 6 * s, y1)))
                 lx = bx[2] + 5 * s
             lid = c.create_text(lx, cy, anchor="w", text=r["label"], font=self.fonts["text"], fill=fg)
             self.clip_text(lid, r["label"], c.bbox(vid)[0] - 8 * s)
@@ -945,7 +964,7 @@ class DpsApp:
                 c.itemconfigure("hover_%s_bg" % key, fill=shade(base, 0.12))
         cursor = ""
         if tgt:
-            cursor = {"btn": "hand2", "tab": "hand2", "grip": "size_nw_se"}[tgt[0]]
+            cursor = {"btn": "hand2", "tab": "hand2", "fav": "hand2", "grip": "size_nw_se"}.get(tgt[0], "")
         c.configure(cursor=cursor)
 
     # ------------------------------------------------------------ ações
@@ -1437,9 +1456,10 @@ class DpsApp:
     def on_wheel(self, e):
         if e.state & 0x4:                                   # Ctrl
             self.set_scale(self.cfg["scale"] * (1.08 if e.delta > 0 else 1 / 1.08))
-        elif self.cfg["tab"] == "drops":                    # rola a lista de itens
+        elif self.cfg["tab"] == "drops":                    # rola a lista de itens (3 por "clique" da roda)
             first, shown, total = self.drop_view
-            new = max(0, min(total - shown, first + (-1 if e.delta > 0 else 1)))
+            step = DROP_SCROLL_ROWS * max(1, abs(e.delta) // 120)
+            new = max(0, min(total - shown, first + (-step if e.delta > 0 else step)))
             if new != first:
                 self.drop_scroll = new
                 self.dirty = True

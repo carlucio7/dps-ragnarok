@@ -2,6 +2,23 @@
 
 Português · [English](#english) · [Español](#español)
 
+## [1.2.4] — 2026-11-06
+
+- **Corrige o widget que parava de atualizar:** passar o mouse na estrela de
+  favorito da aba Drops dava um erro que travava a leitura (DPS e drops paravam).
+  Agora a estrela funciona e nenhum erro de desenho para o medidor.
+- **Estrela mais fácil de clicar e rolagem mais rápida:** o clique vale no começo
+  da linha toda, e cada passo da roda do mouse rola 3 itens.
+- **Replays grandes abrem bem mais rápido:** a ligação entre os itens que sumiram
+  do chão e os que entraram na bolsa ficou muito mais leve (um replay de 8 MB
+  cheio de drops caiu de 42 s para 1,5 s).
+- **XP:** nova linha "Até o próximo nível", no ritmo de XP atual (no widget e na
+  análise).
+- **Bônus de XP mais claros:** a lista tem cabeçalho ("Contar · Bônus · % · Nesta
+  gravação") e diz se cada bônus estava ativo ("ativo em 100% da gravação" ou
+  "não estava ativo"); os que não apareceram ficam em cinza. A caixa marcada só
+  quer dizer "contar quando aparecer".
+
 ## [1.2.3] — 2026-11-06
 
 - **Milagre mais fiel ao jogo:** um novo proc no meio do efeito renova a hora
@@ -191,6 +208,23 @@ inglês e espanhol.
 
 ## English
 
+### [1.2.4] — 2026-11-06
+
+- **Fixes the widget that stopped updating:** hovering the favorite star on the
+  Drops tab raised an error that froze reading (DPS and drops stopped). The star
+  works now, and no drawing error can stop the meter.
+- **Easier star and faster scrolling:** the click works across the start of the
+  row, and each mouse-wheel step scrolls 3 items.
+- **Big replays open much faster:** matching items that left the ground with
+  items that entered the bag is far lighter (an 8 MB drop-heavy replay went from
+  42 s to 1.5 s).
+- **XP:** new "Time to next level" row at the current XP pace (widget and
+  analysis).
+- **Clearer XP bonuses:** the list has a header ("Count · Bonus · % · In this
+  recording") and says whether each bonus was active ("active for 100% of the
+  recording" or "wasn't active"); the ones that didn't show are grayed out. A
+  ticked box only means "count it when it shows".
+
 ### [1.2.3] — 2026-11-06
 
 - **Miracle closer to the game:** a new proc during the effect restarts the full
@@ -376,6 +410,24 @@ and Spanish.
 ---
 
 ## Español
+
+### [1.2.4] — 2026-11-06
+
+- **Corrige el widget que dejaba de actualizarse:** pasar el mouse por la
+  estrella de favorito de la pestaña Drops daba un error que trababa la lectura
+  (DPS y drops se detenían). Ahora la estrella funciona y ningún error de dibujo
+  detiene el medidor.
+- **Estrella más fácil de clicar y desplazamiento más rápido:** el clic vale en
+  el inicio de la fila, y cada paso de la rueda del mouse desplaza 3 ítems.
+- **Los replays grandes abren mucho más rápido:** la relación entre los ítems
+  que salieron del suelo y los que entraron en la bolsa es mucho más liviana (un
+  replay de 8 MB lleno de drops bajó de 42 s a 1,5 s).
+- **XP:** nueva línea "Hasta el próximo nivel", al ritmo de XP actual (en el
+  widget y en el análisis).
+- **Bonos de XP más claros:** la lista tiene encabezado ("Contar · Bono · % · En
+  esta grabación") y dice si cada bono estaba activo ("activo en 100% de la
+  grabación" o "no estaba activo"); los que no aparecieron quedan en gris. La
+  casilla marcada solo significa "contar cuando aparezca".
 
 ### [1.2.3] — 2026-11-06
 

@@ -1271,7 +1271,7 @@ class AnalysisWindow:
         self.xp_tiles = Tiles(tab, self, [
             ("est", _("XP estimada no recorte")), ("min", _("XP por minuto")), ("hour", _("XP por hora")),
             ("kills", _("Abates")), ("factor", _("Fator de bônus")), ("level", _("Nível no início")),
-            ("real", _("XP real até a próxima gravação"))], min_w=140, dense=True)
+            ("eta", _("Até o próximo nível")), ("real", _("XP real até a próxima gravação"))], min_w=140, dense=True)
         self.xp_tiles.pack(fill="x", padx=10, pady=(10, 0))
         self.label(tab, _("O replay não grava a XP ganha: só a XP total no início de cada gravação. A estimativa soma "
                           "a XP de cada monstro que você ajudou a matar (rAthena e Divine Pride), com a penalidade de "
@@ -1315,13 +1315,18 @@ class AnalysisWindow:
                 ttk.Button(row, text=_("Esquecer"), style="An.TButton", command=self.xp_forget).pack(side="right")
         lst = tk.Frame(left, bg=c["tile"])
         lst.pack(fill="x", padx=10, pady=(8, 4))
-        self.xp_on, self.xp_pct, self.xp_seen = {}, {}, {}
-        for i, bdef in enumerate(xp.BONUSES):
+        self.xp_on, self.xp_pct, self.xp_seen, self.xp_checks = {}, {}, {}, {}
+        # a caixa diz se o bônus entra na conta; se ele estava ativo nesta gravação, diz a última coluna
+        for col, text in ((0, _("Contar · Bônus")), (1, "%"), (3, _("Nesta gravação"))):
+            self.label(lst, text, "small", "muted", "tile").grid(row=0, column=col, columnspan=2 if col == 1 else 1,
+                                                                 sticky="w", padx=(10, 0) if col == 3 else 0)
+        for i, bdef in enumerate(xp.BONUSES, start=1):
             var = tk.BooleanVar(self.top, bdef["on"])
             cb = tk.Checkbutton(lst, text=_(bdef["name"]), variable=var, command=self.xp_save, bg=c["tile"],
                                 fg=c["fg"], selectcolor=c["btn"], activebackground=c["tile"], activeforeground=c["fg"],
                                 font=self.f["text"], anchor="w", highlightthickness=0)
             cb.grid(row=i, column=0, sticky="w")
+            self.xp_checks[bdef["key"]] = cb
             pv = tk.StringVar(self.top, "%g" % bdef["pct"])
             if bdef["key"] == "server":          # o evento costuma ser +50%, +100% e às vezes +200%
                 ent = ttk.Combobox(lst, textvariable=pv, values=("50", "100", "200"), width=4, style="An.TCombobox",
@@ -1444,6 +1449,12 @@ class AnalysisWindow:
             put("min", "—", _("recorte curto demais"))
         put("hour", full(round(est["per_hour"])) if est["per_hour"] else "—",
             short=num(est["per_hour"]) if est["per_hour"] else None)
+        eta, left = xp.time_to_level(c, cfg, est["per_min"])
+        if eta is None:
+            put("eta", "—", _("sem ritmo de XP no recorte"))
+        else:
+            put("eta", xp.span_text(eta) if eta else _("já subiu"),
+                (_("faltam %s XP") % full(round(left))) if left else _("pela XP estimada"))
         put("kills", "%d" % est["kills"], (_("%d sem XP conhecida") % est["unknown"]) if est["unknown"] else "")
         kind, info = est["source"]
         if kind == "medido":
@@ -1490,10 +1501,13 @@ class AnalysisWindow:
                 text = _("detectado (%s); a confirmar depois de morte ou troca de mapa") % dec(
                     "%.0f%%" % (100 * seen[b["key"]]))
             elif seen.get(b["key"]):
-                text = _("detectado (%s da gravação)") % dec("%.0f%%" % (100 * seen[b["key"]]))
+                text = _("ativo em %s da gravação") % dec("%.0f%%" % (100 * seen[b["key"]]))
             else:
-                text = _("não apareceu nesta gravação")
+                text = _("não estava ativo")
             self.xp_seen[b["key"]].configure(text=text, fg=self.c["good"] if seen.get(b["key"]) else self.c["muted"])
+            # bônus que o replay mostra e que não apareceu: nome em cinza (a caixa marcada só quer dizer "contar")
+            absent = b["status"] is not None and b["key"] != "gear" and not seen.get(b["key"])
+            self.xp_checks[b["key"]].configure(fg=self.c["muted"] if absent else self.c["fg"])
         cal = (cfg.get("xp_factor") or {}).get(str(ses.gid))
         self.xp_measured.configure(text=(_("×%s (%s)") % (dec("%.2f" % cal[0]), cal[2])) if cal
                                    else _("ainda sem duas gravações seguidas"))

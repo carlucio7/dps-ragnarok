@@ -1363,4 +1363,16 @@ CATALOG = {
     "detectado (%s); a confirmar depois de morte ou troca de mapa": (
         "detected (%s); unconfirmed after a death or map change",
         "detectado (%s); por confirmar después de morir o cambiar de mapa"),
+    "Contar · Bônus": ("Count · Bonus", "Contar · Bono"),
+    "Nesta gravação": ("In this recording", "En esta grabación"),
+    "ativo em %s da gravação": ("active for %s of the recording", "activo en %s de la grabación"),
+    "não estava ativo": ("wasn't active", "no estaba activo"),
+    "Até o próximo nível": ("Time to next level", "Hasta el próximo nivel"),
+    "já subiu": ("already up", "ya subió"),
+    "faltam %s XP": ("%s XP to go", "faltan %s XP"),
+    "sem ritmo de XP no recorte": ("no XP pace in the selection", "sin ritmo de XP en la selección"),
+    "pela XP estimada": ("by the estimated XP", "según la XP estimada"),
+    "%d min": ("%d min", "%d min"),
+    "%d h %02d min": ("%d h %02d min", "%d h %02d min"),
+    "%d dias %d h": ("%d days %d h", "%d días %d h"),
 }

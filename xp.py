@@ -397,3 +397,28 @@ def gear_windows(c, event_on):
         if pct:
             out.append((t, end, pct))
     return out
+
+
+def time_to_level(c, cfg, per_min):
+    """(ms até o próximo nível no ritmo `per_min`, XP que falta) ou (None, None). Usa a XP do início da gravação
+    mais a XP estimada até agora; 0 se a estimativa já passou do nível."""
+    ses = c.session
+    if not per_min or per_min <= 0 or ses.base_exp is None or not ses.next_exp:
+        return None, None
+    left = ses.next_exp - ses.base_exp - estimate(c, cfg, None)["xp"]
+    if left <= 0:
+        return 0, 0
+    return left / per_min * 60000.0, left
+
+
+def span_text(ms):
+    """Duração longa em palavras: "45 min", "3 h 20 min", "4 dias 6 h"."""
+    from i18n import _
+    minutes = int(ms // 60000)
+    if minutes < 60:
+        return _("%d min") % max(1, minutes)
+    hours, minutes = divmod(minutes, 60)
+    if hours < 48:
+        return _("%d h %02d min") % (hours, minutes)
+    days, hours = divmod(hours, 24)
+    return _("%d dias %d h") % (days, hours)
