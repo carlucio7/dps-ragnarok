@@ -103,7 +103,7 @@ CATALOG = {
     "Grupo": ("Party", "Grupo"),
     "Skills": ("Skills", "Skills"),
     "Alvos": ("Targets", "Objetivos"),
-    "DPS Ragnarok": ("DPS Ragnarok", "DPS Ragnarok"),
+    "Replay Master": ("Replay Master", "Replay Master"),
     "Zerar": ("Reset", "Reiniciar"),
     "Tudo": ("All", "Todo"),
     "Luta atual": ("Current fight", "Pelea actual"),
@@ -306,8 +306,8 @@ CATALOG = {
     "Último encontro (acompanha)": ("Latest encounter (follows)", "Último encuentro (sigue)"),
     "Sem eventos de dano para exibir.": ("No damage events to show.", "No hay eventos de daño para mostrar."),
     "Nenhum dano neste recorte.": ("No damage in this range.", "No hay daño en este rango."),
-    "Análise — DPS Ragnarok   (Ctrl + roda do mouse: tamanho)": (
-        "Analysis — DPS Ragnarok   (Ctrl + mouse wheel: size)", "Análisis — DPS Ragnarok   (Ctrl + rueda: tamaño)"),
+    "Análise — Replay Master   (Ctrl + roda do mouse: tamanho)": (
+        "Analysis — Replay Master   (Ctrl + mouse wheel: size)", "Análisis — Replay Master   (Ctrl + rueda: tamaño)"),
     "Análise": ("Analysis", "Análisis"),
     "Copiar ranking": ("Copy ranking", "Copiar ranking"),
     "Recorte:": ("Range:", "Rango:"),
@@ -944,4 +944,409 @@ CATALOG = {
     "%s antes do começo da luta": ("%s before the fight started", "%s antes del inicio de la pelea"),
     "%s de luta": ("%s into the fight", "%s de pelea"),
     "Desde o começo": ("Since start", "Desde el inicio"),
+    # zona de risco (fase 3 do Betelgeuse)
+    "em cima do Betel": ("on top of Betel", "encima de Betel"),
+    "Ficou na zona de risco das armadilhas": ("Stood in the trap danger zone", "Se quedó en la zona de riesgo de las trampas"),
+    "de 1 s antes a 16 s depois de o Betel aparecer; segura é a coluna 2 ← abaixo do Betel (2 ← 1 ↓ a 2 ← 6 ↓), "
+    "1 → 1 ↓ de 7,5 a 14,5 s ou fora do alcance das armadilhas (canto esquerdo da arena)": (
+        "from 1 s before to 16 s after Betel appears; safe is the column 2 ← below Betel (2 ← 1 ↓ to 2 ← 6 ↓), "
+        "1 → 1 ↓ from 7.5 to 14.5 s, or out of the traps' reach (left corner of the arena)",
+        "de 1 s antes a 16 s después de que aparece Betel; seguro es la columna 2 ← debajo de Betel (2 ← 1 ↓ a "
+        "2 ← 6 ↓), 1 → 1 ↓ de 7,5 a 14,5 s o fuera del alcance de las trampas (esquina izquierda de la arena)"),
+    "%s %s (%d golpe(s))": ("%s %s (%d hit(s))", "%s %s (%d golpe(s))"),
+    "Zona de risco": ("Danger zone", "Zona de riesgo"),
+    "Zona de risco (sem fase 3)": ("Danger zone (no phase 3)", "Zona de riesgo (sin fase 3)"),
+    "Só na fase 3 do Betelgeuse, de 1 s antes a 16 s depois de ele aparecer. Zona segura: a coluna 2 ← abaixo do "
+    "Betel (de 2 ← 1 ↓ a 2 ← 6 ↓), 1 → 1 ↓ de 7,5 a 14,5 s e tudo fora do alcance das armadilhas (o canto esquerdo "
+    "da arena). Atenção para quem passou 40% do tempo ou mais (e 2 s ou mais) fora dela.": (
+        "Only in Betelgeuse's phase 3, from 1 s before to 16 s after it appears. Safe zone: the column 2 ← below "
+        "Betel (2 ← 1 ↓ to 2 ← 6 ↓), 1 → 1 ↓ from 7.5 to 14.5 s, and anything out of the traps' reach (the left "
+        "corner of the arena). Warning for whoever spent 40% of the time or more (and 2 s or more) outside it.",
+        "Solo en la fase 3 de Betelgeuse, de 1 s antes a 16 s después de que aparece. Zona segura: la columna 2 ← "
+        "debajo de Betel (de 2 ← 1 ↓ a 2 ← 6 ↓), 1 → 1 ↓ de 7,5 a 14,5 s y todo lo que está fuera del alcance de "
+        "las trampas (la esquina izquierda de la arena). Atención para quien pasó 40% del tiempo o más (y 2 s o "
+        "más) fuera de ella."),
+    "Tempo olhado": ("Time checked", "Tiempo revisado"),
+    "Na zona de risco": ("In the danger zone", "En la zona de riesgo"),
+    "% em risco": ("% at risk", "% en riesgo"),
+    "Golpes de armadilha": ("Trap hits", "Golpes de trampa"),
+    "Golpes na zona de risco": ("Hits in the danger zone", "Golpes en la zona de riesgo"),
+    "Onde mais ficou": ("Where they stood most", "Dónde estuvo más"),
+    # assincronia entre os DPS
+    "Golpes fortes fora da rajada dos outros DPS": ("Strong hits outside the other DPS's burst",
+                                                    "Golpes fuertes fuera de la ráfaga de los otros DPS"),
+    "golpe de %s ou mais (%s do HP) mais de %s longe de qualquer golpe forte dos outros DPS vivos": (
+        "hit of %s or more (%s of HP) more than %s away from any strong hit by the other living DPS",
+        "golpe de %s o más (%s del HP) a más de %s de cualquier golpe fuerte de los otros DPS vivos"),
+    "%s %d×": ("%s %d×", "%s %d×"),
+    "%s: %s": ("%s: %s", "%s: %s"),
+    "%s (sozinho)": ("%s (alone)", "%s (solo)"),
+    "%s (%s do mais perto)": ("%s (%s from the nearest)", "%s (%s del más cercano)"),
+    # Cinzas Vulcânicas
+    "%s (de %s)": ("%s (%s's)", "%s (de %s)"),
+    "fogo dá 150%% do dano no chefe com as cinzas · %d uso(s)": (
+        "fire deals 150%% damage to the boss in the ash · %d use(s)",
+        "el fuego hace 150%% de daño al jefe con las cenizas · %d uso(s)"),
+    "o status nunca apareceu no chefe em %d uso(s): chefe imune": (
+        "the status never showed on the boss in %d use(s): boss is immune",
+        "el estado nunca apareció en el jefe en %d uso(s): jefe inmune"),
+    "Cinzas Vulcânicas não pegaram no chefe": ("Volcanic Ash didn't stick to the boss",
+                                               "Cenizas Volcánicas no afectaron al jefe"),
+    "a nuvem foi usada %d vez(es), mas o status das cinzas nunca apareceu no chefe (Garra Sombria, Pólen e Vício "
+    "Mágico aparecem); chefes costumam ser imunes: o turno do homúnculo pode ir para outra skill": (
+        "the cloud was used %d time(s), but the ash status never showed on the boss (Dark Claw, Pollen and Magic "
+        "Poison do); bosses are usually immune: the homunculus's turn can go to another skill",
+        "la nube se usó %d vez(es), pero el estado de cenizas nunca apareció en el jefe (Garra Sombría, Polen y "
+        "Vicio Mágico sí aparecen); los jefes suelen ser inmunes: el turno del homúnculo puede ir a otra habilidad"),
+    # linha do tempo: eventos individuais e filtros
+    "ataque básico": ("basic attack", "ataque básico"),
+    "Golpes dos jogadores": ("Players' hits", "Golpes de los jugadores"),
+    "Skills dos jogadores": ("Players' skills", "Habilidades de los jugadores"),
+    "Golpes dos monstros": ("Monsters' hits", "Golpes de los monstruos"),
+    "Skills dos monstros": ("Monsters' skills", "Habilidades de los monstruos"),
+    "errou %s": ("missed %s", "falló a %s"),
+    "conjurou %s (%s)": ("cast %s (%s)", "conjuró %s (%s)"),
+    "%s em %s": ("%s on %s", "%s a %s"),
+    " (crítico)": (" (critical)", " (crítico)"),
+    " em %s": (" on %s", " a %s"),
+    "em %s": ("on %s", "a %s"),
+    "Só na lista de eventos": ("Event list only", "Solo en la lista de eventos"),
+    "Quem:": ("Who:", "Quién:"),
+    "Chefe e monstros": ("Boss and monsters", "Jefe y monstruos"),
+    "Só o trecho visível do gráfico": ("Only the visible part of the chart", "Solo el tramo visible del gráfico"),
+    "Eventos — %d no trecho visível": ("Events — %d in the visible part", "Eventos — %d en el tramo visible"),
+    "Eventos — %d": ("Events — %d", "Eventos — %d"),
+    "golpe forte": ("strong hit", "golpe fuerte"),
+    # dano por fase
+    "Dano por fase": ("Damage per phase", "Daño por fase"),
+    "%s: %s em %s (%s/s), %d jogador(es)": ("%s: %s in %s (%s/s), %d player(s)", "%s: %s en %s (%s/s), %d jugador(es)"),
+    "% da luta": ("% of fight", "% de la pelea"),
+    "Por fase (lutas contra chefe no recorte)": ("Per phase (boss fights in the selection)",
+                                                 "Por fase (peleas contra jefes en la selección)"),
+    "Por fase: nenhuma luta contra chefe no recorte": ("Per phase: no boss fight in the selection",
+                                                       "Por fase: ninguna pelea contra jefe en la selección"),
+    "Luta": ("Fight", "Pelea"),
+    "Dano do grupo": ("Group damage", "Daño del grupo"),
+    "DPS do grupo": ("Group DPS", "DPS del grupo"),
+    "Dano do jogador": ("Player damage", "Daño del jugador"),
+    "% do jogador": ("Player %", "% del jugador"),
+    "DPS do jogador": ("Player DPS", "DPS del jugador"),
+    "Total": ("Total", "Total"),
+    # /where no widget
+    "Onde quem grava está (mapa e coordenadas). Clique para copiar o /navi": (
+        "Where the recorder is (map and coordinates). Click to copy the /navi",
+        "Dónde está quien graba (mapa y coordenadas). Haz clic para copiar el /navi"),
+    "Copiado: %s": ("Copied: %s", "Copiado: %s"),
+    # salvar qualquer luta como teste
+    "Salvar luta como teste…": ("Save fight as test…", "Guardar pelea como prueba…"),
+    "Salvar luta como teste": ("Save fight as test", "Guardar pelea como prueba"),
+    "Gravado por %s · o equipamento salvo é o dessa pessoa": ("Recorded by %s · the saved equipment is theirs",
+                                                            "Grabado por %s · el equipo guardado es el de esa persona"),
+    "Rótulo:": ("Label:", "Etiqueta:"),
+    "ex.: com Coroa +12, sem Impositio": ("e.g. with +12 Crown, no Impositio", "ej.: con Corona +12, sin Impositio"),
+    "Cancelar": ("Cancel", "Cancelar"),
+    "Salvar": ("Save", "Guardar"),
+    "%d teste(s). Os encontros contra bonecos de treino são salvos sozinhos; qualquer outra luta (inclusive de replays "
+    "de outras pessoas) dá para salvar no botão. Ctrl + clique escolhe dois para comparar.": (
+        "%d test(s). Fights against training dummies are saved on their own; any other fight (including from other "
+        "people's replays) can be saved with the button. Ctrl + click picks two to compare.",
+        "%d prueba(s). Las peleas contra muñecos de entrenamiento se guardan solas; cualquier otra pelea (incluso de "
+        "replays de otras personas) se puede guardar con el botón. Ctrl + clic elige dos para comparar."),
+    # drops
+    "Drops": ("Drops", "Drops"),
+    "Itens que caíram": ("Items dropped", "Objetos que cayeron"),
+    "Pegos por você": ("Picked by you", "Recogidos por ti"),
+    "Pegos por outros": ("Picked by others", "Recogidos por otros"),
+    "Prêmios de MVP": ("MVP rewards", "Premios de MVP"),
+    "Itens diferentes": ("Different items", "Objetos distintos"),
+    "Itens que caíram de monstros no recorte. \"Pego por\" vem da ação de pegar do jogo; quando ela não aparece, "
+    "vale o item que entrou na bolsa de quem grava logo depois de sumir do chão. A experiência ganha não fica gravada "
+    "no replay (só o total no começo da gravação), então não dá para mostrar XP.": (
+        "Items monsters dropped in the selection. \"Picked by\" comes from the game's pick-up action; when it isn't "
+        "there, an item that entered the recorder's bag right after leaving the ground counts. Experience gained isn't "
+        "saved in the replay (only the total when recording starts), so XP can't be shown.",
+        "Objetos que soltaron los monstruos en la selección. \"Recogido por\" viene de la acción de recoger del juego; "
+        "cuando no aparece, cuenta el objeto que entró en la bolsa de quien graba justo después de salir del suelo. La "
+        "experiencia ganada no queda grabada en el replay (solo el total al comenzar la grabación), así que no se "
+        "puede mostrar la XP."),
+    "Por item": ("By item", "Por objeto"),
+    "Item": ("Item", "Objeto"),
+    "Caíram": ("Dropped", "Cayeron"),
+    "Você pegou": ("You picked", "Recogiste"),
+    "MVP": ("MVP", "MVP"),
+    "Cada drop": ("Each drop", "Cada drop"),
+    "Qtd.": ("Qty.", "Cant."),
+    "Monstro": ("Monster", "Monstruo"),
+    "Onde": ("Where", "Dónde"),
+    "Destino": ("Outcome", "Destino"),
+    "pego por você": ("picked by you", "recogido por ti"),
+    "pego por %s": ("picked by %s", "recogido por %s"),
+    "sumiu %s depois": ("gone %s later", "desapareció %s después"),
+    "ainda no chão": ("still on the ground", "todavía en el suelo"),
+    "prêmio de MVP": ("MVP reward", "premio de MVP"),
+    "na sua bolsa": ("in your bag", "en tu bolsa"),
+    "Itens que caíram e quantos você pegou": ("Items dropped and how many you picked",
+                                             "Objetos que cayeron y cuántos recogiste"),
+    "você pegou %d": ("you picked %d", "recogiste %d"),
+    "ninguém pegou ainda": ("nobody picked yet", "nadie lo recogió aún"),
+    "Nenhum drop neste recorte.": ("No drops in this selection.", "Ningún drop en esta selección."),
+    "Os itens que caírem de monstros aparecem aqui.": ("Items dropped by monsters show up here.",
+                                                       "Los objetos que suelten los monstruos aparecen aquí."),
+    # buffs e debuffs: quanto cada efeito rendeu
+    "Buffs e Debuffs": ("Buffs and Debuffs", "Buffs y Debuffs"),
+    "Rendeu = quanto o dano cairia sem o efeito, pela fórmula de cada um (rAthena e textos do jogo), golpe a golpe e "
+    "só onde ele vale (fogo, físico, corpo a corpo...). É estimativa: os que não mudam o dano direto (Bênção, "
+    "Agilidade...) aparecem só com o tempo ativo.": (
+        "Gain = how much damage would drop without the effect, by each one's formula (rAthena and the game's texts), "
+        "hit by hit and only where it applies (fire, physical, melee...). It's an estimate: the ones that don't change "
+        "damage directly (Blessing, Agility...) only show their active time.",
+        "Rindió = cuánto bajaría el daño sin el efecto, según la fórmula de cada uno (rAthena y textos del juego), "
+        "golpe a golpe y solo donde aplica (fuego, físico, cuerpo a cuerpo...). Es una estimación: los que no cambian "
+        "el daño directo (Bendición, Agilidad...) solo muestran el tiempo activo."),
+    "Rendeu": ("Gain", "Rindió"),
+    "Ativo": ("Active", "Activo"),
+    "Como conta": ("How it counts", "Cómo cuenta"),
+    "Debuffs no chefe — escolha uma luta contra chefe": ("Debuffs on the boss — pick a boss fight",
+                                                         "Debuffs en el jefe — elige una pelea contra jefe"),
+    "Debuffs no chefe — %s de dano olhado": ("Debuffs on the boss — %s of damage checked",
+                                             "Debuffs en el jefe — %s de daño revisado"),
+    "Buffs de %s — %% do tempo em combate, vivo (%s)": ("%s's buffs — %% of time in combat, alive (%s)",
+                                                       "Buffs de %s — %% del tiempo en combate, vivo (%s)"),
+    "Nenhum efeito com dano estimado nesta luta (ou nenhuma luta contra chefe no recorte).": (
+        "No effect with estimated damage in this fight (or no boss fight in the selection).",
+        "Ningún efecto con daño estimado en esta pelea (o ninguna pelea contra jefe en la selección)."),
+    "%s do dano · %s · ativo %s": ("%s of damage · %s · active %s", "%s del daño · %s · activo %s"),
+    "sem estimativa de dano": ("no damage estimate", "sin estimación de daño"),
+    "+50% em todo o dano (todas as propriedades)": ("+50% to all damage (every element)",
+                                                   "+50% a todo el daño (todas las propiedades)"),
+    "+100% no dano de fogo (resistência a fogo −100%)": ("+100% fire damage (fire resistance −100%)",
+                                                        "+100% al daño de fuego (resistencia a fuego −100%)"),
+    "+100% no dano de terra": ("+100% earth damage", "+100% al daño de tierra"),
+    "+50% no dano de fogo (iRO Wiki); chefes costumam ser imunes": (
+        "+50% fire damage (iRO Wiki); bosses are usually immune",
+        "+50% al daño de fuego (iRO Wiki); los jefes suelen ser inmunes"),
+    "+30% por nível no dano físico corpo a corpo (metade em chefe)": (
+        "+30% per level to physical melee damage (half on bosses)",
+        "+30% por nivel al daño físico cuerpo a cuerpo (la mitad en jefes)"),
+    "+50% no dano físico": ("+50% physical damage", "+50% al daño físico"),
+    "+5% no dano físico de longe em chefe (+10% nos outros)": (
+        "+5% ranged physical damage on bosses (+10% on others)",
+        "+5% al daño físico a distancia en jefes (+10% en los demás)"),
+    "+5% por nível no dano físico": ("+5% per level to physical damage", "+5% por nivel al daño físico"),
+    "dobra o 1º golpe depois de aplicada": ("doubles the 1st hit after it's applied",
+                                            "duplica el 1er golpe después de aplicarla"),
+    "usada, mas o status nunca apareceu no chefe: imune": ("used, but the status never showed on the boss: immune",
+                                                           "usada, pero el estado nunca apareció en el jefe: inmune"),
+    # aba Equipamento: lista do que quem gravou vestia e o visual montado com os sprites do jogo
+    "Momento:": ("Moment:", "Momento:"),
+    "Início da gravação": ("Start of the recording", "Inicio de la grabación"),
+    "%s · trocou %s": ("%s · changed %s", "%s · cambió %s"),
+    "Equipamento de %s": ("%s's equipment", "Equipo de %s"),
+    "quem gravou": ("the recorder", "quien grabó"),
+    "Equipamento — o replay não trouxe a lista de itens de quem gravou": (
+        "Equipment — the replay didn't include the recorder's item list",
+        "Equipo — el replay no trajo la lista de ítems de quien grabó"),
+    "Cabeça:": ("Head:", "Cabeza:"),
+    "Parado": ("Standing", "Quieto"),
+    "Andando": ("Walking", "Caminando"),
+    "Sentado": ("Sitting", "Sentado"),
+    "Em guarda": ("Ready", "En guardia"),
+    "Atacando": ("Attacking", "Atacando"),
+    "Conjurando": ("Casting", "Conjurando"),
+    "Levando dano": ("Taking damage", "Recibiendo daño"),
+    "Caído": ("Down", "Caído"),
+    "Frente": ("Front", "Frente"),
+    "Esquerda": ("Left", "Izquierda"),
+    "Direita": ("Right", "Derecha"),
+    "Carregando os sprites do jogo…": ("Loading the game's sprites…", "Cargando los sprites del juego…"),
+    "Não deu para ler o data.grf do jogo (%s).": ("Couldn't read the game's data.grf (%s).",
+                                                  "No se pudo leer el data.grf del juego (%s)."),
+    "Jogo não encontrado: o visual é montado com os sprites do data.grf da instalação.": (
+        "Game not found: the look is built from the installation's data.grf sprites.",
+        "Juego no encontrado: el aspecto se arma con los sprites del data.grf de la instalación."),
+    "Sem sprite para esta classe.": ("No sprite for this class.", "Sin sprite para esta clase."),
+    "cabelo %d, cor %d · roupa cor %d": ("hair %d, color %d · outfit color %d", "pelo %d, color %d · ropa color %d"),
+    "direção %s": ("facing %s", "dirección %s"),
+    "sem sprite no jogo: %s": ("no sprite in the game: %s", "sin sprite en el juego: %s"),
+    "corpo": ("body", "cuerpo"),
+    "cabeça": ("head", "cabeza"),
+    "chapéu de baixo": ("lower headgear", "casco inferior"),
+    "chapéu do meio": ("middle headgear", "casco medio"),
+    "chapéu de cima": ("upper headgear", "casco superior"),
+    "capa": ("garment", "capa"),
+    # XP: nível no início da gravação e XP exata até a próxima gravação
+    "Drops e XP": ("Drops and XP", "Drops y XP"),
+    "Nível no início": ("Level at start", "Nivel al inicio"),
+    "XP até a próxima gravação": ("XP until the next recording", "XP hasta la próxima grabación"),
+    "sem gravação depois desta": ("no recording after this one", "sin grabación después de esta"),
+    "até %02d/%02d %02d:%02d": ("until %02d/%02d %02d:%02d", "hasta %02d/%02d %02d:%02d"),
+    "+%d níveis": ("+%d levels", "+%d niveles"),
+    "Nível %d": ("Level %d", "Nivel %d"),
+    "+%s XP até a próx. gravação": ("+%s XP until next recording", "+%s XP hasta la próx. grabación"),
+    "XP no início": ("XP at start", "XP al inicio"),
+    "Itens que caíram de monstros no recorte. \"Pego por\" vem da ação de pegar do jogo; quando ela não aparece, vale "
+    "o item que entrou na bolsa de quem grava logo depois de sumir do chão. A XP ganha não fica no replay: o jogo "
+    "guarda só a XP total no início de cada gravação. Por isso a XP exata vai do início desta gravação ao início da "
+    "próxima do mesmo personagem (na mesma pasta), incluindo o que você fez entre as duas.": (
+        "Items that dropped from monsters in the selection. \"Picked by\" comes from the game's pick-up action; when "
+        "it's missing, it's the item that entered the recorder's bag right after leaving the ground. XP gained isn't "
+        "in the replay: the game only stores the total XP at the start of each recording. So the exact XP goes from "
+        "the start of this recording to the start of the same character's next one (same folder), including whatever "
+        "you did in between.",
+        "Ítems que cayeron de monstruos en la selección. \"Recogido por\" viene de la acción de recoger del juego; "
+        "cuando no aparece, vale el ítem que entró en la bolsa de quien graba justo después de salir del suelo. La XP "
+        "ganada no queda en el replay: el juego guarda solo la XP total al inicio de cada grabación. Por eso la XP "
+        "exacta va del inicio de esta grabación al inicio de la próxima del mismo personaje (misma carpeta), "
+        "incluyendo lo que hiciste entre las dos."),
+    "Efeito": ("Effect", "Efecto"),
+    # drops separados por destino e XP estimada (widget e análise)
+    "XP": ("XP", "XP"),
+    "Itens que você pegou": ("Items you picked up", "Ítems que recogiste"),
+    "XP estimada dos seus abates e seu nível": ("Estimated XP from your kills and your level",
+                                                "XP estimada de tus muertes y tu nivel"),
+    "Você não pegou nenhum item aqui.": ("You didn't pick up any item here.", "No recogiste ningún ítem aquí."),
+    "O que caiu no chão e o que outros pegaram fica na análise (aba Drops).": (
+        "What stayed on the ground or others picked up is in the analysis (Drops tab).",
+        "Lo que quedó en el suelo o recogieron otros está en el análisis (pestaña Drops)."),
+    "×%s calibrado": ("×%s calibrated", "×%s calibrado"),
+    "×%s (bônus +%d%%)": ("×%s (bonus +%d%%)", "×%s (bono +%d%%)"),
+    "sem bônus (calibre na análise)": ("no bonus (calibrate in the analysis)", "sin bono (calibra en el análisis)"),
+    "sem bônus": ("no bonus", "sin bono"),
+    "XP estimada": ("Estimated XP", "XP estimada"),
+    "XP por hora": ("XP per hour", "XP por hora"),
+    "no início da gravação": ("at the start of the recording", "al inicio de la grabación"),
+    "XP real até a próxima gravação": ("Real XP until the next recording", "XP real hasta la próxima grabación"),
+    "%d sem XP conhecida": ("%d with unknown XP", "%d sin XP conocida"),
+    "Pegos por outros jogadores": ("Picked up by other players", "Recogidos por otros jugadores"),
+    "Pegos por outros jogadores — %d": ("Picked up by other players — %d", "Recogidos por otros jugadores — %d"),
+    "Ficaram no chão": ("Left on the ground", "Quedaron en el suelo"),
+    "Ficaram no chão — %d": ("Left on the ground — %d", "Quedaron en el suelo — %d"),
+    "Você pegou — %d": ("You picked up — %d", "Recogiste — %d"),
+    "De onde": ("From", "De dónde"),
+    "Quem pegou": ("Picked up by", "Quién recogió"),
+    "Por monstro": ("Per monster", "Por monstruo"),
+    "XP estimada no recorte": ("Estimated XP in selection", "XP estimada en la selección"),
+    "Fator de bônus": ("Bonus factor", "Factor de bono"),
+    "Bônus de XP somado (%):": ("Total XP bonus (%):", "Bono de XP sumado (%):"),
+    "Usar": ("Use", "Usar"),
+    "Esquecer calibração": ("Forget calibration", "Olvidar calibración"),
+    "calibrado com %s": ("calibrated with %s", "calibrado con %s"),
+    "calibrado em %s": ("calibrated on %s", "calibrado el %s"),
+    "bônus informado: +%g%%": ("bonus entered: +%g%%", "bono informado: +%g%%"),
+    "desconhecida": ("unknown", "desconocida"),
+    "Nível": ("Level", "Nivel"),
+    "Penalidade": ("Penalty", "Penalización"),
+    "Por abate": ("Per kill", "Por muerte"),
+    "Itens que caíram de monstros no recorte. \"Pego por\" vem da ação de pegar do jogo; quando ela não aparece, vale "
+    "o item que entrou na bolsa de quem grava logo depois de sumir do chão.": (
+        "Items that dropped from monsters in the selection. \"Picked up by\" comes from the game's pick-up action; "
+        "when it's missing, it's the item that entered the recorder's bag right after leaving the ground.",
+        "Ítems que cayeron de monstruos en la selección. \"Recogido por\" viene de la acción de recoger del juego; "
+        "cuando no aparece, vale el ítem que entró en la bolsa de quien graba justo después de salir del suelo."),
+    "O replay não grava a XP ganha: só a XP total no início de cada gravação. A estimativa soma a XP de cada monstro "
+    "que você ajudou a matar (rAthena e Divine Pride), com a penalidade de nível e a sua parte do dano, vezes o fator "
+    "de bônus (servidor, VIP, manuais, equipamentos...). O replay só mostra que um bônus está ativo, não quanto ele "
+    "dá: o fator é calibrado sozinho quando uma gravação começa logo depois de outra do mesmo personagem (a XP exata "
+    "entre as duas ÷ a XP estimada). Sem calibração, vale o bônus que você informar (os bônus de XP somam: 100% do "
+    "servidor + 20% do VIP + 50% do manual = 170%).": (
+        "The replay doesn't store XP gained: only the total XP at the start of each recording. The estimate adds up "
+        "the XP of each monster you helped kill (rAthena and Divine Pride), with the level penalty and your share of "
+        "the damage, times the bonus factor (server, VIP, manuals, equipment...). The replay only shows that a bonus "
+        "is active, not how much it gives: the factor calibrates itself when a recording starts right after another "
+        "one of the same character (the exact XP between them ÷ the estimated XP). Without calibration, the bonus you "
+        "enter is used (XP bonuses add up: 100% server + 20% VIP + 50% manual = 170%).",
+        "El replay no graba la XP ganada: solo la XP total al inicio de cada grabación. La estimación suma la XP de "
+        "cada monstruo que ayudaste a matar (rAthena y Divine Pride), con la penalización de nivel y tu parte del "
+        "daño, por el factor de bono (servidor, VIP, manuales, equipos...). El replay solo muestra que un bono está "
+        "activo, no cuánto da: el factor se calibra solo cuando una grabación empieza justo después de otra del mismo "
+        "personaje (la XP exacta entre las dos ÷ la XP estimada). Sin calibración, vale el bono que informes (los "
+        "bonos de XP se suman: 100% del servidor + 20% del VIP + 50% del manual = 170%)."),
+    # XP: lista de bônus, XP por minuto e gráfico
+    "Bônus de XP": ("XP bonuses", "Bonos de XP"),
+    "XP ao longo do tempo": ("XP over time", "XP a lo largo del tiempo"),
+    "Pela lista abaixo": ("From the list below", "Según la lista de abajo"),
+    "Medido nas gravações": ("Measured from recordings", "Medido en las grabaciones"),
+    "Valor fixo (%):": ("Fixed value (%):", "Valor fijo (%):"),
+    "recorte curto demais": ("selection too short", "selección demasiado corta"),
+    "medido em %s": ("measured on %s", "medido el %s"),
+    "pela lista de bônus": ("from the bonus list", "según la lista de bonos"),
+    "marque se valia": ("tick it if it applied",
+                        "márcalo si aplicaba"),
+    "Pela lista: ×%s": ("From the list: ×%s", "Según la lista: ×%s"),
+    "/min": ("/min", "/min"),
+    "total": ("total", "total"),
+    "XP por minuto": ("XP per minute", "XP por minuto"),
+    "Manual usado:": ("Manual used:", "Manual usado:"),
+    "valor fixo: +%g%%": ("fixed value: +%g%%", "valor fijo: +%g%%"),
+    "não apareceu nesta gravação": ("didn't show in this recording", "no apareció en esta grabación"),
+    "ainda sem duas gravações seguidas": ("no back-to-back recordings yet", "todavía sin dos grabaciones seguidas"),
+    "medido: ×%s (%s%% da lista)": ("measured: ×%s (%s%% vs. the list)", "medido: ×%s (%s%% respecto a la lista)"),
+    "Nenhum abate com XP conhecida no recorte.": ("No kill with known XP in the selection.",
+                                                  "Ninguna muerte con XP conocida en la selección."),
+    "do nível · %s/min": ("of the level · %s/min", "del nivel · %s/min"),
+    "detectado (%s da gravação)": ("detected (%s of the recording)", "detectado (%s de la grabación)"),
+    "×%s (%s)": ("×%s (%s)", "×%s (%s)"),
+    "Esquecer": ("Forget", "Olvidar"),
+    "×%s pela lista": ("×%s from list", "×%s según lista"),
+    "×%s medido": ("×%s measured", "×%s medido"),
+    "×%s fixo": ("×%s fixed", "×%s fijo"),
+    "%s/h": ("%s/h", "%s/h"),
+    "Evento do servidor": ("Server event", "Evento del servidor"),
+    "VIP (Bônus de EXP II, 30 dias)": ("VIP (EXP Bonus II, 30 days)", "VIP (Bono de EXP II, 30 días)"),
+    "Cetro do Coração Lunar (Bônus de EXP, 24 h)": ("Lunar Heart Scepter (EXP Bonus, 24 h)",
+                                                    "Cetro del Corazón Lunar (Bono de EXP, 24 h)"),
+    "Kafra Buff / Manual Kafra (7 dias)": ("Kafra Buff / Kafra Manual (7 days)", "Kafra Buff / Manual Kafra (7 días)"),
+    "Manual de combate (consumível)": ("Battle manual (consumable)", "Manual de combate (consumible)"),
+    "Banquete de Njord": ("Njord's Feast", "Banquete de Njord"),
+    "Milagre Solar, Lunar e Estelar (alvos estelares)": ("Miracle of the Sun, Moon and Stars (star targets)",
+                                                         "Milagro Solar, Lunar y Estelar (objetivos estelares)"),
+    "Outros (equipamentos, cartas, alvos do ódio...)": ("Others (equipment, cards, hatred targets...)",
+                                                        "Otros (equipos, cartas, objetivos del odio...)"),
+    "Manual de Combate": ("Field Manual", "Manual de Combate"),
+    "Manual de Combate com Chiclete": ("Field x Gum Manual", "Manual de Combate con Chicle"),
+    "Manual de Campo Avançado": ("Advanced Field Manual", "Manual de Campo Avanzado"),
+    "Enciclopédia de Combate": ("Battle Tome", "Enciclopedia de Combate"),
+    "Manual de Combate HE": ("HE Battle Manual", "Manual de Combate HE"),
+    "Manual de Combate x3": ("Battle Manual X3", "Manual de Combate x3"),
+    "O replay não grava a XP ganha: só a XP total no início de cada gravação. A estimativa soma a XP de cada monstro "
+    "que você ajudou a matar (rAthena e Divine Pride), com a penalidade de nível e a sua parte do dano, vezes os "
+    "bônus. Todos os bônus de XP somam; os manuais e outros consumíveis competem entre si (vale o maior). O replay "
+    "mostra quando VIP, Cetro, Kafra Buff, manual e Banquete de Njord estão ativos, mas não o evento do servidor nem "
+    "o Milagre: marque-os. \"Medido\" usa a XP exata entre duas gravações seguidas do mesmo personagem.": (
+        "The replay doesn't store XP gained: only the total XP at the start of each recording. The estimate adds up "
+        "the XP of each monster you helped kill (rAthena and Divine Pride), with the level penalty and your share of "
+        "the damage, times the bonuses. All XP bonuses add up; manuals and other consumables compete (the highest "
+        "one counts). The replay shows when VIP, Scepter, Kafra Buff, a manual and Njord's Feast are active, but not "
+        "the server event or the Miracle: tick those. \"Measured\" uses the exact XP between two back-to-back "
+        "recordings of the same character.",
+        "El replay no graba la XP ganada: solo la XP total al inicio de cada grabación. La estimación suma la XP de "
+        "cada monstruo que ayudaste a matar (rAthena y Divine Pride), con la penalización de nivel y tu parte del "
+        "daño, por los bonos. Todos los bonos de XP se suman; los manuales y otros consumibles compiten entre sí "
+        "(vale el mayor). El replay muestra cuándo están activos VIP, Cetro, Kafra Buff, un manual y el Banquete de "
+        "Njord, pero no el evento del servidor ni el Milagro: márcalos. \"Medido\" usa la XP exacta entre dos "
+        "grabaciones seguidas del mismo personaje."),
+    # Milagre Solar, Lunar e Estelar e bônus de XP dos itens
+    "auto": ("auto", "auto"),
+    "lendo os itens do jogo…": ("reading the game's items…", "leyendo los ítems del juego…"),
+    "nenhum item vestido dá XP": ("no worn item gives XP", "ningún ítem equipado da XP"),
+    "+%d%%: %s": ("+%d%%: %s", "+%d%%: %s"),
+    "★ MILAGRE ★": ("★ MIRACLE ★", "★ MILAGRO ★"),
+    "todos os monstros são alvos estelares por 1 hora": ("every monster is a star target for 1 hour",
+                                                         "todos los monstruos son objetivos estelares por 1 hora"),
+    "Festejar o Milagre Solar, Lunar e Estelar (Mestre Taekwon)": (
+        "Celebrate the Miracle of the Sun, Moon and Stars (Star Gladiator)",
+        "Festejar el Milagro Solar, Lunar y Estelar (Maestro Taekwon)"),
+    "★ Milagre · %d min": ("★ Miracle · %d min", "★ Milagro · %d min"),
+    "Milagre Solar, Lunar e Estelar": ("Miracle of the Sun, Moon and Stars", "Milagro Solar, Lunar y Estelar"),
+    "Todos os monstros viram alvos estelares por 1 hora (+XP com a Bênção Estelar)": (
+        "Every monster becomes a star target for 1 hour (+XP with Blessing of the Stars)",
+        "Todos los monstruos se vuelven objetivos estelares por 1 hora (+XP con la Bendición Estelar)"),
+    "★ MILAGRE! Todos os monstros viraram alvos estelares por 1 hora": (
+        "★ MIRACLE! Every monster is now a star target for 1 hour",
+        "★ ¡MILAGRO! Todos los monstruos son objetivos estelares por 1 hora"),
+    "Equipamentos, visuais e cartas (texto dos itens)": ("Equipment, costumes and cards (item texts)",
+                                                         "Equipos, visuales y cartas (texto de los ítems)"),
+    "Tocar um som no Milagre": ("Play a sound on the Miracle", "Tocar un sonido en el Milagro"),
+    "Fase:": ("Phase:", "Fase:"),
+    "Jogadores marcados": ("Ticked players", "Jugadores marcados"),
 }

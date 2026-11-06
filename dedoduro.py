@@ -19,6 +19,7 @@ Buffs dos outros que já estavam ativos quando a gravação começou só aparece
 gravação, o estado dele é desconhecido ("?") e não vira acusação.
 """
 
+import bisect
 import collections
 
 import analysis as an
@@ -80,6 +81,15 @@ ELO_SKILL = 5475              # o uso da skill todo mundo vê
 ELO_MS = 900000               # dura até 15 min (nv 10) e sai ao morrer
 STRONG_HIT = 0.005            # dano no chefe antes da Garra Sombria da fase acima disso do HP = erro
 APPEAR_MS = 15000             # o monstro da fase apareceu até isso antes do 1º golpe: a fase começa ali
+# Zona de risco: fase 3 do Betelgeuse (análise das armadilhas em 5 lutas da dificuldade 3). Segura é a coluna 2
+# células à esquerda do Betel, de 1 a 6 abaixo dele; de 7,5 a 14,5 s também 1 → 1 ↓ (a rota); e tudo fora do
+# alcance das armadilhas (o canto esquerdo da arena, onde ficam os suportes).
+RISK_BOSS, RISK_PHASE = 20994, 3
+RISK_FROM, RISK_TO = -1000, 16000      # ms em relação ao aparecimento do Betel da fase 3
+RISK_SWAP = (7500, 14500)              # quando a rota manda ficar em 1 → 1 ↓
+TRAP_AREA = (140, 171, 62, 110)        # x de, x até, y de, y até: onde alguma armadilha alcança
+RISK_MIN_MS, RISK_MIN_SHARE = 2000, 0.4
+RISK_STEP = 100
 EXTRA_SOURCES = {1402: [5296], 1121: [361], 110: [361]}   # status sem skill no rAthena
 # Buffs que o jogo não mostra nos outros jogadores (conferido nos replays): o início nunca chega e o fim
 # só chega quando acaba sozinho (na morte, nem isso). Desses, só dá para cobrar de quem gravou.
@@ -395,8 +405,14 @@ class Ctx:
             # chefe visto muito antes de a luta começar conta do primeiro golpe
             seen = c.spawned.get(a)
             appear = seen if seen is not None and s - APPEAR_MS <= seen <= s else s
-            self.phases.append(dict(n=i + 1, aid=a, start=s, appear=appear, end=e,
+            self.phases.append(dict(n=i + 1, i=i, aid=a, start=s, appear=appear, end=e,
                                     climax_start=cs if cs < e else None, win=win))
+        # número de verdade: se a fase 2 foi pulada, o 2º monstro é a fase 3 (meter.PHASE_MARKERS)
+        appears = [p["appear"] for p in self.phases]
+        for p, n in zip(self.phases, c.phase_numbers(appears)):
+            p["n"] = n
+            nxt = appears[p["i"] + 1] - meter.MARK_EARLY_MS if p["i"] + 1 < len(appears) else None
+            p["marked"] = c.phase_marked(p["appear"], nxt)
         self.multi = len(self.phases) > 1
         self.whole = _("Todas as fases") if self.multi else _("Luta inteira")
         self.st = collections.defaultdict(list)        # aid -> [(efst, início, fim)]
@@ -428,7 +444,7 @@ class Ctx:
             self.first_death.setdefault(a, t)
 
     def phase_name(self, p):
-        return _("Fase %d") % p["n"] if self.multi else _("Clímax")
+        return _("Fase %d") % p["n"] if self.multi or p.get("marked") else _("Clímax")
 
     def phase_at(self, t):
         for p in self.phases:
@@ -457,6 +473,10 @@ class Ctx:
                 back = next((x for x in life if x > t + 300 and (nxt is None or x <= nxt)), nxt)
             out.append((t, back, exact))
         return out
+
+    def dead_at(self, aid):
+        """[(morte, volta)] com volta = fim da luta quando não voltou."""
+        return [(t, back if back is not None else self.end) for t, back, _x in self.dead.get(aid, ())]
 
     def alive(self, aid, windows):
         holes = [(t, b if b is not None else self.end) for t, b, _x in self.dead.get(aid, ())]
@@ -551,7 +571,7 @@ def _buff_rows(x, rules, kind, alerts):
         if not want:
             continue
         who_gives = x.who_gives(rule, prov)
-        per_phase = collections.defaultdict(list)    # (fase, depois de morrer?) -> [(aid, %)]
+        per_phase = collections.defaultdict(list)    # (índice da fase, depois de morrer?) -> [(aid, %)]
         all_ups = {}
         for a in want:
             until = next((t for t, _b, _e in x.dead.get(a, ())), None) if rule.no_renew else None
@@ -572,15 +592,15 @@ def _buff_rows(x, rules, kind, alerts):
             for p, u in zip(x.phases, ups):
                 if first is None:
                     if isinstance(u, float) and u < rule.need():
-                        per_phase[(p["n"], False)].append((a, u))
+                        per_phase[(p["i"], False)].append((a, u))
                     continue
                 # antes da 1ª morte e depois dela contam separado (a média da fase esconderia a falta)
                 pre = x.member_up(a, rule.ids, p["win"], first)
                 post = x.member_up(a, rule.ids, an._subtract(p["win"], [(0, first)]))
                 if isinstance(pre, float) and pre < rule.need():
-                    per_phase[(p["n"], False)].append((a, pre))
+                    per_phase[(p["i"], False)].append((a, pre))
                 elif isinstance(post, float) and post < rule.need():
-                    per_phase[(p["n"], True)].append((a, post))
+                    per_phase[(p["i"], True)].append((a, post))
         if kind != "grupo":
             continue
         if not seen_on and not rule.hidden:
@@ -593,7 +613,7 @@ def _buff_rows(x, rules, kind, alerts):
             continue
         party_spans = [sp for a in x.party for sp in x.spans(a, rule.ids)]
         for (n, after), miss in sorted(per_phase.items()):
-            p = x.phases[n - 1]
+            p = x.phases[n]
             sev = 1 if after else rule.miss_sev(c)
             k = (n, sev, after, who_gives, tuple(sorted(a for a, _u in miss)))
             m = merged.setdefault(k, [[], [], {}])
@@ -627,7 +647,7 @@ def _buff_rows(x, rules, kind, alerts):
         detail = _("quem dá: %s") % who_gives
         if after:
             detail += _(" · estava com o buff antes da 1ª morte, mas não recebeu de novo depois de ressuscitar")
-        _alert(alerts, sev, x.phase_name(x.phases[n - 1]), what,
+        _alert(alerts, sev, x.phase_name(x.phases[n]), what,
                ", ".join(_("%s %s") % (c.name_of(a), _pct(u)) for a, u in sorted(worst.items(), key=lambda m: m[1])),
                detail + "".join(" · " + t for t in notes))
     return rows
@@ -699,7 +719,7 @@ def pollen_cause(x, p):
     c = x.c
     bits = []
     spans = [sp for sp in x.boss_spans({FLORESCER}, p["aid"]) if sp[1] > p["start"]]
-    if p["n"] > 1:
+    if p["i"] > 0:
         if not spans:
             bits.append(_("a fase é um monstro novo e chega sem Pólen: não foi aplicado de novo"))
         elif min(a for a, _b in spans) - p["start"] > PHASE_LATE_MS:
@@ -804,6 +824,36 @@ def _debuffs(x, alerts, refl, poisoned, gaps=()):
                _("%d golpes refletidos (%s de dano) com a Garra Sombria desligada") % (
                    refl["no_claw_hits"], an._full(refl["no_claw_dmg"])))
     return rows
+
+
+VOLCANIC_ASH, ASH_SKILL = 608, 8043   # Cinzas Vulcânicas do homúnculo Dieter: fogo dá 150% no alvo (iRO Wiki)
+
+
+def _ash(x, alerts, rows):
+    """Cinzas Vulcânicas. O status não se vê nos outros só pelo uso: a nuvem cai no chão e o alvo dentro dela
+    recebe o status (608). Nos replays do Betelgeuse a nuvem caiu em cima dele e o status nunca apareceu, enquanto
+    Garra, Pólen e Vício Mágico aparecem: chefe imune (no rAthena, chefes não pegam)."""
+    c = x.c
+    casts = [u for u in c.casts if u[4] == ASH_SKILL and x.start - 5000 <= u[0] <= x.end and u[1] in x.party]
+    if not casts:
+        return
+    who = ", ".join(_("%s (de %s)") % (c.name_of(u2), c.name_of(u1))
+                    for u1, u2 in sorted({(u[1], u[2]) for u in casts}))
+    spans = x.boss_spans({VOLCANIC_ASH})
+    ups = [_uptime(x.boss_spans({VOLCANIC_ASH}, p["aid"]), p["win"]) for p in x.phases]
+    if spans:
+        note = _("fogo dá 150%% do dano no chefe com as cinzas · %d uso(s)") % len(casts)
+    else:
+        ups = [None] * len(x.phases)
+        note = _("o status nunca apareceu no chefe em %d uso(s): chefe imune") % len(casts)
+        _alert(alerts, 0, x.whole, _("Cinzas Vulcânicas não pegaram no chefe"), who,
+               _("a nuvem foi usada %d vez(es), mas o status das cinzas nunca apareceu no chefe (Garra Sombria, Pólen "
+                 "e Vício Mágico aparecem); chefes costumam ser imunes: o turno do homúnculo pode ir para outra skill")
+               % len(casts))
+    row = dict(key="deb|%d" % VOLCANIC_ASH, debuff=meter.status_name(VOLCANIC_ASH), who=who, note=note)
+    _phase_cols(row, ups)
+    row["bad"] = False
+    rows.append(row)
 
 
 def _late(dead_ms):
@@ -977,7 +1027,7 @@ def _elo(x, alerts, aids):
     c = x.c
     name = meter.skill_name(ELO_SKILL)
     rows = []
-    miss = collections.defaultdict(dict)      # fase -> {aid: %}
+    miss = collections.defaultdict(dict)      # índice da fase -> {aid: %}
     for a in aids:
         if ELO_SKILL not in JOB_SKILLS.get(job_id(c, a), set()) or not x.dmg.get(a):
             continue                      # quem bateu pouco também é cobrado (pode ser por isso); quem nem bateu, não
@@ -1007,12 +1057,174 @@ def _elo(x, alerts, aids):
             rows.append(row)
         for p, u in zip(x.phases, ups):
             if isinstance(u, float) and u < ALWAYS_MIN:
-                miss[p["n"]][a] = u
+                miss[p["i"]][a] = u
     for n, who in sorted(miss.items()):
-        _alert(alerts, 2, x.phase_name(x.phases[n - 1]), _("Faltou %s") % name,
+        _alert(alerts, 2, x.phase_name(x.phases[n]), _("Faltou %s") % name,
                ", ".join("%s %s" % (c.name_of(a), _pct(u)) for a, u in sorted(who.items(), key=lambda m: m[1])),
                _("buff do próprio Mestre Celestial: tem que ficar o tempo todo até a 1ª morte (dura até 15 min; "
                  "depois de morrer não tem AP para usar de novo)"))
+    return rows
+
+
+SYNC_MS = 500                 # golpe forte de um DPS mais longe que isso de qualquer golpe forte dos outros = fora da rajada
+SYNC_JOIN_MS = 1000           # golpes fora da rajada mais perto que isso um do outro contam como um episódio
+
+
+def _desync(x, alerts):
+    """DPS que bateu forte (STRONG_HIT do HP ou mais) fora da rajada dos outros DPS do grupo (alerta grave).
+    Só no clímax e só quando havia outro DPS vivo para bater junto."""
+    c = x.c
+    limit = STRONG_HIT * x.hp
+    dps = [a for a in x.party if x.role.get(a) in ("W", "M")]
+    if limit <= 0 or len(dps) < 2:
+        return []
+    out = []
+    for p in x.phases:
+        wins = p["win"]
+        strong = sorted((h.t, h.src) for h in x.hits if h.src in dps and h.dmg >= limit
+                        and h.dst_raw == p["aid"] and any(s <= h.t <= e for s, e in wins))
+        times = [t for t, _a in strong]
+        eps = collections.defaultdict(list)          # aid -> [[início, fim, maior distância, nº de golpes]]
+        for t, a in strong:
+            others = [b for b in dps if b != a and not any(s <= t < e for s, e in x.dead_at(b))]
+            if not others:
+                continue
+            i, j = bisect.bisect_left(times, t - SYNC_MS), bisect.bisect_right(times, t + SYNC_MS)
+            if any(strong[k][1] != a for k in range(i, j)):
+                continue                              # bateu junto com alguém
+            near = [abs(t2 - t) for t2, b in strong if b != a]
+            gap = min(near) if near else None
+            lst = eps[a]
+            if lst and t - lst[-1][1] <= SYNC_JOIN_MS:
+                lst[-1][1] = t
+                lst[-1][3] += 1
+                if gap is not None and (lst[-1][2] is None or gap > lst[-1][2]):
+                    lst[-1][2] = gap
+            else:
+                lst.append([t, t, gap, 1])
+        if not eps:
+            continue
+        who = sorted(eps, key=lambda a: -len(eps[a]))
+        _alert(alerts, 2, x.phase_name(p) if x.multi or p.get("marked") else x.whole,
+               _("Golpes fortes fora da rajada dos outros DPS"),
+               ", ".join(_("%s %d×") % (c.name_of(a), len(eps[a])) for a in who),
+               _("golpe de %s ou mais (%s do HP) mais de %s longe de qualquer golpe forte dos outros DPS vivos") % (
+                   num(limit), dec("%.1f%%" % (STRONG_HIT * 100)), _secs(SYNC_MS)) + "".join(
+                   " · " + _("%s: %s") % (c.name_of(a), ", ".join(
+                       (_("%s (sozinho)") if g is None else _("%s (%s do mais perto)")) % (
+                           (_when(s),) if g is None else (_when(s), dec("%.2f s" % (g / 1000.0))))
+                       for s, _e, g, _n in eps[a][:4]) + (" …" if len(eps[a]) > 4 else ""))
+                   for a in who))
+        for a in who:
+            out += [dict(aid=a, phase=p["n"], start=s, end=e, gap=g, hits=n) for s, e, g, n in eps[a]]
+    return out
+
+
+def phase_damage(x):
+    """Dano de cada fase (total, tempo em combate, DPS) e de cada jogador por fase.
+    Devolve (fases, linhas); nas linhas, d<i> = dano na fase de índice i e s<i> = parte do dano da fase."""
+    c = x.c
+    phases, per = [], collections.defaultdict(collections.Counter)
+    for p in x.phases:
+        hs = [h for h in x.hits if h.dst_raw == p["aid"]]
+        total = sum(h.dmg for h in hs)
+        ms = _total(_intersect([(p["start"], max(p["end"], p["start"] + 1))], x.active))
+        for h in hs:
+            per[h.src][p["i"]] += h.dmg
+        phases.append(dict(i=p["i"], name=x.phase_name(p) if x.multi or p.get("marked") else x.whole,
+                           start=p["appear"], end=p["end"], ms=ms, total=total,
+                           dps=total * 1000.0 / ms if ms else 0.0, players=len({h.src for h in hs if h.dmg})))
+    rows = []
+    for a, cnt in per.items():
+        tot = sum(cnt.values())
+        if not tot:
+            continue
+        row = dict(key=a, aid=a, name=c.name_of(a), job=meter.job_name(job_id(c, a)), total=tot, me=a == c.me,
+                   share=tot / float(x.total or 1))
+        for ph in phases:
+            v = cnt.get(ph["i"], 0)
+            row["d%d" % ph["i"]] = v
+            row["s%d" % ph["i"]] = v / float(ph["total"]) if ph["total"] else 0.0
+            row["r%d" % ph["i"]] = v * 1000.0 / ph["ms"] if ph["ms"] else 0.0
+        rows.append(row)
+    rows.sort(key=lambda r: -r["total"])
+    return phases, rows
+
+
+def rel_cell(dx, dy):
+    """Célula contada a partir do Betel: '2 ← 1 ↓'."""
+    h = "" if dx == 0 else ("%d ←" % -dx if dx < 0 else "%d →" % dx)
+    v = "" if dy == 0 else ("%d ↑" % dy if dy > 0 else "%d ↓" % -dy)
+    return " ".join(s for s in (h, v) if s) or _("em cima do Betel")
+
+
+def risk_safe(dx, dy, rel_ms):
+    """A célula (relativa ao Betel) está na zona segura nesse instante da fase 3?"""
+    if dx == -2 and -6 <= dy <= -1:
+        return True
+    return RISK_SWAP[0] <= rel_ms < RISK_SWAP[1] and (dx, dy) == (1, -1)
+
+
+def risk_phase(x):
+    """A fase 3 de verdade do Betelgeuse (reconhecida pelas armadilhas dela), ou None."""
+    e = x.c.entities.get(x.key)
+    if e is None or e.job != RISK_BOSS:
+        return None
+    return next((p for p in x.phases if p["n"] == RISK_PHASE and p.get("marked")), None)
+
+
+def _risk(x, aids, alerts):
+    """Quanto tempo cada jogador passou na zona de risco das armadilhas no começo da fase 3 (alerta amarelo)."""
+    c = x.c
+    p = risk_phase(x)
+    if p is None:
+        return []
+    b = c.pos_at(p["aid"], p["appear"] + 300) or (156, 80)
+    hits_by = collections.defaultdict(list)
+    for t, a in c.trap_log:
+        hits_by[a].append(t)
+    lo, hi = p["appear"] + RISK_FROM, min(p["appear"] + RISK_TO, max(p["end"], p["appear"]))
+    rows = []
+    for a in aids:
+        dead = [(t, back if back is not None else x.end) for t, back, _x in x.dead.get(a, ())]
+
+        def zone(t):
+            if any(s <= t < e for s, e in dead):
+                return None
+            pos = c.pos_at(a, t)
+            if pos is None:
+                return None
+            if not (TRAP_AREA[0] <= pos[0] <= TRAP_AREA[1] and TRAP_AREA[2] <= pos[1] <= TRAP_AREA[3]):
+                return "fora"
+            dx, dy = pos[0] - b[0], pos[1] - b[1]
+            return "segura" if risk_safe(dx, dy, t - p["appear"]) else (dx, dy)
+        seen = risk = 0
+        cells = collections.Counter()
+        for t in range(lo, hi, RISK_STEP):
+            z = zone(t)
+            if z is None:
+                continue
+            seen += RISK_STEP
+            if isinstance(z, tuple):
+                risk += RISK_STEP
+                cells[z] += 1
+        if seen < 1000:
+            continue                                   # quase não esteve na arena (ou estava morto)
+        hits = [t for t in hits_by.get(a, ()) if lo <= t < hi]
+        risk_hits = sum(1 for t in hits if isinstance(zone(t - 50), tuple))
+        share = risk / float(seen)
+        rows.append(dict(key=a, aid=a, name=c.name_of(a), job=meter.job_name(job_id(c, a)), me=a == c.me,
+                         seen=seen, risk_ms=risk, share=share, hits=len(hits), risk_hits=risk_hits,
+                         where=rel_cell(*cells.most_common(1)[0][0]) if cells else "",
+                         bad=risk >= RISK_MIN_MS and share >= RISK_MIN_SHARE))
+    rows.sort(key=lambda r: (-r["share"], -r["risk_hits"]))
+    bad = [r for r in rows if r["bad"]]
+    if bad:
+        _alert(alerts, 1, x.phase_name(p), _("Ficou na zona de risco das armadilhas"),
+               ", ".join(_("%s %s (%d golpe(s))") % (r["name"], _pct(r["share"]), r["risk_hits"]) for r in bad),
+               _("de 1 s antes a 16 s depois de o Betel aparecer; segura é a coluna 2 ← abaixo do Betel "
+                 "(2 ← 1 ↓ a 2 ← 6 ↓), 1 → 1 ↓ de 7,5 a 14,5 s ou fora do alcance das armadilhas (canto esquerdo "
+                 "da arena)"))
     return rows
 
 
@@ -1255,10 +1467,14 @@ def analyze(c, key, rng=None):
     claw, claw_execs = _claw(x, alerts, refl, x.party, True)
     _before_claw(x, alerts, refl, x.party)
     debuffs = _debuffs(x, alerts, refl, poisoned, claw)
+    _ash(x, alerts, debuffs)
     deaths = _deaths(x, x.party, alerts, True)
     element, flor, defense = _elements(x, alerts, set(x.party), True)
     _magus(x, alerts, flor)
+    risk = _risk(x, x.party, alerts)
+    desync = _desync(x, alerts)
     o_alerts = []
+    o_risk = _risk(x, x.others, o_alerts)
     o_deaths = _deaths(x, x.others, o_alerts, False)
     o_element, _f, _d = _elements(x, o_alerts, set(x.others), False)
     o_claw, o_claw_execs = _claw(x, o_alerts, refl, x.others, False)
@@ -1287,6 +1503,7 @@ def analyze(c, key, rng=None):
                 alerts=alerts, buffs=buffs, debuffs=debuffs, deaths=deaths, element=element, poison=poison_rows,
                 o_alerts=o_alerts, o_deaths=o_deaths, o_element=o_element, reflect=refl, florescer=flor,
                 claw=claw, claw_execs=claw_execs, o_claw=o_claw, o_claw_execs=o_claw_execs,
+                risk=risk, o_risk=o_risk, risk_phase=risk_phase(x) is not None, desync=desync,
                 defense=defense, best=best_elements(defense), late_start=x.start < UNSEEN_MS)
 
 

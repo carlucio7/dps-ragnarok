@@ -1,5 +1,6 @@
 """Agregacao de dano (encontros, ranking, skills) e leitura ao vivo da pasta Replay."""
 
+import bisect
 import collections
 import json
 import os
@@ -21,6 +22,18 @@ SUMMON_KINDS = {"homun", "merc", "elem", "abr", "bionic", "mob", "unknown", "pet
 # um apos o outro (Alma Morta, Espinho...) nao podem virar uma luta so.
 PHASED_BOSSES = {20994}       # Betelgeuse: 3 fases, ~11 s entre elas
 MAX_PHASE_GAP_MS = 60000
+# Unidades que dizem qual é a fase de verdade de um chefe. As armadilhas da Torre da Constelação são as mesmas 26
+# unidades a instância toda e reaparecem com outro tipo a cada fase: com o tipo 20351 só na fase 3 do Betelgeuse.
+# Quando a fase 1 morre por excesso de dano, a fase 2 é pulada e o 2º monstro já é a fase 3.
+PHASE_MARKERS = {20351: 3}
+MARKER_JOBS = {20112, 20351}
+MARK_EARLY_MS = 3000
+# Milagre Solar, Lunar e Estelar (Mestre Taekwon/Imperador Celeste): o servidor liga o status 160 por 1 hora,
+# sem ícone no cliente; enquanto dura, todo monstro é alvo estelar (+XP com a Bênção Estelar)
+MIRACLE_EFST = 160
+MIRACLE_MIN_MS = 3000000
+LOOT_KILL_MS = 2000           # o item cai até isso depois de o monstro morrer
+LOOT_MATCH_MS = 1500          # sumiu do chão e entrou na bolsa de quem grava com essa diferença: foi ele que pegou          # a unidade marcadora aparece até isso antes do monstro da fase (Betelgeuse: ~0,9 s)
 DUMMY_MIN, DUMMY_MAX = 21060, 21099   # bonecos de treino
 MVP_HP = 1000000
 # (traduzidos na hora do aviso: os nomes do jogo só carregam depois do import)
@@ -222,7 +235,15 @@ PARTY_BUFFS |= set(SIM_BUFFS)
 MOB_DEBUFFS |= set(SIM_DEBUFFS) - {1166}
 # Status de sistema que não são buff de verdade (tempo de pós-conjuração, recarga de item...)
 SYSTEM_EFST = ("POSTDELAY", "REUSE_", "PLAYTIME", "HEAD_EQUIPMENT", "SPECIALZONE", "WEIGHTOVER", "_PLACE",
-               "ACTIONDELAY", "ENSEMBLEFATIGUE")
+               "ACTIONDELAY", "ENSEMBLEFATIGUE", "ASSISTANT_VENDING", "MONSTER_TRANSFORM", "USE_SKILL_SP_SPA",
+               "GET_CNT_UNREAD", "STAR_MONSTER")
+SERVICE_EFST = ("AID_PERIOD_", "PERIOD_PLUSEXP", "PERIOD_RECEIVEITEM", "CASH_PLUS")
+# códigos (rAthena) de status que vêm de item: poções, comidas, sucos, pergaminhos...
+ITEM_EFST = ("POTION", "FOOD", "STEW", "NOODLE", "JUICE", "BLOOD", "SCROLL", "CANDY", "DRINK", "COCKTAIL", "ELIXIR",
+             "PLUSATTACKPOWER", "PLUSMAGICPOWER", "ABYSS_", "C_BUFF", "GM_BATTLE", "EXTRACT_", "ATKER_", "MATKER_",
+             "MOVHASTE", "ATTHASTE", "CASH_", "BOX_OF", "COOKIE", "PUDDING", "MILK", "TEA_", "_BERRY", "SALAD",
+             "SOUP", "CAKE", "BREAD", "MYSTICPOWDER", "LIFEPOTION", "SPEEDUP", "INCSTR", "INCAGI", "INCVIT",
+             "INCINT", "INCDEX", "INCLUK", "INCHIT", "INCFLEE", "INCATK", "INCMATK", "ENERGY_DRINK")
 CONSUMABLE_WORDS = ("pocao", "elixir", "comida", "bolinho", "pilula", "suco", "churrasco", "estimulante",
                     "abrasivo", "manual de mascar", "salada", "sopa", "torta", "bolo", "biscoito", "cha ",
                     "cerveja", "vinho", "drink", "pao", "racao", "doce")
@@ -231,6 +252,8 @@ SERVICE_WORDS = ("bonus de exp", "bonus de drop", "armazem", "premium", "vip")
 
 def status_name(efst):
     """Nome do buff/debuff na tela (no idioma escolhido)."""
+    if efst == MIRACLE_EFST:
+        return _("Milagre Solar, Lunar e Estelar")
     if i18n.LANG != "pt":
         name = clientdata.NAMES.game_name("status", efst) or BUNDLED_NAMES.get("status", {}).get(str(efst))
         if name and name.isupper():
@@ -248,7 +271,29 @@ def status_name(efst):
             name = game_name("skill", sid) or _aegis_name(sid)
             if name:
                 return name
+    elif not _pt_has_name(efst):
+        # a base não tem nome em português (só o código interno): usa o do jogo instalado
+        name = clientdata.NAMES.game_name("status", efst)
+        if name and "%" not in name and not name.isupper():
+            return name
+        for sid in (EFST.get(str(efst)) or {}).get("s", []):
+            name = clientdata.NAMES.game_name("skill", sid)
+            if name:
+                return name
+        desc = status_desc(efst)
+        if desc and len(desc) <= 32:      # ícones sem nome no jogo ("%s"): a descrição curta diz o que é
+            return desc
     return status_name_pt(efst)
+
+
+def _pt_has_name(efst):
+    name = (STATUSES.get(str(efst)) or {}).get("name") or ""
+    const = (EFST.get(str(efst)) or {}).get("c", "")
+    if SIM_BUFFS.get(efst) or SIM_DEBUFFS.get(efst):
+        return True
+    if name and name != "?" and "%" not in name and _norm(name).replace(" ", "") != _norm(const).replace("_", ""):
+        return True                   # (a base às vezes só repete o código interno: "Plusattackpower")
+    return any((SKILLS.get(str(sid)) or {}).get("name") for sid in (EFST.get(str(efst)) or {}).get("s", []))
 
 
 def status_name_pt(efst):
@@ -280,13 +325,22 @@ def status_kind(efst):
     if efst in PARTY_BUFFS:
         return "Grupo/suporte"
     n = _norm(status_name_pt(efst))
+    if any(w in n for w in SERVICE_WORDS) or any(p in const for p in SERVICE_EFST):
+        return "Serviço"
     if any(w in n for w in CONSUMABLE_WORDS):
         return "Consumível"
-    if any(w in n for w in SERVICE_WORDS):
-        return "Serviço"
-    if n.startswith("status "):
+    if n.startswith("status ") or not const:
         return "Outro"
+    if not (EFST.get(str(efst)) or {}).get("s") and any(p in const for p in ITEM_EFST):
+        return "Consumível"           # nenhuma skill aplica e o código é de item (comida, poção, pergaminho...)
     return "Classe/outros"
+
+
+def status_desc(efst):
+    """O que o status faz, com o texto do próprio jogo (descrição do ícone) no idioma escolhido."""
+    if efst == MIRACLE_EFST:
+        return _("Todos os monstros viram alvos estelares por 1 hora (+XP com a Bênção Estelar)")
+    return clientdata.NAMES.game_name("status_desc", efst) or ""
 
 
 def status_alert(efst, total_ms):
@@ -405,12 +459,15 @@ class Combat:
 
     def __init__(self, session, gap_ms=10000, targets="all"):
         self.session = session
+        self.path = None              # .rrf de onde veio (ReplayFile preenche)
         self.targets = targets        # "all" = todos os monstros; "mvp" = só MVPs e bonecos de treino
         self.trap_log = []            # (t, aid) de cada armadilha do mapa que atingiu um aliado
         self.effect_log = collections.defaultdict(list)   # aid aliado -> [(t, id do efeito)]
         self.party = set()            # membros do grupo (quem recebe 0x080e) — você entra à parte
         self.res_log = []             # (t, aid) de cada ressurreição
         self.spawned = {}             # AID -> quando apareceu pela primeira vez (começo de cada fase de um MVP)
+        self.phase_marks = []         # (t, fase de verdade) quando aparece uma unidade de PHASE_MARKERS
+        self._marker_job = {}         # AID da unidade marcadora -> tipo com que apareceu por último
         self.status_val = {}          # (aid, efst, início) -> val1 (nível/força do efeito)
         self.status_first = {}        # (aid, efst) -> (t, ligou) do primeiro aviso visto na gravação
         self.status_total = {}        # efst -> maior duração (ms) que o servidor mandou
@@ -426,6 +483,10 @@ class Combat:
         self.recent = collections.deque()   # (t, dano) do jogador, para o "DPS agora"
         self.now = 0
         self.map = session.map
+        # posições (jogadores, chefes e quem grava): aid -> [(t, x de, y de, x para, y para)], tempos à parte
+        self.pos_ev = collections.defaultdict(list)
+        self.pos_t = collections.defaultdict(list)
+        self.speed = {}               # aid -> ms por célula
         self.finished = False         # a gravacao parou (nada mais esta "ao vivo")
         self.dead = set()             # AIDs que morreram (ZC_NOTIFY_VANISH tipo 1)
         self.alias = {}               # fase seguinte de um MVP -> AID da primeira fase
@@ -439,12 +500,22 @@ class Combat:
         self.casts = []               # (t, fonte, fonte_original, alvo, skill, ms de conjuracao)
         self.deaths = {}              # AID -> quando morreu (a ultima vez)
         self.death_log = []           # (t, AID) de todas as mortes
+        # drops: itens que caíram ou estavam no chão, o que entrou na bolsa de quem grava e prêmios de MVP
+        self.ground = {}              # id do item no chão -> drop (enquanto está no chão)
+        self.drop_ids = {}            # id do item no chão -> drop (todos, para saber quem pegou)
+        self.drops = []               # dict(t, item, count, x, y, fell, gone, mine, mob)
+        self.pickups = []             # dict(t, item, count, used): entrou na bolsa de quem grava
+        self.mvp_items = []           # (t, item)
         self.version = 0             # muda a cada evento novo (para a interface saber se redesenha)
+        if session.pos:
+            self.add_pos(session.aid, 0, session.pos, session.pos)
         self._last_seen = {}
         self.status_on = {}           # (aid, efst) -> [início, duração total, restante] dos ativos
         self.status_log = []          # (aid, efst, início, fim) dos que já acabaram
         self.hp_log = collections.defaultdict(list)   # aid -> [(t, hp, hp máx.)]
         self.alerts = collections.deque(maxlen=50)    # (nº, t, tipo, texto) para o widget mostrar
+        self.miracle_starts = set()   # inícios do Milagre em quem grava
+        self.status_len = {}          # (aid, efst, início) -> duração prevista (ms)
         self.alert_seq = 0
         self._alerted = {}
         self.bag = {}                 # slot da bolsa -> Item
@@ -538,13 +609,39 @@ class Combat:
             x = rrf.parse_damage(t, pid, d)
             if x is not None:
                 self.on_damage(x)
+            elif pid in rrf.ACT_OFFSET:
+                r = rrf.parse_pickup_action(pid, d)
+                drop = self.drop_ids.get(r[1]) if r is not None else None
+                if drop is not None and drop["by"] is None:
+                    drop["by"] = r[0]                 # quem pegou (qualquer jogador visível)
+                    if r[0] == self.me:
+                        drop["mine"] = True
+                    self.version += 1
         elif pid in rrf.SPAWN_PACKETS:
             e = rrf.parse_spawn(pid, d)
             if e is not None:
                 self.spawned.setdefault(e.aid, t)
+                if e.job in MARKER_JOBS and self._marker_job.get(e.aid) != e.job:
+                    self._marker_job[e.aid] = e.job          # cada passo dela repete o pacote: conta só a troca
+                    if e.job in PHASE_MARKERS:
+                        self.phase_marks.append((t, PHASE_MARKERS[e.job]))
+                if e.kind == "pc" or e.boss == 2:
+                    mv = rrf.spawn_move(pid, d)
+                    if mv is not None:
+                        self.speed[e.aid] = mv[2]
+                        self.add_pos(e.aid, t, mv[0], mv[1])
                 self.add_entity(e)
                 if e.kind == "pc":
                     self.set_option(e.aid, t, e.option)
+        elif pid == rrf.P_MOVE_SELF:
+            if len(d) >= 12:
+                a, b = rrf.movedata(d[6:12])
+                self.add_pos(self.me, t, a, b)
+        elif pid == rrf.P_STOP or pid in rrf.P_SLIDE:
+            if len(d) >= 10:
+                aid, x, y = struct.unpack_from("<Ihh", d, 2)
+                if aid == self.me or aid in self.pos_ev:
+                    self.add_pos(aid, t, (x, y), (x, y))
         elif pid == rrf.P_EFFECT:
             r = rrf.parse_effect(d)
             if r is not None and self.is_friendly(r[0]):
@@ -564,7 +661,12 @@ class Combat:
             if r and r[0] != r[1]:
                 self.owner[r[0]] = r[1]
         elif pid == rrf.P_MAPMOVE:
-            self.map = rrf.decode_name(d[2:18])
+            name = rrf.decode_name(d[2:18])
+            self.map = name[:-4] if name.lower().endswith(".gat") else name
+            if len(d) >= 22:
+                x, y = struct.unpack_from("<HH", d, 18)
+                self.add_pos(self.me, t, (x, y), (x, y))
+            self.version += 1
         elif pid == rrf.P_VANISH:
             if len(d) >= 7:
                 aid = struct.unpack_from("<I", d, 2)[0]
@@ -582,6 +684,33 @@ class Combat:
             r = rrf.parse_status(pid, d)
             if r is not None:
                 self.on_status(t, *r)
+        elif pid in (rrf.P_ITEM_FALL, rrf.P_ITEM_ENTRY):
+            r = rrf.parse_ground_item(pid, d)
+            if r is not None and r[0] not in self.ground:
+                map_id, item, count, x, y = r
+                fell = pid == rrf.P_ITEM_FALL
+                drop = dict(t=t, item=item, count=count, x=x, y=y, fell=fell, gone=None, mine=False, by=None,
+                            mob=self.recent_kill(t) if fell else None)
+                self.ground[map_id] = drop
+                self.drop_ids[map_id] = drop
+                self.drops.append(drop)
+                self.version += 1
+        elif pid == rrf.P_ITEM_GONE:
+            if len(d) >= 6:
+                drop = self.ground.pop(struct.unpack_from("<I", d, 2)[0], None)
+                if drop is not None:
+                    drop["gone"] = t
+                    self.match_loot(t)
+        elif pid == rrf.P_PICKUP:
+            r = rrf.parse_pickup(d)
+            if r is not None:
+                self.pickups.append(dict(t=t, item=r[0], count=r[1], used=False))
+                self.match_loot(t)
+                self.version += 1
+        elif pid == rrf.P_MVP_ITEM:
+            if len(d) >= 6:
+                self.mvp_items.append((t, struct.unpack_from("<I", d, 2)[0]))
+                self.version += 1
         elif pid == rrf.P_PARAM:
             r = rrf.parse_param(d)
             if r is not None and r[0] in (rrf.SP_HP, rrf.SP_MAXHP):
@@ -604,6 +733,10 @@ class Combat:
             it = rrf.parse_item_add(d)
             if it is not None:
                 self.bag[it.slot] = it
+                r = rrf.parse_pickup(d)
+                if r is not None:
+                    self.pickups.append(dict(t=t, item=r[0], count=r[1], used=False))
+                    self.match_loot(t)
         elif pid in rrf.SKILL_USE_PACKETS:
             r = rrf.parse_skill_use(pid, d)
             if r is not None and self.fresh(("u",) + r, t):
@@ -638,6 +771,11 @@ class Combat:
             if cur is None:
                 self.status_on[key] = [t, total, left]
                 self.status_val[(aid, efst, t)] = val1
+                self.status_len[(aid, efst, t)] = left or total     # quanto o status ia durar a partir de t
+                if efst == MIRACLE_EFST and aid == self.me and max(total or 0, left or 0) >= MIRACLE_MIN_MS:
+                    self.miracle_starts.add(t)
+                    if t > 0:
+                        self.alert(t, "miracle", _("★ MILAGRE! Todos os monstros viraram alvos estelares por 1 hora"))
             else:
                 cur[1], cur[2] = total or cur[1], left or cur[2]     # renovou
                 if val1:
@@ -657,6 +795,34 @@ class Combat:
             if t - self._alerted.get(efst, -10 ** 9) > 10000:
                 self._alerted[efst] = t
                 self.alert(t, "buff", _("%s acabou") % status_name(efst))
+
+    def lasting(self, efst):
+        """[(início, fim)] de um status de quem grava que não acaba com a morte (VIP, manuais, Milagre...):
+        vale pela duração que o jogo mandou, não até a morte (o medidor encerra tudo quando alguém morre)."""
+        out = []
+        for a, ef, st, e in self.statuses(self.me):
+            if ef != efst:
+                continue
+            ln = self.status_len.get((a, ef, st))
+            out.append((st, min(self.now, max(e, st + ln)) if ln else self.now))
+        merged = []
+        for st, e in sorted(out):
+            if merged and st <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+            else:
+                merged.append((st, e))
+        return merged
+
+    def miracle_windows(self):
+        """[(início, fim)] em que o Milagre esteve ativo em quem grava (não acaba com a morte)."""
+        return [(st, e) for st, e in self.lasting(MIRACLE_EFST) if st in self.miracle_starts]
+
+    def miracle_left(self):
+        """ms que faltam do Milagre ativo agora (None se não está ativo)."""
+        cur = self.status_on.get((self.me, MIRACLE_EFST))
+        if cur is None or cur[0] not in self.miracle_starts:
+            return None
+        return max(0, (cur[2] or cur[1] or MIRACLE_MIN_MS) - (self.now - cur[0]))
 
     def end_statuses(self, aid, t):
         for key in [k for k in self.status_on if k[0] == aid]:
@@ -760,13 +926,18 @@ class Combat:
                     self.worn.pop(bit, None)
         self.equip_log.append((t, dict(self.worn)))
 
-    def equipment_at(self, t):
-        """Equipamento vestido no instante t: [(rótulo do slot, Item)]."""
+    def worn_at(self, t):
+        """{bit do slot: Item} vestido no instante t."""
         worn = {}
         for when, state in self.equip_log:
             if when > t:
                 break
             worn = state
+        return worn
+
+    def equipment_at(self, t):
+        """Equipamento vestido no instante t: [(rótulo do slot, Item)]."""
+        worn = self.worn_at(t)
         return [(label, worn[bit]) for bit, label in EQUIP_SLOTS if bit in worn]
 
     def fresh(self, key, t):
@@ -868,8 +1039,99 @@ class Combat:
         self.hits, self.uses, self.casts = [], [], []
         self.deaths = {}
         self.death_log = []
+        self.drops, self.pickups, self.mvp_items, self.drop_ids = [], [], [], {}
         self.was_reset = True
         self.version += 1
+
+    # --- drops -------------------------------------------------------------
+
+    def recent_kill(self, t):
+        """Nome do monstro que morreu por último até 2 s antes (quem provavelmente deixou o item cair)."""
+        for when, aid in reversed(self.death_log):
+            if when < t - LOOT_KILL_MS:
+                break
+            if when <= t and not self.is_friendly(aid):
+                e = self.entities.get(aid)
+                if e is not None and e.kind == "mob":
+                    return self.name_of(aid)
+        return None
+
+    def match_loot(self, t):
+        """Item que sumiu do chão perto da hora em que o mesmo item entrou na bolsa de quem grava: pego por ele."""
+        for p in self.pickups:
+            if p["used"] or abs(p["t"] - t) > LOOT_MATCH_MS:
+                continue
+            drop = next((dr for dr in reversed(self.drops) if not dr["mine"] and dr["gone"] is not None
+                         and dr["by"] in (None, self.me)
+                         and dr["item"] == p["item"] and abs(dr["gone"] - p["t"]) <= LOOT_MATCH_MS), None)
+            if drop is not None:
+                drop["mine"] = True
+                p["used"] = True
+
+    def drop_summary(self, rng=None):
+        """Itens por nome no recorte: quantos caíram e quantos você pegou (mais os prêmios de MVP)."""
+        rows = {}
+        for dr in self.drops:
+            if not dr["fell"] or (rng and not rng[0] <= dr["t"] <= rng[1]):
+                continue
+            r = rows.setdefault(dr["item"], dict(item=dr["item"], name=item_name(dr["item"]), fell=0, mine=0, mvp=0))
+            r["fell"] += dr["count"]
+            if dr["mine"]:
+                r["mine"] += dr["count"]
+        for t, item in self.mvp_items:
+            if rng and not rng[0] <= t <= rng[1]:
+                continue
+            r = rows.setdefault(item, dict(item=item, name=item_name(item), fell=0, mine=0, mvp=0))
+            r["mvp"] += 1
+            r["mine"] += 1
+        return sorted(rows.values(), key=lambda r: (-r["mvp"], -r["mine"], -r["fell"], r["name"]))
+
+    # --- posições ---------------------------------------------------------
+
+    def add_pos(self, aid, t, a, b):
+        ev, ts = self.pos_ev[aid], self.pos_t[aid]
+        ev.append((t, a[0], a[1], b[0], b[1]))
+        ts.append(t)
+        if len(ev) > 40000:                   # sessões muito longas: guarda só o mais recente
+            del ev[:10000], ts[:10000]
+        if aid == self.me:
+            self.version += 1
+
+    def pos_at(self, aid, t):
+        """(x, y) de `aid` no instante t, andando em linha reta entre os pontos; None se nunca foi visto."""
+        ts = self.pos_t.get(aid)
+        if not ts:
+            return None
+        i = bisect.bisect_right(ts, t) - 1
+        if i < 0:
+            return None
+        t0, x0, y0, x1, y1 = self.pos_ev[aid][i]
+        cells = max(abs(x1 - x0), abs(y1 - y0))
+        if not cells:
+            return x0, y0
+        frac = min(1.0, (t - t0) / float(cells * self.speed.get(aid, 150)))
+        return int(round(x0 + (x1 - x0) * frac)), int(round(y0 + (y1 - y0) * frac))
+
+    def where(self):
+        """(mapa, x, y) de quem grava agora; x/y None se ainda não deu para saber."""
+        p = self.pos_at(self.me, self.now)
+        return self.map, (p[0] if p else None), (p[1] if p else None)
+
+    def phase_numbers(self, starts):
+        """Número de verdade de cada fase de um chefe, dados os começos de cada fase em ordem. Uma unidade marcadora
+        (PHASE_MARKERS) vista no começo da fase diz o número dela; as outras seguem a ordem. Ex.: fase 2 pulada ->
+        [1, 3]; gravação que começou já na fase 3 -> [3]."""
+        out = []
+        for i, s in enumerate(starts):
+            e = starts[i + 1] - MARK_EARLY_MS if i + 1 < len(starts) else None
+            marks = [n for t, n in self.phase_marks if s - MARK_EARLY_MS <= t and (e is None or t < e)]
+            prev = out[-1] if out else 0
+            out.append(max(max(marks) if marks else 0, prev + 1))
+        return out
+
+    def phase_marked(self, start, end=None):
+        """Se alguma unidade marcadora apareceu no começo dessa fase (o número dela é conhecido)."""
+        return any(start - MARK_EARLY_MS <= t and (end is None or t < end) for t, _n in self.phase_marks)
 
     def encounters(self):
         """Encontros do mais antigo ao mais novo."""
@@ -1059,6 +1321,58 @@ def find_replay_dir():
     return dirs[0] if dirs else None
 
 
+_XP_INFO = {}
+
+
+def _xp_info(path):
+    """(personagem, quando gravou, nível, XP de base no início) de um .rrf; guardado por arquivo."""
+    if path in _XP_INFO:
+        return _XP_INFO[path]
+    try:
+        s = rrf.read_session(path)
+    except (OSError, ValueError, struct.error):
+        return None
+    info = (s.gid, s.recorded_at, s.base_level, s.base_exp) if s.gid and s.base_exp is not None else None
+    _XP_INFO[path] = info
+    return info
+
+
+def xp_after(path, session):
+    """XP exata do início desta gravação até o início da próxima gravação do mesmo personagem (mesma pasta).
+    {"path", "when", "gain" (None se subiu mais de um nível), "levels"} ou None."""
+    if not path or not session.gid or session.base_exp is None:
+        return None
+    folder = os.path.dirname(path)
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return None
+    best = None
+    for name in names:
+        p = os.path.join(folder, name)
+        if not name.lower().endswith(".rrf") or os.path.normcase(p) == os.path.normcase(path):
+            continue
+        info = _xp_info(p)
+        if info and info[0] == session.gid and info[1] > session.recorded_at and (best is None or info[1] < best[1]):
+            best = info + (p,)
+    if best is None:
+        return None
+    _gid, when, level, exp, p = best
+    gain = None
+    if level == session.base_level:
+        gain = exp - session.base_exp
+    elif level == session.base_level + 1 and session.next_exp:
+        gain = session.next_exp - session.base_exp + exp
+    return dict(path=p, when=when, gain=gain, levels=level - session.base_level)
+
+
+def level_progress(session):
+    """Fração do nível atual no início da gravação (None se o jogo não mandou)."""
+    if session.base_exp is None or not session.next_exp or session.next_exp <= 0:
+        return None
+    return max(0.0, min(1.0, session.base_exp / float(session.next_exp)))
+
+
 class ReplayFile:
     """Um .rrf sendo lido de forma incremental. O arquivo e aberto e fechado a cada
     leitura, para nunca atrapalhar o jogo quando ele quiser escrever ou fechar."""
@@ -1096,6 +1410,7 @@ class ReplayFile:
                     self.session = rrf.Session(h, buf)
                     self.reader = rrf.StreamReader(h.keys, rrf.WANTED)
                     self.combat = Combat(self.session, self.gap_ms, self.targets)
+                    self.combat.path = self.path
                     for e in rrf.initial_entities(h, buf):
                         self.combat.add_entity(e)
                     self.combat.start_statuses(rrf.statuses_at_start(h, buf))

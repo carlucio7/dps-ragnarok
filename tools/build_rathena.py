@@ -114,7 +114,8 @@ def main():
         req = e.get("Requires") if isinstance(e.get("Requires"), dict) else {}
         skills[sid] = {"n": e.get("Name"), "d": e.get("Description") or "", "t": {"Weapon": "W", "Magic": "M"}.get(e.get("Type"), "X"),
                        "e": e.get("Element") if isinstance(e.get("Element"), str) else "",
-                       "cd": as_max(e.get("Cooldown"), "Time"), "ap": as_max(req.get("ApCost"), "Amount")}
+                       "cd": as_max(e.get("Cooldown"), "Time"), "ap": as_max(req.get("ApCost"), "Amount"),
+                       "r": as_max(e.get("Range"), "Size")}       # alcance: menos de 5 = corpo a corpo
 
     trees = {}
     inherit = {}

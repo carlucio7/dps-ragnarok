@@ -15,14 +15,23 @@ def container(chunks, keys):
     return rrf.decrypt(body, keys)          # XOR: cifrar = decifrar
 
 
-def header(aid, player="Tester", map_name="prt_fild08", date=DATE, entities=(), option=0):
-    """Cabecalho + containers. O fluxo (tipo 1) comeca logo depois."""
+def header(aid, player="Tester", map_name="prt_fild08", date=DATE, entities=(), option=0, look=None, sex=None,
+           xp=None):
+    """Cabecalho + containers. O fluxo (tipo 1) comeca logo depois.
+    look: {"hair": 22, "top": 1677, ...} (visual de quem grava, como em rrf.LOOK_CHUNKS); sex: 1/0.
+    xp: (id do personagem, XP de base no início, XP do nível) -> chunks 1011, 1015 e 1018."""
     keys = rrf.Keys(*date)
     # cada container abre com o marcador do cliente (id proprio, tamanho 0)
     replay_data = [(950, b""), (951, b""), (960, b""), (961, b""), (970, player.encode("utf-8") + b"\0"),
                    (971, map_name.encode() + b"\0")]
     session = [(1000, b""), (1010, struct.pack("<I", aid)), (1014, struct.pack("<I", 4302)),
                (1016, struct.pack("<I", 240)), (1070, struct.pack("<I", option))]
+    chunk = dict(rrf.LOOK_CHUNKS)
+    session += [(chunk[k], struct.pack("<i", v)) for k, v in (look or {}).items()]
+    if sex is not None:
+        replay_data.append((rrf.RD_SEX, struct.pack("<i", sex)))
+    if xp is not None:
+        session += [(1011, struct.pack("<I", xp[0])), (1015, struct.pack("<q", xp[1])), (1018, struct.pack("<q", xp[2]))]
     init = [(10000, b"")] + [(210, spawn0857(*e)) for e in entities] + [(10001, b"")]
     # mesma ordem do cliente: ReplayData por ultimo, logo antes do fluxo
     blobs = [(rrf.CT_SESSION, container(session, keys)),

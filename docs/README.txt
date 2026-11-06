@@ -1,4 +1,4 @@
-DPS Ragnarok {VERSION} — DPS meter for Ragnarok Online (ROLatam)
+Replay Master {VERSION} — DPS meter and replay analysis for Ragnarok Online (ROLatam)
 ================================================================
 
 A small widget that shows your DPS and the party's damage ranking in real time
@@ -11,8 +11,8 @@ Languages: português, English, español (right-click › Language).
 
 HOW TO USE
 ----------
-1. Extract the .zip into a folder of your own (e.g. Documents\DpsRagnarok).
-2. Run DpsRagnarok.exe. No installation or administrator rights needed.
+1. Extract the .zip into a folder of your own (e.g. Documents\ReplayMaster).
+2. Run ReplayMaster.exe. No installation or administrator rights needed.
 3. In the game, start recording a replay. The meter finds the recording by
    itself and starts counting.
 4. Right-click the widget for all options. The chart button opens the full
@@ -27,7 +27,7 @@ in: right-click › Replay folder. With several game installations, it watches a
 Replay folders and follows the newest recording.
 
 You can also open a recorded replay: right-click › Open saved replay, or drag
-the .rrf file onto DpsRagnarok.exe.
+the .rrf file onto ReplayMaster.exe.
 
 Tip for the Snitch tab: start recording before the party buffs up. Other
 players' buffs that were already active when the recording started only show up
@@ -47,7 +47,7 @@ SAFETY
   your PC". Before allowing it, check that the file is the original: open
   PowerShell in the folder and run
 
-      Get-FileHash .\DpsRagnarok.exe
+      Get-FileHash .\ReplayMaster.exe
 
   The code shown must match the one in SHA256.txt (and on the page you
   downloaded from). If it matches, click "More info" › "Run anyway".
@@ -58,7 +58,7 @@ SAFETY
 
 IF THE PROGRAM DOESN'T OPEN
 ---------------------------
-- DpsRagnarok.exe is gone from the folder, or Windows says "Windows cannot access
+- ReplayMaster.exe is gone from the folder, or Windows says "Windows cannot access
   the specified device, path, or file": your antivirus deleted it (a false alarm,
   common with unsigned programs). Check the .exe code as explained above and
   restore the file in Windows Security › Virus & threat protection › Protection

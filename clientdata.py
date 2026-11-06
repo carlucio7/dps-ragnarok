@@ -33,7 +33,7 @@ COLUMNS = {"en": 2, "pt": 7, "es": 9}          # colunas das tabelas do jogo
 MAX_KEY = 4                                    # chaves de monstros têm 4 letras
 MAX_NAME = 48                                  # textos maiores que isso são frases, não nomes
 I18N_PREFIX = b"data\\i18n\\sc\\"
-CACHE_VERSION = 5
+CACHE_VERSION = 6
 SUFFIX = {"en": "enus", "es": "eses", "pt": "ptbr"}
 LUA = "data\\luafiles514\\lua files\\"
 ID_FILES = {"skill": LUA + "skillinfoz\\skillid.lub", "status": LUA + "stateicon\\efstids.lub",
@@ -101,6 +101,21 @@ def _table(data, name):
         return {}
 
 
+def status_text(descript):
+    """Descrição do ícone de status (linhas 2 em diante do stateiconinfo, sem o tempo nem códigos de cor)."""
+    lines = []
+    for i in sorted(k for k in descript if isinstance(k, int) and k >= 2):
+        row = descript[i]
+        text = row.get(1) if isinstance(row, dict) else None
+        if not isinstance(text, str):
+            continue
+        text = re.sub(r"\^[0-9a-fA-F]{6}", "", text).strip()
+        if not text or re.fullmatch(r"[%\w\s:]*%[sd][%\w\s:]*", text) and len(text) < 12:
+            continue
+        lines.append(text)
+    return " ".join(" ".join(lines).split())
+
+
 def read_game_names(grf, lang, pt_names=None, pt_monsters=None):
     """{tipo: {id: nome}} no idioma `lang`: skill, status, job, option, item e monster.
     pt_names: {texto em português: [en, pt, es]} das tabelas de texto (para os monstros);
@@ -119,10 +134,12 @@ def read_game_names(grf, lang, pt_names=None, pt_monsters=None):
     ids = get(ID_FILES["status"], "EFST_IDs")
     names = get(NAME_FILES["status"] % SUFFIX[lang], "StateIconList_string")
     out["status"] = {}
+    out["status_desc"] = {}
     for k, v in names.items():
         try:
             if isinstance(k, lub.Symbol) and k[1] in ids:
                 out["status"][ids[k[1]]] = v["descript"][1][1]
+                out["status_desc"][ids[k[1]]] = status_text(v["descript"])
         except (KeyError, TypeError, IndexError):
             pass
     ids = get(ID_FILES["job"], "JTtbl")

@@ -594,6 +594,303 @@ check(kinds["death"] == 1 and kinds["res"] == 1 and kinds["claw"] == 1 and kinds
 ts2, vals = tl.series([(1000, 500), (1500, 500), (9000, 1000)], 0, 10000, 1000, 1000)
 check(vals[1] == 1000.0 and vals[9] == 1000.0 and sum(vals) == 2000.0, "curva: dano por segundo por balde")
 
+# --- fase de verdade: as armadilhas da fase 3 dizem que a fase 2 foi pulada ----
+TRAP = 70001
+
+
+def betel_phases(n_bosses, marker_before):
+    """n_bosses fases do Betelgeuse (cada uma um monstro novo, ~11 s depois da anterior); a armadilha da fase 3
+    (tipo 20351) reaparece 0,9 s antes do monstro de índice marker_before (None = nenhuma)."""
+    ev = [(0, fr.spawn(TRAP, "npc", 20112, "#trap_1_0aa"))]
+    for i in range(n_bosses):
+        t0, aid = i * 16000, 61000 + i
+        if marker_before == i:
+            ev.append((t0 - 900, fr.spawn(TRAP, "npc", 20351, "#trap_1_0aa")))
+            ev += [(t0 - 900 + k * 150, fr.spawn(TRAP, "npc", 20351, "#trap_1_0aa")) for k in range(1, 5)]
+        ev += [(t0, fr.spawn(aid, "mob", BETEL, "Betelgeuse", boss=2)), (t0 + 500, fr.skill_damage(ME, aid, 1000)),
+               (t0 + 4000, fr.skill_damage(ME, aid, 1000)), (t0 + 4500, fr.vanish(aid, 0))]
+    c = combat_of(fr.build(ME, ev)[0])
+    f = next(f for f in dd.boss_fights(c) if c.entities[f["key"]].job == BETEL)
+    x = dd.Ctx(c, f["key"], None)
+    return [x.phase_name(p) for p in x.phases], c
+
+
+names, c = betel_phases(2, 1)
+check(names == ["Fase 1", "Fase 3"], "fase 2 pulada: o 2º monstro é a fase 3 -> %s" % names)
+check(len(c.phase_marks) == 1, "a armadilha andando repete o pacote, mas marca uma vez só -> %d" % len(c.phase_marks))
+names, _c = betel_phases(3, 2)
+check(names == ["Fase 1", "Fase 2", "Fase 3"], "três fases continuam 1, 2, 3 -> %s" % names)
+names, _c = betel_phases(2, None)
+check(names == ["Fase 1", "Fase 2"], "sem armadilha da fase 3, a ordem de sempre -> %s" % names)
+names, _c = betel_phases(1, 0)
+check(names == ["Fase 3"], "gravação que começa na fase 3 -> %s" % names)
+
+
+def at(packet, x, y):
+    """Põe a posição (PosDir) num 0x09fe do fake_replay."""
+    p = bytearray(packet)
+    p[63:66] = bytes([x >> 2, ((x & 3) << 6) | (y >> 4), (y & 0xF) << 4])
+    return bytes(p)
+
+
+# --- zona de risco: só na fase 3 do Betelgeuse --------------------------------
+SAFE, RISKY, CORNER = 2101, 2102, 2103
+ev = [(0, fr.spawn(TRAP, "npc", 20112, "#trap_1_0aa")), (0, at(fr.spawn(61000, "mob", BETEL, "Betelgeuse", boss=2), 156, 80)),
+      (500, fr.skill_damage(ME, 61000, 1000)), (4500, fr.vanish(61000, 0)),
+      (15100, fr.spawn(TRAP, "npc", 20351, "#trap_1_0aa")),
+      (16000, at(fr.spawn(61001, "mob", BETEL, "Betelgeuse", boss=2), 156, 80)),
+      (15000, at(fr.spawn(SAFE, "pc", 4302, "Segura"), 154, 79)), (15000, at(fr.spawn(RISKY, "pc", 4302, "Colada"), 156, 79)),
+      (15000, at(fr.spawn(CORNER, "pc", 4256, "Canto"), 133, 70))]
+ev += [(15000, fr.party_hp(a, 50000, 50000)) for a in (SAFE, RISKY, CORNER)]
+ev += [(16500 + i * 500, fr.skill_damage(a, 61001, 1000)) for i in range(30) for a in (SAFE, RISKY)]
+ev += [(18000, fr.effect(RISKY, rrf.EF_TRAP)), (19000, fr.effect(RISKY, rrf.EF_TRAP)), (18000, fr.effect(SAFE, rrf.EF_TRAP))]
+c = combat_of(fr.build(ME, ev)[0])
+f = next(f for f in dd.boss_fights(c) if c.entities[f["key"]].job == BETEL)
+r = dd.analyze(c, f["key"])
+rows = {x["name"]: x for x in r["risk"]}
+check(r["risk_phase"] and rows["Colada"]["bad"] and rows["Colada"]["risk_hits"] == 2,
+      "zona de risco: colada no Betel dá alerta e conta os 2 golpes -> %s" % rows.get("Colada"))
+check(not rows["Segura"]["bad"] and rows["Segura"]["risk_ms"] == 0 and not rows["Canto"]["bad"],
+      "zona de risco: 2 ← 1 ↓ e o canto esquerdo são seguros")
+alert = [a for a in r["alerts"] if a["what"] == "Ficou na zona de risco das armadilhas"]
+check(len(alert) == 1 and alert[0]["sev"] == 1 and alert[0]["phase"] == "Fase 3" and "Colada" in alert[0]["who"]
+      and "Segura" not in alert[0]["who"], "zona de risco: alerta amarelo na fase 3 -> %s" % alert)
+r1 = dd.analyze(*(lambda cc: (cc, next(f["key"] for f in dd.boss_fights(cc) if cc.entities[f["key"]].job == BETEL)))(
+    betel_phases(2, None)[1]))
+check(not r1["risk_phase"] and not r1["risk"], "zona de risco: sem a fase 3 não olha nada")
+
+# --- golpes fortes fora da rajada dos outros DPS ------------------------------
+DA, DB = 2201, 2202
+ev = [(0, fr.spawn(61000, "mob", BETEL, "Betelgeuse", boss=2)), (0, fr.spawn(DA, "pc", 4302, "Sincronia")),
+      (0, fr.spawn(DB, "pc", 4302, "Parceiro"))]
+ev += [(100, fr.party_hp(a, 50000, 50000)) for a in (DA, DB)]
+ev += [(1000 + i * 1000, fr.skill_damage(DA, 61000, 10000000, hits=1)) for i in range(20)]
+ev += [(1100 + i * 1000, fr.skill_damage(DB, 61000, 10000000, hits=1)) for i in range(20)]
+ev += [(22600, fr.skill_damage(DA, 61000, 10000000, hits=1)),     # 2,5 s depois do último golpe do parceiro
+       (22900, fr.skill_damage(DA, 61000, 10000000, hits=1))]     # mesmo episódio
+c = combat_of(fr.build(ME, ev)[0])
+r = dd.analyze(c, 61000)
+alert = [a for a in r["alerts"] if a["what"] == "Golpes fortes fora da rajada dos outros DPS"]
+check(len(alert) == 1 and alert[0]["sev"] == 2 and alert[0]["who"] == "Sincronia 1×" and len(r["desync"]) == 1
+      and r["desync"][0]["hits"] == 2, "assincronia: golpe forte sozinho, 2 golpes num episódio -> %s" % alert)
+
+# --- Cinzas Vulcânicas: usadas, mas o status não aparece no chefe -------------
+GEN, DIETER = 2301, 7301
+ev = [(0, fr.spawn(61000, "mob", BETEL, "Betelgeuse", boss=2)), (0, fr.spawn(GEN, "pc", 4257, "Bioquimica")),
+      (0, fr.spawn(DIETER, "homun", 6051, "Dieter", gid=GEN)), (100, fr.party_hp(GEN, 50000, 50000))]
+ev += [(1000 + i * 1000, fr.skill_damage(ME, 61000, 10000000, hits=1)) for i in range(15)]
+ev += [(3000, fr.cast(DIETER, 61000, 8043, 2000)), (9000, fr.cast(DIETER, 61000, 8043, 2000))]
+c = combat_of(fr.build(ME, ev)[0])
+r = dd.analyze(c, 61000)
+row = next((d for d in r["debuffs"] if d["key"] == "deb|608"), None)
+alert = [a for a in r["alerts"] if a["what"] == "Cinzas Vulcânicas não pegaram no chefe"]
+check(row is not None and row["who"] == "Dieter (de Bioquimica)" and "2 uso(s)" in row["note"] and len(alert) == 1
+      and alert[0]["sev"] == 0, "Cinzas Vulcânicas: linha nos debuffs e aviso de que não pegaram -> %s" % row)
+
+# --- drops: caiu do monstro, quem pegou, entrou na bolsa ----------------------
+import struct  # noqa: E402
+
+
+def item_fall(map_id, item, x, y, count=1):
+    return struct.pack("<HIIHBHHBBHBH", rrf.P_ITEM_FALL, map_id, item, 3, 1, x, y, 6, 6, count, 1, 0)
+
+
+def pick_action(src, map_id):
+    p = bytearray(29)
+    struct.pack_into("<HII", p, 0, rrf.P_ACT_LEGACY, src, map_id)
+    p[26] = 1                                            # ação 1: pegar item
+    return bytes(p)
+
+
+def pickup_ack(item, count=1):
+    p = bytearray(70)
+    struct.pack_into("<HHHI", p, 0, rrf.P_PICKUP, 10, count, item)
+    return bytes(p)
+
+
+ev = [(0, fr.spawn(50101, "mob", 1002, "Poring")), (500, fr.skill_damage(ME, 50101, 100)), (900, fr.vanish(50101, 1)),
+      (1200, item_fall(900001, 607, 100, 100)), (1200, item_fall(900002, 909, 100, 101, 3)),
+      (3000, pick_action(ME, 900001)), (3010, struct.pack("<HI", rrf.P_ITEM_GONE, 900001)), (3050, pickup_ack(607)),
+      (4000, pick_action(OTHER, 900002)), (4010, struct.pack("<HI", rrf.P_ITEM_GONE, 900002)),
+      (0, fr.spawn(OTHER, "pc", 4252, "Outro"))]
+c = combat_of(fr.build(ME, ev)[0])
+d1, d2 = c.drops
+check(d1["mob"] == "Poring" and d1["mine"] and d1["by"] == ME and d2["by"] == OTHER and not d2["mine"],
+      "drops: monstro, pego por você e pego por outro -> %s" % [(d["mob"], d["by"], d["mine"]) for d in c.drops])
+summ = {r["item"]: r for r in c.drop_summary()}
+check(summ[607]["fell"] == 1 and summ[607]["mine"] == 1 and summ[909]["fell"] == 3 and summ[909]["mine"] == 0,
+      "drops: resumo por item -> %s" % list(summ.values()))
+
+# --- quanto cada debuff rendeu (estimativa pela fórmula) ----------------------
+import contrib  # noqa: E402
+ev = [(0, fr.spawn(61000, "mob", BETEL, "Betelgeuse", boss=2)),
+      (100, fr.status(61000, 1142, True, 30000, 30000, 1)), (100, fr.status(61000, 1183, True, 30000, 30000, 100)),
+      (1000, fr.skill_damage(ME, 61000, 2500000, skill=2218, hits=1)),          # Tetra Vortex de fogo (mágico)
+      (2000, fr.status(61000, 1142, False)), (2000, fr.status(61000, 1183, False)),
+      (2500, fr.status(61000, 730, True, 20000, 20000, 150)),                   # Garra Sombria nv 5 (150%)
+      (3000, fr.skill_damage(ME, 61000, 1750000, skill=5473, hits=1)),          # corpo a corpo físico
+      (4000, fr.skill_damage(ME, 61000, 1000000, skill=2218, hits=1))]          # mágico: a Garra não vale
+c = combat_of(fr.build(ME, ev)[0])
+rows, total = contrib.fight(c, 61000)
+got = {r["efst"]: round(r["contrib"]) for r in rows}
+check(total == 5250000 and got.get(1183) == 1000000 and got.get(1142) == 500000 and got.get(730) == 750000,
+      "contribuição: Pólen 100/250, Vício 50/250 do golpe de fogo; Garra 75/175 só no corpo a corpo -> %s" % got)
+
+# --- visual de quem gravou (sprites do jogo) ------------------------------------
+import sprites  # noqa: E402
+import types  # noqa: E402
+
+
+def spr_bytes(w, h, idx, colors):
+    """.spr 0x200 (sem compressão) com uma imagem indexada e a paleta {índice: (r, g, b)}."""
+    pal = bytearray(1024)
+    for k, rgb in colors.items():
+        pal[k * 4:k * 4 + 3] = bytes(rgb)
+    return b"SP" + bytes((0, 2)) + struct.pack("<HHHH", 1, 0, w, h) + bytes(idx) + bytes(pal)
+
+
+def act_bytes(layer_xy, anchor, delay=4.0):
+    """.act 0x203 com uma ação de um quadro: uma camada (imagem 0) e uma âncora."""
+    d = b"AC" + bytes((3, 2)) + struct.pack("<H", 1) + bytes(10)
+    d += struct.pack("<I", 1) + bytes(32) + struct.pack("<I", 1)
+    d += struct.pack("<iiii", layer_xy[0], layer_xy[1], 0, 0) + bytes((255, 255, 255, 255))
+    d += struct.pack("<f", 1.0) + struct.pack("<ii", 0, 0) + struct.pack("<i", -1)
+    d += struct.pack("<i", 1) + struct.pack("<iiii", 0, anchor[0], anchor[1], 0)
+    return d + struct.pack("<i", 0) + struct.pack("<f", delay)
+
+
+RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (0, 0, 255)
+body = sprites.Part("corpo", sprites.Sprite(spr_bytes(2, 2, [1] * 4, {1: RED})),
+                    sprites.Act(act_bytes((0, -1), (0, -10))), anchored=False)
+head = sprites.Part("cabeça", sprites.Sprite(spr_bytes(2, 2, [1] * 4, {1: GREEN})), sprites.Act(act_bytes((0, 0), (0, 2))))
+w_, h_, px, ox, oy = sprites.compose([body, head], body, sprites.IDLE, 0, 0)
+check((w_, h_, ox, oy) == (2, 13, 1, 13) and px[0][:3] == GREEN and px[12 * 2][:3] == RED and px[5 * 2][3] == 0,
+      "sprite: cabeça presa na âncora do corpo (12 px acima), corpo no pé -> %s" % ((w_, h_, ox, oy),))
+check(body.act.delays == [100.0] and body.act.actions[0][0][1] == [(0, -10)], "sprite: .act com âncora e tempo do quadro")
+blue_pal = bytes(4) + bytes(BLUE) + bytes(1020 - 3)
+body2 = sprites.Part("corpo", body.spr, body.act, blue_pal, anchored=False)
+px2 = sprites.compose([body2], body2, sprites.IDLE, 0, 0)[2]
+check(px2[0][:3] == BLUE, "sprite: paleta de cor de roupa troca a do arquivo")
+with tempfile.TemporaryDirectory() as tmp:
+    gp = os.path.join(tmp, "data.grf")
+    base = sprites.HUMAN + "몸통\\남\\sky_emperor_남"
+    fr.build_grf(gp, {base + ".spr": spr_bytes(2, 2, [1] * 4, {1: RED}), base + ".act": act_bytes((0, -1), (0, -10)),
+                      sprites.HUMAN + "머리통\\남\\22_남.spr": spr_bytes(2, 2, [1] * 4, {1: GREEN}),
+                      sprites.HUMAN + "머리통\\남\\22_남.act": act_bytes((0, 0), (0, 2))})
+    wd = sprites.Wardrobe(gp)
+    r = wd.render(dict(job=4302, sex=1, hair=22, top=1677), sprites.WALK, 3)
+    check(r is not None and r[:2] == (2, 13) and r[7] == ["top"],
+          "sprite: guarda-roupa lê corpo e cabeça do .grf; chapéu sem tabela fica como faltando -> %s" % (r and r[7]))
+it = rrf.Item
+worn = {1024: it(1, 31368), 256: it(2, 400242), 512: it(2, 400242), 2: it(3, 540045), 4: it(4, 480926)}
+look = sprites.look_at(dict(job=4302, top=5, mid=7, low=9, robe=260), worn, {31368: 1677, 400242: 2220, 540045: 15})
+check((look["top"], look["mid"], look["low"], look["robe"], look["weapon"]) == (1677, 2220, 0, 0, 540045),
+      "visual no momento: visual vale mais que o normal, item sem ClassNum some -> %s" % look)
+a, b, sh = it(3, 1), it(4, 2), it(5, 3)
+fake = types.SimpleNamespace(equip_log=[(0, {2: a}), (5000, {2: b}), (6000, {2: b, 32: sh}), (20000, {2: b, 32: sh})])
+check(an.equip_moments(fake) == [(0, []), (6000, ["Arma", "Escudo"])],
+      "equipamento: trocas em sequência viram um momento só -> %s" % an.equip_moments(fake))
+data, _off = fr.build(ME, [], look=dict(hair=22, top=1677, mid=1792, low=2154, robe=260, cloth_color=3), sex=0)
+s_ = rrf.Session(rrf.Header(data), data)
+check(s_.look.get("hair") == 22 and s_.look.get("top") == 1677 and s_.look.get("sex") == 0 and s_.look.get("job") == 4302
+      and s_.player == "Tester", "sessão: visual e sexo de quem grava -> %s" % s_.look)
+
+# --- XP exata entre gravações (o jogo guarda a XP total no início de cada uma) ---
+with tempfile.TemporaryDirectory() as tmp:
+    def rec(name, date, exp, gid=7001):
+        data, _off = fr.build(ME, [], date=date, xp=(gid, exp, 1000000))
+        with open(os.path.join(tmp, name), "wb") as f:
+            f.write(data)
+        return os.path.join(tmp, name)
+    a = rec("a.rrf", (2026, 11, 5, 15, 24, 22), 500000)
+    rec("b.rrf", (2026, 11, 5, 15, 24, 49), 500379)
+    rec("c.rrf", (2026, 11, 5, 16, 0, 0), 900000)
+    rec("outro.rrf", (2026, 11, 5, 15, 24, 30), 1, gid=7002)
+    s_a = rrf.read_session(a)
+    nxt = meter.xp_after(a, s_a)
+    check(nxt and nxt["gain"] == 379 and os.path.basename(nxt["path"]) == "b.rrf" and meter.level_progress(s_a) == 0.5,
+          "XP: +379 até a próxima gravação do mesmo personagem; 50%% do nível -> %s" % nxt)
+
+# --- XP estimada dos abates e fator calibrado com a gravação seguinte --------------
+import xp as xpmod  # noqa: E402
+check(xpmod.penalty(255 - 246) == 135 and xpmod.penalty(44 - 240) == 10 and xpmod.penalty(0) == 100,
+      "XP: penalidade de nível (rAthena / Divine Pride)")
+with tempfile.TemporaryDirectory() as tmp:
+    ev = []
+    for i, aid in enumerate((52001, 52002, 52003)):
+        ev += [(i * 1000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 1000 + 300, fr.skill_damage(ME, aid, 5000)),
+               (i * 1000 + 400, fr.vanish(aid, 1))]
+    ev += [(3500, fr.spawn(52004, "mob", 1124, "Goblin")), (3600, fr.skill_damage(OTHER, 52004, 5000)),
+           (3700, fr.vanish(52004, 1))]                                    # morto por outro: sem XP
+    for name, date, exp, events in (("a.rrf", (2026, 11, 5, 19, 35, 0), 1000, ev),
+                                    ("b.rrf", (2026, 11, 5, 19, 35, 20), 1000 + 306, [])):
+        data, _off = fr.build(ME, events, date=date, xp=(7100, exp, 10 ** 9))
+        with open(os.path.join(tmp, name), "wb") as f:
+            f.write(data)
+    rf = meter.ReplayFile(os.path.join(tmp, "a.rrf"))
+    rf.poll(max_bytes=1 << 30)
+    cfg = {}
+    rows, unknown = xpmod.kills(rf.combat)
+    f = xpmod.calibrate(rf.combat, cfg, meter.xp_after)
+    est = xpmod.estimate(rf.combat, dict(cfg, xp_mode="medido"))
+    check(len(rows) == 3 and unknown == 0 and rows[0]["xp"] == 34 and f == 3.0 and round(est["xp"]) == 306
+          and est["source"][0] == "medido",
+          "XP: 3 Goblins a 10%% = 102, +306 na gravação seguinte = fator medido ×3 -> %s %s" % (f, est["source"]))
+    check(xpmod.factor(rf.combat, {"xp_mode": "fixo", "xp_fixed": 200})[0] == 3.0, "XP: valor fixo +200% = ×3")
+    est = xpmod.estimate(rf.combat, {"xp_bonuses": {"server": {"on": True, "pct": 100}}})
+    check(round(est["xp"]) == 204 and est["source"][0] == "lista", "XP: pela lista, evento +100%% = ×2 -> %s" % est["xp"])
+
+wins = {"vip": [(0, 100, 0)], "manual": [(0, 100, 0)], "njord": [(50, 100, 60)]}
+sets = xpmod.settings({"xp_bonuses": {"server": {"on": True}, "manual": {"pct": 200}}})
+check(xpmod.bonus_at(10, wins, sets) == 100 + 20 + 200 and xpmod.bonus_at(60, wins, sets) == 100 + 20 + 200 + 60,
+      "XP: bônus somam; o manual vale só enquanto ativo; Njord com o % do status")
+sets2 = xpmod.settings({"xp_bonuses": {"manual": {"pct": 50}}})
+xpmod.BONUSES.append(dict(key="_teste", name="x", pct=100, status=1, on=True, group="consumível"))
+sets2 = xpmod.settings({"xp_bonuses": {"manual": {"pct": 50}}})
+check(xpmod.bonus_at(10, {"manual": [(0, 100, 0)], "_teste": [(0, 100, 0)], "vip": []}, sets2) == 100,
+      "XP: dois consumíveis ativos não somam (vale o maior)")
+xpmod.BONUSES.pop()
+
+# --- Milagre Solar, Lunar e Estelar (status 160 de 1 hora, sem ícone) e bônus dos itens ----------------
+ev = [(1000, fr.status(ME, 984, True, 2592000, 2592000, 0)),          # VIP
+      (5000, fr.status(ME, meter.MIRACLE_EFST, True, 3600000, 3600000, 1)),
+      (8000, fr.vanish(ME, 1)),                                            # morreu: VIP e Milagre continuam
+      (20000, fr.skill_damage(ME, 77, 1))]
+c = combat_of(fr.build(ME, ev)[0])
+check(c.miracle_windows() == [(5000, c.now)] and any(a[2] == "miracle" for a in c.alerts)
+      and c.lasting(984) == [(1000, c.now)],
+      "Milagre: status 160 de 1 h vira o Milagre (com aviso); ele e o VIP não acabam com a morte -> %s" % c.miracle_windows())
+items = {31975: {"identifiedDisplayName": "Visual Batata-doce na Boca", "identifiedDescriptionName": {
+            1: "[Durante o Evento]", 2: "EXP obtida por monstros +5%.", 3: "-", 4: "Conjunto",
+            5: "[Visual] Chapéu do Festival da Colheita", 6: "Dano físico +10%.",
+            7: "EXP obtida por monstros +5% adicional.", 8: "-", 9: "Conjunto", 10: "[Visual] Espetinhos",
+            11: "EXP obtida por monstros +5% adicional.", 12: "--------------------------", 13: "Tipo: Visual"}},
+         31368: {"identifiedDisplayName": "[Visual] Chapéu do Festival da Colheita"},
+         300834: {"identifiedDisplayName": "Carta Baby Shark", "identifiedDescriptionName": {
+             1: "EXP adquirida ao derrotar a raça Planta +10%.", 2: "EXP adquirida ao derrotar monstros +15%."}}}
+table = xpmod.parse_gear(items)
+names = {i: xpmod._norm(v["identifiedDisplayName"]) for i, v in items.items()}
+worn = {4096: rrf.Item(1, 31975), 1024: rrf.Item(2, 31368), 4: rrf.Item(3, 480146, cards=(300834,))}
+check(xpmod.gear_bonus(worn, True, table, names)[0] == 5 + 5 + 15 and xpmod.gear_bonus(worn, False, table, names)[0] == 15,
+      "XP dos itens: +5% da Batata, +5% do conjunto com o chapéu (sem o Espetinhos), +15% da carta; sem evento só a carta")
+
+# --- todo texto da interface tem tradução -------------------------------------
+import ast  # noqa: E402
+import i18n  # noqa: E402
+untranslated = []
+for name in sorted(os.listdir(os.path.join(HERE, ".."))):
+    if name.endswith(".py"):
+        tree = ast.parse(open(os.path.join(HERE, "..", name), encoding="utf-8").read())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_" and node.args:
+                a = node.args[0]
+                if isinstance(a, ast.Constant) and isinstance(a.value, str) and a.value not in i18n.CATALOG:
+                    untranslated.append("%s: %s" % (name, a.value[:60]))
+untranslated += ["sprites.py: %s" % n for _a, n in sprites.ACTIONS + sprites.HEAD_DIRS if n not in i18n.CATALOG]
+untranslated += ["xp.py: %s" % n for n in [b["name"] for b in xpmod.BONUSES] + [m for m, _p in xpmod.MANUALS]
+                 if n not in i18n.CATALOG]
+check(not untranslated, "textos sem tradução para EN/ES: %s" % (untranslated or "nenhum"))
+
 # --- replays reais do usuario (se existirem) ----------------------------------
 for path, who, expected in LOCAL.get("totals", []):
     if not os.path.isfile(path):

@@ -1,4 +1,4 @@
-DPS Ragnarok {VERSION} — medidor de DPS para Ragnarok Online (ROLatam)
+Replay Master {VERSION} — medidor de DPS e análise de replays para Ragnarok Online (ROLatam)
 =====================================================================
 
 Um widget pequeno que mostra o seu DPS e o ranking de dano do grupo em tempo
@@ -12,8 +12,8 @@ Idiomas: português, English, español (botão direito › Idioma).
 
 COMO USAR
 ---------
-1. Extraia o .zip numa pasta sua (ex.: Documentos\DpsRagnarok).
-2. Abra o DpsRagnarok.exe. Não precisa instalar nem ser administrador.
+1. Extraia o .zip numa pasta sua (ex.: Documentos\ReplayMaster).
+2. Abra o ReplayMaster.exe. Não precisa instalar nem ser administrador.
 3. No jogo, comece a gravar um replay. O medidor acha a gravação sozinho e
    começa a contar.
 4. Botão direito no widget abre todas as opções. O botão de gráfico abre a
@@ -28,7 +28,7 @@ replays. Com várias instalações do jogo, ele olha todas as pastas Replay e
 segue a gravação mais nova.
 
 Dá para abrir um replay já gravado: botão direito › Abrir replay salvo, ou
-arraste o arquivo .rrf em cima do DpsRagnarok.exe.
+arraste o arquivo .rrf em cima do ReplayMaster.exe.
 
 Dica para o Dedo Duro: comece a gravar antes de o grupo se buffar. Os buffs dos
 outros que já estavam ativos quando a gravação começou só aparecem quando acabam.
@@ -47,7 +47,7 @@ SEGURANÇA
   protegeu o computador". Antes de liberar, confira se o arquivo é o original:
   abra o PowerShell na pasta e rode
 
-      Get-FileHash .\DpsRagnarok.exe
+      Get-FileHash .\ReplayMaster.exe
 
   O código que aparecer tem que ser igual ao do arquivo SHA256.txt (e ao da
   página de onde você baixou). Se for igual, clique em "Mais informações" ›
@@ -59,7 +59,7 @@ SEGURANÇA
 
 SE O PROGRAMA NÃO ABRIR
 -----------------------
-- O DpsRagnarok.exe sumiu da pasta, ou aparece "O Windows não pode acessar o
+- O ReplayMaster.exe sumiu da pasta, ou aparece "O Windows não pode acessar o
   dispositivo, caminho ou arquivo especificado": o antivírus apagou o arquivo
   (alarme falso, comum em programas sem assinatura). Confira o código do .exe
   como explicado acima e restaure o arquivo em Segurança do Windows › Proteção

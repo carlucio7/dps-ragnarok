@@ -1,7 +1,7 @@
 """Monta o pacote para compartilhar: .exe com versão, instruções (pt/en/es), créditos, SHA-256 e .zip.
 
 uso: python tools/build_release.py
-saída: release/DpsRagnarok-VERSÃO/ e release/DpsRagnarok-VERSÃO-win.zip
+saída: release/ReplayMaster-VERSÃO/ e release/ReplayMaster-VERSÃO-win.zip
 
 O UPX fica desligado (compactar o .exe faz antivírus desconfiar à toa). O código SHA-256 do .exe
 vai no SHA256.txt do pacote; o do .zip aparece no fim, para pôr na página de download.
@@ -42,11 +42,11 @@ def version_file(path):
                     subtype=0x0, date=(0, 0)),
   kids=[
     StringFileInfo([StringTable('040904B0', [
-      StringStruct('FileDescription', 'DPS Ragnarok - DPS meter for Ragnarok Online (reads replay files)'),
+      StringStruct('FileDescription', 'Replay Master - DPS meter and replay analysis for Ragnarok Online (reads replay files)'),
       StringStruct('FileVersion', '%(v)s'),
-      StringStruct('InternalName', 'DpsRagnarok'),
-      StringStruct('OriginalFilename', 'DpsRagnarok.exe'),
-      StringStruct('ProductName', 'DPS Ragnarok'),
+      StringStruct('InternalName', 'ReplayMaster'),
+      StringStruct('OriginalFilename', 'ReplayMaster.exe'),
+      StringStruct('ProductName', 'Replay Master'),
       StringStruct('ProductVersion', '%(v)s')])]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]
@@ -65,18 +65,18 @@ def main():
     vfile = os.path.join("build", "version_info.txt")
     version_file(vfile)
     subprocess.check_call([sys.executable, "-m", "PyInstaller", "--noconfirm", "--onefile", "--windowed", "--noupx",
-                           "--name", "DpsRagnarok", "--icon", "dpsmeter.ico", "--version-file", vfile,
+                           "--name", "ReplayMaster", "--icon", "dpsmeter.ico", "--version-file", vfile,
                            "--add-data", "dpsmeter.ico;.", "--add-data", "data;data", "dpsmeter.py"])
-    imports = ordinal_imports(os.path.join("dist", "DpsRagnarok.exe"))
+    imports = ordinal_imports(os.path.join("dist", "ReplayMaster.exe"))
     if "comctl32.dll" in imports:
         sys.exit("o .exe importa a comctl32 %s: o lançador é o padrão do PyInstaller" % imports["comctl32.dll"])
-    name = "DpsRagnarok-%s" % VERSION
+    name = "ReplayMaster-%s" % VERSION
     out = os.path.join("release", name)
     if os.path.isdir(out):
         shutil.rmtree(out)
     os.makedirs(out)
-    exe = os.path.join(out, "DpsRagnarok.exe")
-    shutil.copy2(os.path.join("dist", "DpsRagnarok.exe"), exe)
+    exe = os.path.join(out, "ReplayMaster.exe")
+    shutil.copy2(os.path.join("dist", "ReplayMaster.exe"), exe)
     for doc in DOCS:
         with open(os.path.join("docs", doc), encoding="utf-8") as f:
             text = f.read().replace("{VERSION}", VERSION)
@@ -88,7 +88,7 @@ def main():
         f.write(text)
     exe_hash = sha256(exe)
     with open(os.path.join(out, "SHA256.txt"), "w", encoding="utf-8", newline="\r\n") as f:
-        f.write("%s  DpsRagnarok.exe\n" % exe_hash)
+        f.write("%s  ReplayMaster.exe\n" % exe_hash)
     zpath = os.path.join("release", name + "-win.zip")
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
         for fn in sorted(os.listdir(out)):

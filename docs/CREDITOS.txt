@@ -1,4 +1,4 @@
-DPS Ragnarok {VERSION} — créditos / credits / créditos
+Replay Master {VERSION} — créditos / credits / créditos
 =====================================================
 
 - Formato do replay (.rrf) / replay format / formato del replay:
@@ -23,6 +23,8 @@ DPS Ragnarok {VERSION} — créditos / credits / créditos
   https://recap.latam-tools.com.br/
 
 - Elemento do Betelgeuse / Betelgeuse element: Divine Pride.
+- XP dos monstros / Monster XP: rAthena (mob_db) e/and Divine Pride (monstros novos / new
+  monsters: Torre do Relógio / Clock Tower Unknown Basement).
 
 Ragnarok Online é marca da Gravity Co., Ltd. Este programa não é oficial nem tem
 ligação com a Gravity ou a ROLatam. / Ragnarok Online is a trademark of Gravity

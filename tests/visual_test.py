@@ -93,7 +93,7 @@ an_win.refresh(force=True)
 s.shot_window(an_win.top, "18_analise_zoom")
 an_win.set_zoom(0)
 an_win.top.geometry("1180x860+60+40")
-for name in ("buffs", "mortes", "testes"):
+for name in ("equip", "buffs", "mortes", "testes"):
     an_win.select_tab(name)
     an_win.refresh(force=True)
     s.shot_window(an_win.top, "18_analise_%s" % name)

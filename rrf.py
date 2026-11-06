@@ -221,6 +221,12 @@ def entity_name(raw):
     return decode_name(raw[i:])
 
 
+# o visual de quem grava (sessão): mesmos valores que os outros veem no pacote de entrada (0x09fe)
+LOOK_CHUNKS = (("hair", 1060), ("weapon", 1061), ("shield", 1062), ("cloth_color", 1063), ("hair_color", 1064),
+               ("low", 1065), ("top", 1066), ("mid", 1067), ("robe", 1071))
+RD_SEX = 963                  # REPLAY_DATA: 1 = masculino, 0 = feminino
+
+
 class Session:
     """Quem esta gravando: AID e nome do personagem, mapa inicial."""
 
@@ -230,6 +236,7 @@ class Session:
         self.base_level = 0
         self.player = ""
         self.map = ""
+        self.pos = None               # (x, y) de quem grava quando a gravação começou
         self.option = 0
         self.recorded_at = header.recorded_at
         sess = dict(header.container_chunks(buf, CT_SESSION))
@@ -241,10 +248,33 @@ class Session:
             self.base_level = struct.unpack_from("<I", sess[1016])[0]
         if len(sess.get(1070, b"")) >= 4:
             self.option = struct.unpack_from("<I", sess[1070])[0]
+        # XP: o jogo guarda só a XP de base no início da gravação (1015) e quanto falta no nível (1018)
+        self.gid = struct.unpack_from("<I", sess[1011])[0] if len(sess.get(1011, b"")) >= 4 else 0
+        self.base_exp = struct.unpack_from("<q", sess[1015])[0] if len(sess.get(1015, b"")) >= 8 else None
+        self.next_exp = struct.unpack_from("<q", sess[1018])[0] if len(sess.get(1018, b"")) >= 8 else None
         rd = header.container_chunks(buf, CT_REPLAY_DATA)
         if len(rd) > 5:
             self.player = decode_name(rd[4][1])
             self.map = decode_name(rd[5][1])
+        if len(rd) > 8 and len(rd[7][1]) >= 4 and len(rd[8][1]) >= 4:
+            x, y = struct.unpack_from("<i", rd[7][1])[0], struct.unpack_from("<i", rd[8][1])[0]
+            if 0 < x < 1024 and 0 < y < 1024:
+                self.pos = (x, y)
+        # visual no início: classe, sexo, cabelo e cores, chapéus (baixo, topo, meio), capa, arma e escudo
+        self.look = dict(job=self.job, option=self.option, sex=1)
+        for key, cid in LOOK_CHUNKS:
+            if len(sess.get(cid, b"")) >= 4:
+                self.look[key] = struct.unpack_from("<i", sess[cid])[0]
+        sex = dict(rd).get(RD_SEX, b"")
+        if len(sex) >= 4:
+            self.look["sex"] = 1 if struct.unpack_from("<i", sex)[0] else 0
+
+
+def read_session(path, limit=1 << 16):
+    """Session de um .rrf lendo só o começo do arquivo (os containers da sessão vêm antes do fluxo)."""
+    with open(path, "rb") as f:
+        buf = f.read(limit)
+    return Session(Header(buf), buf)
 
 
 class StreamReader:
@@ -328,10 +358,52 @@ MAP_DAMAGE_EFFECTS = {537: "Armadilha da Torre da Constelação"}
 EF_TRAP = 537
 OPTION_FLYING = 0x8000     # Mestre Taekwon com a União Solar, Lunar e Estelar ativa
 
+P_ITEM_FALL = 0x0ADD       # ZC_ITEM_FALL_ENTRY: item caiu no chão (drop de monstro, com efeito)
+P_ITEM_ENTRY = 0x009D      # ZC_ITEM_ENTRY: item que já estava no chão entrou na visão
+P_ITEM_GONE = 0x00A1       # ZC_ITEM_DISAPPEAR: item saiu do chão (pegaram ou acabou o tempo)
+P_PICKUP = 0x0B41          # ZC_ITEM_PICKUP_ACK (novo): item entrou na bolsa de quem grava
+P_MVP_ITEM = 0x010A        # ZC_MVP_GETTING_ITEM: prêmio de MVP para quem grava
+ITEM_PACKETS = {P_ITEM_FALL, P_ITEM_ENTRY, P_ITEM_GONE, P_PICKUP, P_MVP_ITEM}
+# a experiência ganha não fica no replay: só o total no começo da gravação (sessão, chunks 1015/1018)
+
+P_MOVE_SELF = 0x0087       # ZC_NOTIFY_PLAYERMOVE: tempo, MoveData[6] (só quem grava)
+P_STOP = 0x0088            # ZC_STOPMOVE: aid, x, y
+P_SLIDE = {0x01FF, 0x08D2}  # ZC_HIGHJUMP / ZC_FASTMOVE: aid, x, y (empurrão, salto)
+POSITION_PACKETS = {P_MOVE_SELF, P_STOP} | P_SLIDE
+# no LATAM o andar dos outros chega como 0x09fd (aparecer andando) a cada passo, com MoveData de-para
+
 STATUS_PACKETS = {P_STATUS, P_STATUS2, P_STATUS3}
-WANTED = DAMAGE_PACKETS | SPAWN_PACKETS | SKILL_USE_PACKETS | CAST_PACKETS | STATUS_PACKETS | {
+WANTED = DAMAGE_PACKETS | SPAWN_PACKETS | SKILL_USE_PACKETS | CAST_PACKETS | STATUS_PACKETS | POSITION_PACKETS | ITEM_PACKETS | {
     P_VANISH, P_MAPMOVE, P_GROUND_UNIT, P_HP_INFO, 0x010F, P_PARAM, P_PARTY_HP, P_WEAR, P_TAKEOFF, P_ITEM_ADD,
     P_OPTION, P_EFFECT, P_RESURRECT}
+
+
+def posdir(b):
+    """PosDir de 3 bytes -> (x, y)."""
+    return (b[0] << 2) | (b[1] >> 6), ((b[1] & 0x3F) << 4) | (b[2] >> 4)
+
+
+def movedata(b):
+    """MoveData de 6 bytes -> ((x de, y de), (x para, y para))."""
+    x0 = (b[0] << 2) | (b[1] >> 6)
+    y0 = ((b[1] & 0x3F) << 4) | (b[2] >> 4)
+    x1 = ((b[2] & 0x0F) << 6) | (b[3] >> 2)
+    y1 = ((b[3] & 0x03) << 8) | b[4]
+    return (x0, y0), (x1, y1)
+
+
+def spawn_move(pid, d):
+    """(de, para, ms por célula) de um pacote de aparecer; parado: de == para."""
+    try:
+        tail = 69 if pid == P_SPAWN_STAND else (75 if pid in (P_SPAWN_WALK, P_SPAWN_NEW) else 68)
+        speed = struct.unpack_from("<h", d, 13)[0] or 150
+        if pid in (P_SPAWN_WALK, P_SPAWN_NEW):
+            a, b = movedata(d[tail - 8:tail - 2])
+        else:
+            a = b = posdir(d[tail - 5:tail - 2])
+        return a, b, speed
+    except (struct.error, IndexError):
+        return None
 SP_HP, SP_MAXHP = 5, 6
 
 OBJ_KIND = {0: "pc", 5: "mob", 6: "npc", 7: "pet", 8: "homun", 9: "merc", 10: "elem",
@@ -596,6 +668,44 @@ def parse_item_add(d):
         cards = struct.unpack_from("<4i", d, 13)
         loc = struct.unpack_from("<I", d, 29)[0]
         return Item(slot - 2, item_id, refine, 0, cards, (), loc) if amount > 0 else None
+    except (struct.error, IndexError):
+        return None
+
+
+def parse_ground_item(pid, d):
+    """0x0add / 0x009d: (id no chão, item, quantidade, x, y)."""
+    try:
+        map_id, item = struct.unpack_from("<II", d, 2)
+        if pid == P_ITEM_FALL:
+            x, y = struct.unpack_from("<HH", d, 13)
+            count = struct.unpack_from("<H", d, 19)[0]
+        else:
+            x, y, count = struct.unpack_from("<HHH", d, 11)
+        return map_id, item, count, x, y
+    except struct.error:
+        return None
+
+
+ACT_OFFSET = {P_ACT_LEGACY: 26, P_ACT3: 28, P_ACT3_NEW: 29}   # onde fica o tipo de ação em cada versão
+
+
+def parse_pickup_action(pid, d):
+    """Ação de pegar item do chão (o mesmo pacote do ataque, ação 1): (quem pegou, id do item no chão)."""
+    try:
+        if d[ACT_OFFSET[pid]] != 1:
+            return None
+        return struct.unpack_from("<II", d, 2)
+    except (KeyError, IndexError, struct.error):
+        return None
+
+
+def parse_pickup(d):
+    """0x0b41 (e 0x0a37): (item, quantidade, refino) do que entrou na bolsa; None se falhou."""
+    try:
+        _slot, count, item = struct.unpack_from("<HHI", d, 2)
+        if count <= 0 or (len(d) > 34 and d[34] != 0):
+            return None
+        return item, count, d[12]
     except (struct.error, IndexError):
         return None
 

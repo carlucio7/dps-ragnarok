@@ -2,6 +2,71 @@
 
 Português · [English](#english) · [Español](#español)
 
+## [1.2.0] — 2026-11-05
+
+- **Novo nome: Replay Master** (antes DPS Ragnarok). O programa já faz bem mais
+  do que medir DPS. O .exe agora é `ReplayMaster.exe`; as configurações e o
+  histórico de testes continuam em `%APPDATA%\RODpsMeter`.
+- **Equipamento** (nova aba na análise): tudo o que quem gravou vestia (refino,
+  cartas, opções, grau, visuais e sombrios) e o personagem montado com os
+  sprites do próprio jogo instalado: classe, cabelo e cores, roupa, chapéus,
+  capa, arma e escudo. O boneco anda por padrão; gire e escolha a ação
+  (parado, andando, sentado, atacando, conjurando...). Sem o jogo no PC, mostra só a lista.
+- **Drops** (nova aba na análise e no widget, ao lado de Grupo/Skills/Alvos): no
+  widget, só o que você pegou; na análise, um quadro para cada destino (você
+  pegou, outros jogadores pegaram, ficaram no chão) e o resumo por item, com
+  prêmios de MVP. "Pego por" vem da ação de pegar do jogo.
+- **XP** (nova aba na análise e no widget, separada dos drops): o replay não
+  grava a XP ganha, só a XP total no início de cada gravação. O medidor mostra o
+  nível e o % do nível, a XP exata do início desta gravação até o início da
+  próxima do mesmo personagem e uma **estimativa** dos abates: XP de cada
+  monstro (rAthena e Divine Pride) com a penalidade de nível e a sua parte do
+  dano, vezes os bônus. XP por minuto em % do nível, XP por hora, XP por monstro
+  e um gráfico da XP ao longo do tempo.
+  - Lista de bônus para marcar, todos somando: evento do servidor, VIP (+20%),
+    Cetro do Coração Lunar (+30%, 24 h), Kafra Buff (+50%, 7 dias), manuais de
+    combate (consumíveis: competem entre si, vale o maior), Banquete de Njord
+    (o % vem do próprio buff), Milagre Solar, Lunar e Estelar, equipamentos e
+    visuais e outros. VIP, Cetro, Kafra Buff, manual, Njord e Milagre são
+    detectados no replay e só contam enquanto estão ativos (os de conta, os
+    manuais e o Milagre não acabam com a morte); o evento do servidor a pessoa
+    marca. O bônus dos equipamentos, visuais e cartas vem do texto dos itens no
+    jogo instalado ("EXP obtida por monstros +5%", inclusive de conjunto e
+    "[Durante o Evento]").
+  - Também dá para usar o fator **medido** (a XP exata entre duas gravações
+    seguidas do mesmo personagem ÷ a XP estimada) ou um **valor fixo**.
+- **Buffs e Debuffs** (antes Buffs): ranking do quanto cada efeito rendeu de
+  dano, pela fórmula de cada um (Cometa, Pólen, Avanço Sísmico, Garra Sombria,
+  Lex Aeterna...), com gráfico. Os buffs ficam em ordem: o que rendeu dano,
+  depois suporte do grupo, buffs de classe, consumíveis e serviços. Nova coluna
+  Efeito com a descrição do próprio jogo; nomes em português que antes
+  apareciam com o código interno ("Plusattackpower" agora é "ATQ aumentado");
+  status de sistema (venda, transformação...) não aparecem mais. Dá para
+  escolher a fase da luta (Fase 1, Fase 3...).
+- **Linha do tempo:** o filtro vale também para a lista de eventos, que mostra
+  cada golpe e skill (inclusive dos monstros) e segue os jogadores marcados em
+  "DPS de cada jogador". Nova sub-aba Dano por fase.
+- **Análise de DPS:** dano total de cada fase e de cada jogador por fase.
+- **Fases do Betelgeuse:** quando a fase 2 é pulada, a última aparece como
+  Fase 3 (e não Fase 2).
+- **Dedo Duro:**
+  - Zona de risco (amarelo, aba própria): na fase 3 do Betelgeuse, quem ficou
+    no alcance das armadilhas de 1 s antes a 16 s depois de o Betelgeuse
+    aparecer, com a posição segura.
+  - Assincronia (vermelho): golpes fortes (0,5% do HP do chefe ou mais) a mais
+    de 0,5 s de qualquer golpe forte dos outros DPS vivos, em toda janela de
+    ataque.
+  - Cinzas Vulcânicas (Dieter): aparece nos debuffs e avisa quando a skill foi
+    usada mas o status nunca apareceu no chefe (o Betelgeuse é imune).
+- **Milagre Solar, Lunar e Estelar:** o medidor reconhece o Milagre (o jogo liga
+  um status de 1 hora sem ícone) e festeja no widget: faixa dourada com
+  estrelas, cores pulsando e um som curto. Depois mostra quanto falta no rodapé
+  ("★ Milagre · 54 min"). Dá para desligar tudo, ou só o som, no menu ⋯.
+- **Widget:** botão /where com o mapa e as coordenadas de quem grava; um clique
+  copia no formato do navegador do jogo (`/navi icas_in 82/120`).
+- **Testes:** dá para salvar uma luta de qualquer replay, não só dos bonecos de
+  treino (o equipamento salvo é o de quem gravou).
+
 ## [1.1.0] — 2026-10-28
 
 - **Linha do tempo** (nova aba na análise): uma luta contra chefe no tempo, com
@@ -80,6 +145,72 @@ inglês e espanhol.
 
 ## English
 
+### [1.2.0] — 2026-11-05
+
+- **New name: Replay Master** (formerly DPS Ragnarok). The program does a lot
+  more than measure DPS now. The .exe is now `ReplayMaster.exe`; settings and
+  the test history stay in `%APPDATA%\RODpsMeter`.
+- **Equipment** (new analysis tab): everything the recorder wore (refine,
+  cards, options, grade, costumes and shadow gear) and the character drawn with
+  the installed game's own sprites: class, hair and colors, outfit, headgears,
+  garment, weapon and shield. The character walks by default; turn it and pick
+  the action (standing, walking, sitting, attacking, casting...). Without the game on the
+  PC, it shows only the list.
+- **Drops** (new tab in the analysis and the widget, next to Party/Skills/Targets):
+  the widget shows only what you picked up; the analysis has one frame per
+  outcome (you picked up, other players picked up, left on the ground) and the
+  per-item summary, with MVP rewards. "Picked up by" comes from the game's
+  pick-up action.
+- **XP** (new tab in the analysis and the widget, separate from drops): the
+  replay doesn't store XP gained, only the total XP at the start of each
+  recording. The meter shows the level and level %, the exact XP from the start
+  of this recording to the start of the same character's next one, and an
+  **estimate** from kills: each monster's XP (rAthena and Divine Pride) with the
+  level penalty and your share of the damage, times the bonuses. XP per minute as
+  % of the level, XP per hour, XP per monster and a chart of XP over time.
+  - Bonus list to tick, all adding up: server event, VIP (+20%), Lunar Heart
+    Scepter (+30%, 24 h), Kafra Buff (+50%, 7 days), battle manuals
+    (consumables: they compete, the highest counts), Njord's Feast (the % comes
+    from the buff itself), Miracle of the Sun, Moon and Stars, equipment and
+    costumes, and others. VIP, Scepter, Kafra Buff, manuals, Njord and the
+    Miracle are detected in the replay and only count while active (account
+    bonuses, manuals and the Miracle survive death); the server event is ticked
+    by hand. Equipment, costume and card bonuses come from the item texts in the
+    installed game ("EXP obtida por monstros +5%", set and "[Durante o Evento]"
+    bonuses included).
+  - The **measured** factor (exact XP between two back-to-back recordings of the
+    same character ÷ estimated XP) or a **fixed value** can be used instead.
+- **Buffs and Debuffs** (formerly Buffs): ranking of how much damage each effect
+  added, by each one's formula (Comet, Pollen, Rush Quake, Dark Claw, Lex
+  Aeterna...), with a chart. Buffs are ordered: damage gain first, then party
+  support, class buffs, consumables and services. New Effect column with the
+  game's own description; names that showed the internal code now use the
+  game's name; system statuses (vending, transformation...) are hidden. You can
+  pick the fight phase (Phase 1, Phase 3...).
+- **Timeline:** the filter now applies to the event list too, which shows every
+  hit and skill (monsters' included) and follows the players ticked under "DPS
+  of each player". New Damage per phase sub-tab.
+- **DPS analysis:** total damage per phase and per player per phase.
+- **Betelgeuse phases:** when phase 2 is skipped, the last one shows as Phase 3
+  (not Phase 2).
+- **Snitch:**
+  - Risk zone (yellow, own tab): in Betelgeuse's phase 3, who stood within trap
+    range from 1 s before to 16 s after Betelgeuse appears, with the safe spot.
+  - Desync (red): strong hits (0.5% of the boss HP or more) more than 0.5 s away
+    from any strong hit by the other living DPS, in every attack window.
+  - Volcanic Ash (Dieter): listed among the debuffs, with a warning when the
+    skill was used but the status never showed on the boss (Betelgeuse is
+    immune).
+- **Miracle of the Sun, Moon and Stars:** the meter recognizes the Miracle (the
+  game turns on a 1-hour status with no icon) and celebrates on the widget: a
+  gold banner with stars, pulsing colors and a short sound. Then the footer shows
+  the time left ("★ Miracle · 54 min"). Turn it all off, or just the sound, in
+  the ⋯ menu.
+- **Widget:** /where button with the recorder's map and coordinates; one click
+  copies it in the game's navigation format (`/navi icas_in 82/120`).
+- **Tests:** a fight from any replay can be saved, not only training dummies
+  (the saved equipment is the recorder's).
+
 ### [1.1.0] — 2026-10-28
 
 - **Timeline** (new analysis tab): a boss fight over time, with overlaid charts
@@ -156,6 +287,75 @@ and Spanish.
 ---
 
 ## Español
+
+### [1.2.0] — 2026-11-05
+
+- **Nuevo nombre: Replay Master** (antes DPS Ragnarok). El programa ya hace
+  mucho más que medir DPS. El .exe ahora es `ReplayMaster.exe`; la
+  configuración y el historial de pruebas siguen en `%APPDATA%\RODpsMeter`.
+- **Equipo** (nueva pestaña del análisis): todo lo que llevaba quien grabó
+  (refinamiento, cartas, opciones, grado, visuales y sombríos) y el personaje
+  armado con los sprites del propio juego instalado: clase, pelo y colores,
+  ropa, cascos, capa, arma y escudo. El personaje camina por defecto; gíralo y
+  elige la acción (quieto, caminando, sentado, atacando, conjurando...). Sin el juego en la PC,
+  muestra solo la lista.
+- **Drops** (nueva pestaña en el análisis y en el widget, junto a
+  Grupo/Skills/Objetivos): el widget muestra solo lo que recogiste; el análisis
+  tiene un cuadro para cada destino (recogiste, otros jugadores recogieron,
+  quedaron en el suelo) y el resumen por ítem, con premios de MVP. "Recogido
+  por" viene de la acción de recoger del juego.
+- **XP** (nueva pestaña en el análisis y en el widget, separada de los drops): el
+  replay no graba la XP ganada, solo la XP total al inicio de cada grabación. El
+  medidor muestra el nivel y el % del nivel, la XP exacta desde el inicio de esta
+  grabación hasta el inicio de la próxima del mismo personaje y una
+  **estimación** de las muertes: la XP de cada monstruo (rAthena y Divine Pride)
+  con la penalización de nivel y tu parte del daño, por los bonos. XP por minuto
+  en % del nivel, XP por hora, XP por monstruo y un gráfico de la XP en el tiempo.
+  - Lista de bonos para marcar, todos sumando: evento del servidor, VIP (+20%),
+    Cetro del Corazón Lunar (+30%, 24 h), Kafra Buff (+50%, 7 días), manuales de
+    combate (consumibles: compiten entre sí, vale el mayor), Banquete de Njord
+    (el % viene del propio buff), Milagro Solar, Lunar y Estelar, equipos y
+    visuales y otros. VIP, Cetro, Kafra Buff, manual, Njord y el Milagro se
+    detectan en el replay y solo cuentan mientras están activos (los de cuenta,
+    los manuales y el Milagro no terminan con la muerte); el evento del servidor
+    se marca a mano. El bono de equipos, visuales y cartas viene del texto de los
+    ítems en el juego instalado ("EXP obtida por monstros +5%", incluso de
+    conjunto y "[Durante o Evento]").
+  - También se puede usar el factor **medido** (la XP exacta entre dos
+    grabaciones seguidas del mismo personaje ÷ la XP estimada) o un **valor
+    fijo**.
+- **Buffs y Debuffs** (antes Buffs): ranking de cuánto daño rindió cada efecto,
+  según la fórmula de cada uno (Cometa, Polen, Avance Sísmico, Garra Sombría,
+  Lex Aeterna...), con gráfico. Los buffs quedan en orden: lo que rindió daño,
+  luego apoyo del grupo, buffs de clase, consumibles y servicios. Nueva columna
+  Efecto con la descripción del propio juego; los nombres que mostraban el
+  código interno ahora usan el nombre del juego; los estados de sistema (venta,
+  transformación...) ya no aparecen. Se puede elegir la fase de la pelea (Fase
+  1, Fase 3...).
+- **Línea de tiempo:** el filtro también vale para la lista de eventos, que
+  muestra cada golpe y skill (también de los monstruos) y sigue a los jugadores
+  marcados en "DPS de cada jugador". Nueva subpestaña Daño por fase.
+- **Análisis de DPS:** daño total de cada fase y de cada jugador por fase.
+- **Fases de Betelgeuse:** cuando se salta la fase 2, la última aparece como
+  Fase 3 (y no Fase 2).
+- **Soplón (Dedo Duro):**
+  - Zona de riesgo (amarillo, pestaña propia): en la fase 3 de Betelgeuse,
+    quién quedó al alcance de las trampas desde 1 s antes hasta 16 s después de
+    que aparece Betelgeuse, con la posición segura.
+  - Asincronía (rojo): golpes fuertes (0,5% del HP del jefe o más) a más de
+    0,5 s de cualquier golpe fuerte de los otros DPS vivos, en toda ventana de
+    ataque.
+  - Cenizas Volcánicas (Dieter): aparece en los debuffs y avisa cuando la skill
+    se usó pero el estado nunca apareció en el jefe (Betelgeuse es inmune).
+- **Milagro Solar, Lunar y Estelar:** el medidor reconoce el Milagro (el juego
+  activa un estado de 1 hora sin ícono) y lo festeja en el widget: franja
+  dorada con estrellas, colores que laten y un sonido corto. Después el pie
+  muestra cuánto falta ("★ Milagro · 54 min"). Se puede apagar todo, o solo el
+  sonido, en el menú ⋯.
+- **Widget:** botón /where con el mapa y las coordenadas de quien graba; un
+  clic lo copia en el formato del navegador del juego (`/navi icas_in 82/120`).
+- **Pruebas:** se puede guardar una pelea de cualquier replay, no solo de los
+  muñecos de entrenamiento (el equipo guardado es el de quien grabó).
 
 ### [1.1.0] — 2026-10-28
 

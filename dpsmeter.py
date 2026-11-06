@@ -12,8 +12,10 @@ botão para ver o que ele faz no rodapé; o botão direito abre todas as opçõe
 import ctypes
 import json
 import os
+import random
 import subprocess
 import sys
+import threading
 import time
 import traceback
 import tkinter as tk
@@ -23,8 +25,9 @@ from tkinter import filedialog, messagebox
 import clientdata
 import meter
 import testes
+import xp
 from analysis_ui import AnalysisWindow
-from fmt import num, dur
+from fmt import num, dur, dec
 import i18n
 from i18n import _
 from version import VERSION
@@ -49,6 +52,9 @@ MIN_SCALE, MAX_SCALE = 0.7, 2.5
 FONT_PX = {"big": 30, "big_s": 23, "unit": 11, "title": 12, "text": 11, "small": 10, "num": 12, "icon": 11, "tab": 11}
 MIN_FONT_PX = 8
 ALERT_S = 7.0          # quanto tempo um aviso fica no rodapé
+MIRACLE_FLASH_S = 9.0  # o widget brilha por esse tempo quando o Milagre ativa
+MIRACLE_BANNER_S = 6.0
+MIRACLE_COLORS = ("#fbbf24", "#fde68a", "#c084fc", "#f9a8d4", "#ffffff", "#a5b4fc")
 POLL_MS = 150         # ler o pedaço novo do arquivo custa < 1 ms
 
 THEMES = {
@@ -75,15 +81,19 @@ HINTS = {
     "more": _("Opções"), "min": _("Minimizar"), "close": _("Fechar o medidor"), "reset": _("Zerar: começa a contar de novo"),
     "view": _("Escolher o que mostrar: tudo ou uma luta"), "prev": _("Luta anterior"), "next": _("Próxima luta"),
     "group": _("Dano de cada jogador"), "skills": _("O seu dano por skill"), "targets": _("Em quem você bateu"),
+    "drops": _("Itens que você pegou"), "xp": _("XP estimada dos seus abates e seu nível"),
     "grip": _("Arraste para mudar a largura e o número de linhas"),
+    "where": _("Onde quem grava está (mapa e coordenadas). Clique para copiar o /navi"),
 }
-TABS = [("group", _("Grupo")), ("skills", _("Skills")), ("targets", _("Alvos"))]
+TABS = [("group", _("Grupo")), ("skills", _("Skills")), ("targets", _("Alvos")), ("drops", _("Drops")),
+        ("xp", _("XP"))]
 
 ICONS = {
     "pin_on": ("\uE840", "📌"), "pin_off": ("\uE718", "📌"), "more": ("\uE712", "⋯"),
     "min": ("\uE921", "–"), "close": ("\uE8BB", "✕"), "reset": ("\uE72C", "↻"),
     "prev": ("\uE76B", "‹"), "next": ("\uE76C", "›"), "file": ("\uE8E5", "📂"),
     "chart": ("\uE9D2", "📊"),
+    "where": ("\uE707", "📍"),
 }
 
 CONFIG_VERSION = 2
@@ -93,8 +103,13 @@ DEFAULTS = {
     "rate": "combat",      # DPS: "combat" = dano / tempo da luta; "active" = dano / tempo em que cada um bateu
     "folder": None, "x": None, "y": None, "v": CONFIG_VERSION, "width": BASE_W,
     "an_geometry": None, "an_tab": 0, "an_zoom": 1.0,
-    "auto_tests": True, "alert_buffs": True, "alert_death": True, "alert_fusion": True, "targets": "all",
+    "auto_tests": True, "alert_buffs": True, "alert_death": True, "alert_fusion": True, "alert_miracle": True, "miracle_sound": True,
+    "targets": "all",
     "lang": None,          # None = idioma do Windows
+    "xp_factor": {},       # {personagem: [fator, quando, arquivo]} medido com gravações seguidas
+    "xp_bonuses": {},      # {bônus: {"on", "pct"}} da lista de bônus de XP (xp.BONUSES)
+    "xp_mode": "lista",    # "lista" (bônus marcados), "medido" ou "fixo"
+    "xp_fixed": None,      # bônus fixo (%) do modo "fixo"
 }
 
 
@@ -131,6 +146,49 @@ def on_color(h):
 
 def shade(h, amount):
     return mix(h, "#ffffff" if luminance(h) < 0.5 else "#000000", amount)
+
+
+_CHIME = []
+
+
+def chime_wav():
+    """Arpejo curto e brilhante (dó-mi-sol-dó e um brilho no fim), WAV 16 bits mono gerado na hora."""
+    if _CHIME:
+        return _CHIME[0]
+    import math
+    import struct as st
+    rate, length = 22050, 1.25
+    n = int(rate * length)
+    buf = [0.0] * n
+    notes = [(1046.5, 0.00, 0.30), (1318.5, 0.08, 0.28), (1568.0, 0.16, 0.26), (2093.0, 0.24, 0.30),
+             (2637.0, 0.40, 0.10), (3136.0, 0.46, 0.08), (4186.0, 0.52, 0.06)]
+    for freq, start, vol in notes:
+        i0 = int(start * rate)
+        for i in range(i0, n):
+            x = (i - i0) / float(rate)
+            env = math.exp(-x * 5.0) * min(1.0, x * 200)       # ataque rápido, cauda que some
+            w = 2 * math.pi * freq * x
+            buf[i] += vol * env * (math.sin(w) + 0.25 * math.sin(2 * w) + 0.1 * math.sin(3 * w))
+    peak = max(abs(v) for v in buf) or 1.0
+    data = b"".join(st.pack("<h", int(32767 * 0.55 * v / peak)) for v in buf)
+    head = (b"RIFF" + st.pack("<I", 36 + len(data)) + b"WAVEfmt " + st.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16)
+            + b"data" + st.pack("<I", len(data)))
+    _CHIME.append(head + data)
+    return _CHIME[0]
+
+
+def play_chime():
+    """Toca o som do Milagre sem travar o widget (Windows)."""
+    if not IS_WIN:
+        return
+
+    def run():
+        try:
+            import winsound
+            winsound.PlaySound(chime_wav(), winsound.SND_MEMORY | winsound.SND_NODEFAULT)
+        except (ImportError, RuntimeError, OSError):
+            pass
+    threading.Thread(target=run, daemon=True).start()
 
 
 def round_rect_pts(x1, y1, x2, y2, r):
@@ -208,6 +266,8 @@ class DpsApp:
         # nomes do jogo no idioma escolhido (da instalação; com o cache leva ~0,1 s, na 1ª vez alguns segundos)
         clientdata.NAMES.load()
         self.names_v = clientdata.NAMES.version
+        self.xp_seen = None
+        self.miracle_at = -1e9                 # quando o Milagre ativou (o widget brilha por uns segundos)
         self.press_xy = None
         self.enc_back = 0                   # 0 = encontro atual, 1 = anterior...
         self.hover = self.pressed = self.drag = self.resize = None
@@ -224,7 +284,7 @@ class DpsApp:
         self.alert = None             # (texto, tipo, quando apareceu)
         self.alert_seen = 0
 
-        root.title(_("DPS Ragnarok"))
+        root.title(_("Replay Master"))
         root.report_callback_exception = self.log_error
         root.overrideredirect(True)
         self.dpi = root.winfo_fpixels("1i") / 96.0
@@ -317,6 +377,17 @@ class DpsApp:
         t["track"] = mix(t["bg"], t["fg"], 0.07)
         t["bar"] = mix(t["bg"], t["muted"], 0.38)
         t["bar_me"] = mix(t["bg"], t["accent"], 0.62)
+        k = time.time() - getattr(self, "miracle_at", -1e9)
+        if 0 <= k < MIRACLE_FLASH_S:
+            # Milagre: o widget brilha em dourado, lilás e branco, apagando aos poucos
+            fade = 1.0 - k / MIRACLE_FLASH_S
+            star = MIRACLE_COLORS[int(k * 6) % len(MIRACLE_COLORS)]
+            t["accent"] = mix(t["accent"], star, 0.35 + 0.65 * fade)
+            t["bar_me"] = mix(t["bar_me"], star, 0.75 * fade)
+            t["bar"] = mix(t["bar"], "#7c3aed", 0.35 * fade)
+            dark = sum(int(t["bg"][i:i + 2], 16) for i in (1, 3, 5)) < 384
+            t["bg"] = mix(t["bg"], "#2e1065" if dark else "#fef3c7", 0.55 * fade)
+            t["edge"] = mix(t["edge"], "#fbbf24", 0.8 * fade)
         return t
 
     def initial_pos(self, w, h):
@@ -391,6 +462,11 @@ class DpsApp:
             if self.analysis is not None:
                 self.analysis.refresh(force=True)
         f = self.watcher.file
+        cur = f.combat if f is not None and f.ready else None
+        if cur is not self.xp_seen:
+            prev, self.xp_seen = self.xp_seen, cur
+            if prev is not None:
+                self.xp_calibrate(prev)
         if f is not None and f.ready:
             f.combat.finished = not self.watcher.recording(now)
             self.check_alerts(f, now)
@@ -401,6 +477,8 @@ class DpsApp:
                 except Exception:  # noqa: BLE001
                     self.log_error(*sys.exc_info())
         self.phase = (self.phase + 1) % 8
+        if now - self.miracle_at < MIRACLE_FLASH_S + 0.3:
+            self.dirty = True
         if self.dirty or now - self.last_draw >= 1.0:
             self.draw()
         if self.analysis is not None:
@@ -409,6 +487,15 @@ class DpsApp:
             except Exception:  # noqa: BLE001
                 self.log_error(*sys.exc_info())
         self.root.after(POLL_MS, self.tick)
+
+    def xp_calibrate(self, c):
+        """Fator de XP do personagem: XP exata até a próxima gravação ÷ XP estimada dos abates desta."""
+        try:
+            if xp.calibrate(c, self.cfg, meter.xp_after):
+                self.save()
+                self.dirty = True
+        except Exception:  # noqa: BLE001
+            self.log_error(*sys.exc_info())
 
     def check_alerts(self, f, now):
         """Mostra no rodapé o aviso mais novo (buff que acabou, morte) por alguns segundos."""
@@ -419,10 +506,15 @@ class DpsApp:
                 continue
             self.alert_seen = seq
             if ((kind == "buff" and self.cfg["alert_buffs"]) or (kind == "death" and self.cfg["alert_death"])
-                    or (kind == "fusion" and self.cfg["alert_fusion"])):
+                    or (kind == "fusion" and self.cfg["alert_fusion"])
+                    or (kind == "miracle" and self.cfg["alert_miracle"])):
                 self.alert = (text, kind, now)
                 self.dirty = True
-        if self.alert and now - self.alert[2] > ALERT_S:
+                if kind == "miracle":
+                    self.miracle_at = now
+                    if self.cfg["miracle_sound"]:
+                        play_chime()
+        if self.alert and now - self.alert[2] > (MIRACLE_FLASH_S if self.alert[1] == "miracle" else ALERT_S):
             self.alert = None
             self.dirty = True
 
@@ -560,6 +652,13 @@ class DpsApp:
                 text = "%s · %s" % (snap["target"], text)
         elif snap and snap["target"]:
             text = "%s · %s" % (snap["target"], text)
+        # /where: mapa e coordenadas de quem grava; o clique copia o /navi
+        where = cb.where() if cb is not None else None
+        if where and where[1] is not None:
+            label = "%s %d/%d" % (where[0], where[1], where[2])
+            if self.fonts["small"].measure(label) > (bx - 20 * s) * 0.55:
+                label = "%d/%d" % (where[1], where[2])
+            bx = self.text_button("where", bx - 6 * s, fy, self.icon("where"), label)
         r = 3.2 * s
         pulse = live and self.phase < 4
         color = t["muted"]
@@ -567,10 +666,15 @@ class DpsApp:
                          (self.hover[0] if self.hover else None))
         if hint and not self.alert:
             text, color = hint, t["fg"]
+        elif not self.alert and cb is not None and cb.miracle_left() is not None:
+            left = cb.miracle_left()
+            text, color = _("★ Milagre · %d min") % max(1, round(left / 60000.0)), "#fbbf24"
+            live = True
         if self.alert:
             # aviso (buff que acabou, morte) no lugar do status, piscando
             text, kind = self.alert[0], self.alert[1]
-            dot = t["live"] if kind in ("death", "fusion") else "#f59e0b"
+            dot = t["live"] if kind in ("death", "fusion") else (
+                t["accent"] if kind in ("info", "miracle") else "#f59e0b")
             color = dot
             live = True
             c.create_polygon(round_rect_pts(6 * s, fy - 10 * s, bx - 4 * s, fy + 10 * s, 6 * s), smooth=True,
@@ -586,6 +690,34 @@ class DpsApp:
             gx, gy, rr = W - (4 + dx) * s, H - (4 + dy) * s, max(0.8, 1.0 * s)
             c.create_oval(gx - rr, gy - rr, gx + rr, gy + rr, fill=mix(t["bg"], t["muted"], 0.6), outline="")
         self.paint_hover()
+        self.draw_miracle()
+
+    def draw_miracle(self):
+        """Faixa dourada com estrelas quando o Milagre ativa (alguns segundos)."""
+        k = time.time() - self.miracle_at
+        if not 0 <= k < MIRACLE_BANNER_S:
+            return
+        c, t, s, W, H = self.canvas, self.t, self.s, self.W, self.H
+        grow = min(1.0, k / 0.35)                              # abre rápido
+        fade = 1.0 if k < MIRACLE_BANNER_S - 1.2 else max(0.0, (MIRACLE_BANNER_S - k) / 1.2)
+        cy = H * 0.42
+        hh = 34 * s * grow
+        gold = MIRACLE_COLORS[int(k * 8) % 3]
+        fill = mix(t["bg"], "#4c1d95", 0.85 * fade)
+        c.create_polygon(round_rect_pts(8 * s, cy - hh, W - 8 * s, cy + hh, 10 * s), smooth=True, fill=fill,
+                         outline=mix(t["bg"], gold, fade), width=max(2, int(2 * s)))
+        if grow < 1:
+            return
+        rnd = random.Random(int(k * 12))                       # estrelas que piscam
+        for _i in range(28):
+            x, y = rnd.uniform(14 * s, W - 14 * s), rnd.uniform(cy - hh + 4 * s, cy + hh - 4 * s)
+            size = rnd.uniform(7, 15) * s
+            col = mix(t["bg"], rnd.choice(MIRACLE_COLORS), fade * rnd.uniform(0.45, 1.0))
+            c.create_text(x, y, text=rnd.choice("★✦✧⋆"), fill=col, font=("Segoe UI Symbol", -int(size)))
+        c.create_text(W / 2, cy - 8 * s, text=_("★ MILAGRE ★"), fill=mix(t["bg"], "#fde68a", fade),
+                      font=self.fonts["big_s"])
+        c.create_text(W / 2, cy + 18 * s, text=_("todos os monstros são alvos estelares por 1 hora"),
+                      fill=mix(t["bg"], "#f5f3ff", fade), font=self.fonts["small"])
 
     def clip_text(self, item, text, max_x):
         c = self.canvas
@@ -653,6 +785,44 @@ class DpsApp:
                                  frac=k["total"] / (top or 1), me=True))
             if not sk:
                 msg = (_("Você não causou dano aqui."), "")
+        elif tab == "drops":
+            cb = self.combat()
+            enc = None if self.cfg["session"] else cb.encounter(self.enc_back)
+            rng = None if enc is None else (enc.start - 2000, enc.last + 30000)
+            items = [r for r in cb.drop_summary(rng) if r["mine"] or r["mvp"]]
+            top = max([r["mine"] + r["mvp"] for r in items] + [1])
+            for r in items[:n]:
+                rows.append(dict(label=r["name"], value="×%d" % (r["mine"] + r["mvp"]),
+                                 right=_("prêmio de MVP") if r["mvp"] else "", frac=(r["mine"] + r["mvp"]) / float(top),
+                                 me=True))
+            if not items:
+                msg = (_("Você não pegou nenhum item aqui."),
+                       _("O que caiu no chão e o que outros pegaram fica na análise (aba Drops)."))
+        elif tab == "xp":
+            cb = self.combat()
+            enc = None if self.cfg["session"] else cb.encounter(self.enc_back)
+            rng = None if enc is None else (enc.start, enc.last)
+            est = xp.estimate(cb, self.cfg, rng)
+            kind, _info = est["source"]
+            how = {"medido": _("×%s medido"), "fixo": _("×%s fixo")}.get(kind, _("×%s pela lista")) % dec(
+                "%.2f" % est["factor"])
+            rows.append(dict(label=_("XP estimada"), value=num(est["xp"]), right=how, frac=1.0, me=True))
+            if est["per_min"] is not None:
+                rows.append(dict(label=_("XP por minuto"),
+                                 value=dec("%.3f%%" % est["per_min_pct"]) if est["per_min_pct"] is not None
+                                 else num(est["per_min"]), right=_("%s/h") % num(est["per_hour"]), frac=1.0, me=True))
+            rows.append(dict(label=_("Abates"), value="%d" % est["kills"],
+                             right=(_("%d sem XP conhecida") % est["unknown"]) if est["unknown"] else "",
+                             frac=0.0, me=False))
+            prog = meter.level_progress(cb.session)
+            if prog is not None:
+                rows.append(dict(label=_("Nível %d") % cb.session.base_level, value=dec("%.1f%%" % (100 * prog)),
+                                 right=_("no início da gravação"), frac=prog, me=False))
+            nxt = meter.xp_after(getattr(cb, "path", None), cb.session)
+            if nxt and nxt["gain"] is not None:
+                rows.append(dict(label=_("XP real até a próxima gravação"), value="+" + num(nxt["gain"]), right="",
+                                 frac=1.0, me=False))
+            rows = rows[:n]
         else:
             tg = snap["targets"]
             top = tg[0]["total"] if tg else 1
@@ -981,7 +1151,7 @@ class DpsApp:
         self.quit()
 
     def about(self):
-        messagebox.showinfo(_("Sobre"), "DPS Ragnarok %s\n\n%s\n\n%s" % (
+        messagebox.showinfo(_("Sobre"), "Replay Master %s\n\n%s\n\n%s" % (
             VERSION, _("Medidor de DPS para Ragnarok Online (ROLatam) · versão %s") % VERSION,
             _("Só lê o arquivo de replay que o jogo grava. Não lê a memória do jogo, não mexe na rede e não "
               "manda nada para a internet.")), parent=self.root)
@@ -1001,9 +1171,24 @@ class DpsApp:
             "pin": self.toggle_pin, "min": self.minimize, "close": self.quit,
             "more": lambda: self.popup_at(target, self.main_menu),
             "view": lambda: self.popup_at(target, self.view_menu), "reset": self.reset, "chart": self.open_analysis,
-            "prev": lambda: self.browse(1), "next": lambda: self.browse(-1),
+            "prev": lambda: self.browse(1), "next": lambda: self.browse(-1), "where": self.copy_where,
         }
         actions[key]()
+
+    def copy_where(self):
+        """Copia o /navi de onde quem grava está (no formato do jogo: /navi mapa x/y)."""
+        cb = self.combat()
+        w = cb.where() if cb is not None else None
+        if not w or w[1] is None:
+            return
+        cmd = "/navi %s %d/%d" % (w[0], w[1], w[2])
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(cmd)
+        except tk.TclError:
+            return
+        self.alert = (_("Copiado: %s") % cmd, "info", time.time())
+        self.dirty = True
 
     # ------------------------------------------------------------ menus
 
@@ -1039,6 +1224,8 @@ class DpsApp:
         for key, label in (("alert_buffs", _("Avisar quando um buff acabar na luta")),
                            ("alert_death", _("Avisar quando eu morrer (com overkill)")),
                            ("alert_fusion", _("Avisar HP baixo com a União Solar (Mestre Taekwon)")),
+                           ("alert_miracle", _("Festejar o Milagre Solar, Lunar e Estelar (Mestre Taekwon)")),
+                           ("miracle_sound", _("Tocar um som no Milagre")),
                            ("auto_tests", _("Salvar testes no boneco sozinho"))):
             var = self.keep(tk.BooleanVar(self.root, cfg[key]))
             m.add_checkbutton(label=label, variable=var, command=lambda k=key: self.toggle_cfg(k))
@@ -1203,7 +1390,7 @@ def main():
             except (OSError, AttributeError):
                 pass
         try:
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("RODpsMeter.DpsRagnarok")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("RODpsMeter.ReplayMaster")
         except (OSError, AttributeError):
             pass
     root = tk.Tk()

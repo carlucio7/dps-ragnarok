@@ -1,7 +1,7 @@
-# DPS Ragnarok — medidor de DPS para Ragnarok Online (ROLatam)
+# Replay Master — medidor de DPS e análise de replays para Ragnarok Online (ROLatam)
 
 **[⬇ Baixar a versão mais recente / Download the latest version / Descargar la última versión](https://github.com/carlucio7/dps-ragnarok/releases/latest)**
-(Windows · `DpsRagnarok-…-win.zip` · confira o SHA-256 da página da release / check the SHA-256 on the release page / comprueba el SHA-256 en la página de la release)
+(Windows · `ReplayMaster-…-win.zip` · confira o SHA-256 da página da release / check the SHA-256 on the release page / comprueba el SHA-256 en la página de la release)
 
 - 🇧🇷 Widget que mostra o seu DPS e o ranking do grupo em tempo real, lendo a gravação de replay do próprio jogo. Tem análise completa e a aba Dedo Duro (o que faltou nas lutas contra chefes).
 - 🇺🇸 Widget that shows your DPS and the party ranking in real time by reading the game's own replay recording. Includes a full analysis window and the Snitch tab (what was missing in boss fights).
@@ -21,7 +21,7 @@ não interage com o GameGuard.
 ## Como usar
 
 1. Baixe o `.zip` da [página de releases](https://github.com/carlucio7/dps-ragnarok/releases/latest),
-   extraia e abra o `DpsRagnarok.exe` (ou rode `python dpsmeter.py` a partir do código).
+   extraia e abra o `ReplayMaster.exe` (ou rode `python dpsmeter.py` a partir do código).
 2. No jogo, comece a gravar um replay.
 3. O medidor acha o arquivo novo sozinho e começa a contar. Quando a gravação
    termina, o último resultado continua na tela.
@@ -62,6 +62,12 @@ opções.
     homúnculos e skills de chão conta para o dono.
   - **Skills:** o seu dano por skill (% e número de acertos).
   - **Alvos:** em quem você bateu.
+  - **Drops:** os itens que você pegou (e prêmios de MVP).
+  - **XP:** XP estimada dos seus abates, XP por minuto em % do nível, XP por
+    hora e o nível no início da gravação.
+- **Milagre Solar, Lunar e Estelar:** quando o Milagre do Mestre Taekwon ativa, o
+  widget festeja (faixa dourada com estrelas, cores pulsando e um som curto) e o
+  rodapé mostra quanto falta. Dá para desligar no menu ⋯.
 - **Tudo ▾ / Luta atual ▾:** o botão mostra o que está na tela; clique para
   escolher.
   - *Tudo* (padrão) soma desde o início (ou desde *Zerar*) e divide só pelo
@@ -104,6 +110,10 @@ ranking** copia o ranking do recorte em texto (para colar no Discord/WhatsApp).
   e abates (golpe fatal). Para o jogador escolhido: habilidades (acertos, dano
   total e médio, hits médios, cast médio), monstros atingidos e a linha do
   tempo de todos.
+- **Equipamento:** tudo o que quem gravou vestia (refino, cartas, opções, grau,
+  visuais e sombrios) e o personagem desenhado com os sprites do jogo instalado
+  (classe, cabelo e cores, roupa, chapéus, capa, arma e escudo), animado: gire e
+  escolha a ação (andando, parado, sentado, atacando...).
 - **Monstros:** dano recebido, acertos, atacantes, HP máx., tempo até abate e
   quem abateu. Para o monstro escolhido:
   - dano por jogador (barras);
@@ -111,6 +121,17 @@ ranking** copia o ranking do recorte em texto (para colar no Discord/WhatsApp).
   - habilidades usadas contra ele (por jogador e classe);
   - habilidades do próprio monstro: com dano, de suporte/debuff ("usos sem
     dano"), alvos e tempo de conjuração, com filtro por alvo.
+- **Drops:** um quadro para cada destino: o que você pegou, o que outros
+  jogadores pegaram e o que ficou no chão, mais o resumo por item.
+- **XP:** o replay não grava a XP ganha, só a XP total no início de cada
+  gravação. A aba mostra o nível e o % do nível, a XP exata até a próxima
+  gravação do mesmo personagem e uma estimativa dos abates (XP de cada monstro
+  pelo rAthena e Divine Pride, penalidade de nível e a sua parte do dano) vezes
+  os bônus: evento do servidor, VIP, Cetro do Coração Lunar, Kafra Buff,
+  manuais (o maior vale), Banquete de Njord, Milagre e o texto dos equipamentos,
+  visuais e cartas. Os que aparecem no replay são detectados sozinhos. Também
+  dá para usar o fator medido entre duas gravações seguidas ou um valor fixo.
+  XP por minuto em % do nível, XP por hora, XP por monstro e gráfico no tempo.
 - **Análise de DPS:** gráfico de DPS de qualquer jogador, com a média móvel de
   5 s e a média da janela. Arraste para escolher um trecho e veja as
   estatísticas dele (dano, DPS do 1º ao último golpe, intervalo médio, maior
@@ -143,6 +164,10 @@ ranking** copia o ranking do recorte em texto (para colar no Discord/WhatsApp).
     pacote de aparecimento e nunca a barra de HP, 0x0977), e o Betelgeuse não
     usa nenhuma skill de cura nos replays. Por isso o HP vem da dificuldade e o
     que ele perde vem do dano visto.
+- **Buffs e Debuffs:** ranking de quanto dano cada efeito rendeu (Garra Sombria,
+  Pólen, Avanço Sísmico, Cometa, Lex Aeterna...), por fase da luta, com os buffs
+  em ordem (dano, suporte do grupo, classe, consumíveis, serviços) e o efeito
+  de cada um com o texto do próprio jogo. Mais:
 - **Buffs:** seus buffs com o % do tempo em combate (vivo) em que estiveram
   ativos, quantas vezes foram aplicados, se já estavam no início e quanto falta
   para acabar (ao vivo). Buffs de grupo (a lista do simulador da LATAM Tools) e
@@ -302,6 +327,10 @@ Configuração e `erros.log` ficam em `%APPDATA%\RODpsMeter` (ou na variável
   contados.
 - Com vários clientes gravando ao mesmo tempo, o medidor segue a gravação
   mais nova. Para escolher outra, abra o arquivo manualmente.
+- XP: o replay não grava a XP ganha nem o % de cada bônus. A estimativa
+  depende da XP de cada monstro (monstros novos que o rAthena ainda não tem
+  aparecem como "XP desconhecida"), não divide XP de grupo e não sabe qual é o
+  alvo do ódio do Mestre Taekwon.
 - Crítico: o servidor da LATAM quase nunca marca o acerto como crítico, então
   a contagem de críticos não é confiável.
 - Nomes em inglês e espanhol vêm do jogo instalado. Sem o jogo, o medidor usa a
@@ -357,9 +386,10 @@ python tools\tail_test.py                     # mede o atraso de escrita numa gr
 python make_icon.py                           # gera dpsmeter.ico
 python tools\build_efst.py PASTA_RATHENA      # gera data\efst.json (status.hpp, status.yml, skill_db.yml)
 python tools\build_rathena.py PASTA_RATHENA   # gera data\rathena.json (classes, skills, monstros, elementos)
+python tools\build_mob_exp.py MOB_DB.yml       # gera data\mob_exp.json (XP dos monstros + data\mob_exp_extra.json)
 python tools\build_names.py [PASTA_DO_JOGO]   # gera data\names.json (nomes em inglês e espanhol do cliente)
 python tools\build_bootloader.py              # uma vez: .venv-build com o lançador do PyInstaller compilado aqui
-python tools\build_release.py                 # pacote para compartilhar: release\DpsRagnarok-VERSÃO-win.zip + SHA-256
+python tools\build_release.py                 # pacote para compartilhar: release\ReplayMaster-VERSÃO-win.zip + SHA-256
 python tools\demo_shots.py SAIDA              # prints de divulgação (nomes fictícios) em pt, en e es
 ```
 

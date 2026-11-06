@@ -129,6 +129,46 @@ def build(c, key, rng=None):
     for u in c.uses:
         if t0 <= u[0] <= t1 and u[4] == dd.ELO_SKILL and u[2] in pset:
             ev(u[0], "elo", "elo", u[2], _("usou %s") % meter.skill_name(dd.ELO_SKILL))
+    # eventos individuais (só na lista): cada golpe e cada skill, dos jogadores e dos monstros
+    for h in c.hits:
+        if not t0 <= h.t <= t1:
+            continue
+        what = meter.skill_name(h.skill) if h.skill else _("ataque básico")
+        if h.miss:
+            detail = _("errou %s") % c.name_of(h.dst_raw)
+        else:
+            detail = _("%s em %s") % (an._full(h.dmg), c.name_of(h.dst_raw)) + (_(" (crítico)") if h.crit else "")
+        if h.out and h.src in pset:
+            if limit and h.dmg >= limit and h.dst == key:
+                detail += " · " + _("golpe forte")
+            ev(h.t, "hit", "hits", h.src, what, detail, value=h.dmg)
+            events[-1]["target"] = h.dst_raw
+        elif not h.out:
+            ev(h.t, "mobhit", "mobhits", None, what, detail, value=h.dmg)
+            events[-1].update(who=c.name_of(h.raw), mob=True, target=h.dst)
+    for u in c.uses:
+        if t0 <= u[0] <= t1 and u[4] != 717:
+            tgt = _(" em %s") % c.name_of(u[3]) if u[3] and u[3] != u[2] else ""
+            if u[2] in pset or c.is_friendly(u[2]):
+                ev(u[0], "pskill", "pskills", u[1] if u[1] in pset else u[2], _("usou %s") % meter.skill_name(u[4]),
+                   (c.name_of(u[2]) if u[2] != u[1] else "") + tgt)
+                events[-1]["target"] = u[3]
+            else:
+                ev(u[0], "mobskill", "mobskills", None, _("usou %s") % meter.skill_name(u[4]), tgt.strip())
+                events[-1].update(who=c.name_of(u[2]), mob=True, target=u[3])
+    for u in c.casts:
+        if t0 <= u[0] <= t1:
+            what = _("conjurou %s (%s)") % (meter.skill_name(u[4]), dd._secs(u[5]))
+            tgt = _("em %s") % c.name_of(u[3]) if u[3] and u[3] != u[2] else ""
+            if u[2] in pset or c.is_friendly(u[2]):
+                ev(u[0], "pskill", "pskills", u[1] if u[1] in pset else u[2], what, tgt)
+                events[-1]["target"] = u[3]
+            else:
+                ev(u[0], "mobskill", "mobskills", None, what, tgt)
+                events[-1].update(who=c.name_of(u[2]), mob=True, target=u[3])
+    for e_ in events:
+        if e_["kind"] in ("boss", "reflect"):
+            e_["mob"] = True
     events.sort(key=lambda e: e["t"])
 
     used = {e["lane"] for e in events}
@@ -140,6 +180,12 @@ def build(c, key, rng=None):
         if k in used:
             lanes.append(_lane(k, name, "point", color, k != "elo",
                                [e for e in events if e["lane"] == k]))
+    # só na lista (são muitos para o gráfico): começam desligados
+    for k, name, color in (("hits", _("Golpes dos jogadores"), None), ("pskills", _("Skills dos jogadores"), None),
+                           ("mobhits", _("Golpes dos monstros"), EVENT_COLORS["boss"]),
+                           ("mobskills", _("Skills dos monstros"), EVENT_COLORS["boss"])):
+        if k in used:
+            lanes.append(_lane(k, name, "list", color, False, []))
     starts = [(p["appear"], x.phase_name(p) if x.multi else None) for p in x.phases]
     marks = [(t, label or _("Início")) for t, label in starts]
     if x.climax < x.end:
@@ -149,7 +195,7 @@ def build(c, key, rng=None):
                 out=out, taken=taken, hp=hp, hp_known=True, hp_max=x.hp, hp_label=x.hp_label, lanes=lanes,
                 events=events,
                 marks=sorted(marks), players=sorted(dmg, key=lambda a: -dmg[a]), party=set(x.party), dmg=dmg,
-                names={a: c.name_of(a) for a in dmg}, starts=starts,
+                names={a: c.name_of(a) for a in dmg}, starts=starts, phase_dmg=dd.phase_damage(x),
                 lane_events=status_events(c, lanes))
 
 

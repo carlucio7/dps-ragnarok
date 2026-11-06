@@ -8,6 +8,7 @@ A lista embaixo mostra cada evento com décimo de segundo; clicar num evento mar
 """
 
 import bisect
+import collections
 import tkinter as tk
 from tkinter import ttk
 
@@ -58,10 +59,12 @@ def since(starts, t, short=False):
 
 
 class TimelineChart(tk.Canvas):
-    def __init__(self, parent, win, on_click=None):
+    def __init__(self, parent, win, on_click=None, on_view=None):
         super().__init__(parent, highlightthickness=0, bd=0, bg=win.c["panel"], cursor="crosshair")
         self.win = win
         self.on_click = on_click      # clique sem arrastar: instante escolhido
+        self.on_view = on_view        # o trecho visível mudou (zoom, arrastar, voltar)
+        self._told = None
         self.full = None              # (início, fim) da luta
         self.view = None              # trecho visível
         self.curves = []              # dict(name, color, points, axis="dps"|"pct", kind="rate"|"step", width)
@@ -161,6 +164,9 @@ class TimelineChart(tk.Canvas):
 
     def redraw(self):
         self.delete("all")
+        if self.on_view is not None and self.view != self._told:
+            self._told = self.view
+            self.on_view(self.view)
         c, f = self.win.c, self.win.f
         W, H = self.winfo_width(), self.winfo_height()
         if W < 80 or H < 80:
@@ -426,15 +432,45 @@ class TimelineTab:
         side_box.pack(side="right", fill="y", padx=(0, 6))
         side_box.pack_propagate(False)
         self.side = ScrollFrame(side_box, win).inner
-        self.chart = TimelineChart(top, win, on_click=self.time_picked)
+        self.chart = TimelineChart(top, win, on_click=self.time_picked, on_view=self.view_changed)
         self.chart.pack(side="left", fill="both", expand=True, padx=(4, 6), pady=(2, 4))
-        win.section(bottom, _("Eventos (só os das marcações ligadas)"))
-        self.table = Table(bottom, win, [
+        self.bnb = ttk.Notebook(bottom, style="Sub.TNotebook")
+        self.bnb.pack(fill="both", expand=True, padx=8, pady=(4, 8))
+        ev_tab = tk.Frame(self.bnb, bg=c["panel"])
+        self.bnb.add(ev_tab, text=_("Eventos"))
+        ph_tab = tk.Frame(self.bnb, bg=c["panel"])
+        self.bnb.add(ph_tab, text=_("Dano por fase"))
+        ebar = tk.Frame(ev_tab, bg=c["panel"])
+        ebar.pack(fill="x", padx=4, pady=(6, 4))
+        self.ev_title = win.label(ebar, _("Eventos"), "head", bg="panel", anchor="w")
+        self.ev_title.pack(side="left")
+        win.label(ebar, _("Quem:"), color="muted", bg="panel").pack(side="left", padx=(16, 4))
+        self.who_var = tk.StringVar(win.top, _("Jogadores marcados"))
+        self.who_box = ttk.Combobox(ebar, textvariable=self.who_var, state="readonly", width=26,
+                                    style="An.TCombobox", font=win.f["text"])
+        self.who_box.pack(side="left")
+        self.who_box.bind("<<ComboboxSelected>>", lambda e: self.fill_events())
+        self.who_keys = {}
+        self.visible_var = tk.BooleanVar(win.top, True)
+        ttk.Checkbutton(ebar, text=_("Só o trecho visível do gráfico"), variable=self.visible_var,
+                        style="An.TCheckbutton", command=self.fill_events).pack(side="left", padx=(16, 0))
+        self.table = Table(ev_tab, win, [
             ("time", _("Tempo"), 70, "e", "text"), ("since", _("Desde o começo"), 110, "w", "text"),
             ("what", _("O quê"), 230, "w", "text"),
             ("who", _("Quem"), 140, "w", "text"), ("detail", _("Detalhe"), 330, "w", "text")],
             height=6, on_select=self.event_picked, swatch=True)
-        self.table.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self.table.pack(fill="both", expand=True, padx=0, pady=(0, 4))
+        # dano por fase: um resumo de cada fase e cada jogador por fase
+        self.ph_sum = win.label(ph_tab, "", "text", "fg", "panel", anchor="w", justify="left")
+        self.ph_sum.pack(fill="x", padx=6, pady=(8, 4))
+        ph_tab.bind("<Configure>", lambda e: self.ph_sum.configure(wraplength=e.width - 20))
+        cols = [("name", _("Jogador"), 150, "w", "text"), ("job", _("Classe"), 120, "w", "text")]
+        for i in range(3):
+            cols += [("d%d" % i, _("Fase %d") % (i + 1), 110, "e", "big"), ("s%d" % i, "%", 60, "e", "pct"),
+                     ("r%d" % i, "DPS", 90, "e", "big")]
+        cols += [("total", _("Total"), 120, "e", "big"), ("share", _("% da luta"), 80, "e", "pct")]
+        self.ph_table = Table(ph_tab, win, cols, height=6, swatch=True)
+        self.ph_table.pack(fill="both", expand=True, padx=0, pady=(0, 4))
 
     # ------------------------------------------------------------ escolha da luta
 
@@ -471,6 +507,7 @@ class TimelineTab:
             return
         for aid in self.data["players"]:
             self.win.color_of(aid)
+        self.update_who(c)
         if self.players_on is None:
             self.players_on = {c.me} if c.me in self.data["players"] else set(self.data["players"][:1])
         self.build_side(c)
@@ -520,6 +557,11 @@ class TimelineTab:
             head(_("Eventos"))
             for lane in points:
                 check(lane["key"], lane["name"], lane["color"] or col["fg"], lane["on"], self.on)
+        only = [l for l in d["lanes"] if l["kind"] == "list"]
+        if only:
+            head(_("Só na lista de eventos"))
+            for lane in only:
+                check(lane["key"], lane["name"], lane["color"] or col["fg"], lane["on"], self.on)
         head(_("Marcações de fase"))
         check("marks", _("Fases e clímax"), col["fg"], True, self.on)
 
@@ -531,6 +573,8 @@ class TimelineTab:
         else:
             store.discard(key)
         self.draw(keep_view=True)
+        if store is self.players_on or isinstance(store, dict):
+            self.fill_events()                    # a lista de eventos segue o que está marcado
 
     # ------------------------------------------------------------ desenho
 
@@ -561,16 +605,77 @@ class TimelineTab:
         lanes = [l for l in d["lanes"] if self.lane_on(l)]
         marks = d["marks"] if self.on.get("marks", True) else []
         smooth = next((ms for ms, lb in SMOOTH if lb == self.smooth_var.get()), 3000)
-        self.chart.set((d["t0"], d["t1"]), curves, lanes, marks, smooth, keep_view=keep_view, starts=d["starts"])
-        # lista de eventos das marcações ligadas
-        on = {l["key"] for l in lanes}
-        rows = [e for e in d["events"] + d["lane_events"] if e["lane"] in on]
+        self.chart.set((d["t0"], d["t1"]), curves, [l for l in lanes if l["kind"] != "list"], marks, smooth,
+                       keep_view=keep_view, starts=d["starts"])
+        self.fill_events()
+        self.fill_phases()
+
+    def fill_phases(self):
+        d = self.data
+        phases, rows = d.get("phase_dmg") or ([], [])
+        self.ph_sum.configure(text="   ·   ".join(
+            _("%s: %s em %s (%s/s), %d jogador(es)") % (p["name"], full(p["total"]), dur(p["ms"]), num(p["dps"]),
+                                                      p["players"]) for p in phases))
+        keys = ["name", "job"] + [k % p["i"] for p in phases for k in ("d%d", "s%d", "r%d")] + ["total", "share"]
+        titles = {"d%d" % p["i"]: p["name"] for p in phases}
+        if len(phases) <= 1:
+            keys = [k for k in keys if not k.startswith(("s", "r")) or k == "share"]
+        self.ph_table.show(keys, titles)
+        self.ph_table.set_rows(rows, lambda r: r["key"], lambda r: ["me"] if r["me"] else [],
+                               lambda r: self.win.color_of(r["aid"]))
+
+    # ------------------------------------------------------------ lista de eventos
+
+    def update_who(self, c):
+        """Opções do filtro "Quem": os jogadores marcados no gráfico (padrão), todos, chefe e monstros e cada
+        jogador da luta."""
+        d = self.data
+        keys = collections.OrderedDict([(_("Jogadores marcados"), "marked"), (_("Todos"), None),
+                                        (_("Chefe e monstros"), "mob")])
+        for aid in d["players"]:
+            keys[c.name_of(aid)] = aid
+        if list(self.who_keys) != list(keys):
+            self.who_keys = keys
+            self.who_box["values"] = list(keys)
+        if self.who_var.get() not in keys:
+            self.who_var.set(_("Jogadores marcados"))
+
+    def view_changed(self, view):
+        if self.visible_var.get():
+            self.fill_events()
+
+    def fill_events(self):
+        """Eventos das marcações ligadas, de quem foi escolhido e (se marcado) só do trecho visível do gráfico."""
+        d = self.data
+        if d is None:
+            self.table.set_rows([], lambda r: 0)
+            return
+        c = self.win.c
+        on = {l["key"] for l in d["lanes"] if self.lane_on(l)}
+        who = self.who_keys.get(self.who_var.get())
+        marked = self.players_on or set()
+        view = self.chart.view if self.visible_var.get() else None
+        rows = []
+        for e in d["events"] + d["lane_events"]:
+            if e["lane"] not in on or (e["lane"] == "strong" and "hits" in on):
+                continue                          # com todos os golpes ligados, o forte já vem marcado neles
+            if view is not None and not view[0] <= e["t"] <= view[1]:
+                continue
+            if who == "mob" and not (e.get("mob") or e["kind"] == "status"):
+                continue
+            if who == "marked" and not (e.get("mob") or e["kind"] == "status") and                     e["aid"] not in marked and e.get("target") not in marked:
+                continue                          # segue os jogadores marcados em "DPS de cada jogador"
+            if who not in (None, "mob", "marked") and e["aid"] != who and e.get("target") != who:
+                continue
+            rows.append(e)
         rows.sort(key=lambda e: e["t"])
         colors = {l["key"]: l["color"] or c["fg"] for l in d["lanes"]}
         for i, e in enumerate(rows):
             e["time"] = when(e["t"])
             e["since"] = since(d["starts"], e["t"], short=True)
             e["row"] = "%d|%s|%s" % (e["t"], e["lane"], i)
+        zoomed = view is not None and self.chart.full is not None and tuple(view) != tuple(self.chart.full)
+        self.ev_title.configure(text=(_("Eventos — %d no trecho visível") if zoomed else _("Eventos — %d")) % len(rows))
         self.table.set_rows(rows, lambda e: e["row"], None,
                             lambda e: self.win.color_of(e["aid"]) if e["aid"] is not None else colors.get(e["lane"], c["fg"]))
 

@@ -1,0 +1,8 @@
+{
+  "_fonte": "Monstros que o rAthena ainda não tem (entradas comentadas no mob_db): XP de base e de classe a 100% (sem penalidade de nível), tirada das tabelas por nível do Divine Pride (divine-pride.net/database/monster/ID). [nível, XP base, XP classe]",
+  "20175": [255, 755552, 527565],
+  "20176": [254, 748788, 523890],
+  "20177": [255, 755552, 527565],
+  "20178": [255, 767150, 533798],
+  "20179": [253, 742800, 518662]
+}

@@ -814,3 +814,25 @@ def mob_debuffs(c, rng, key, group=True):
 
 def equipment(c, t):
     return [dict(slot=label, item=meter.item_text(it), item_id=it.item_id) for label, it in c.equipment_at(t)]
+
+
+EQUIP_MERGE_MS = 3000         # trocas seguidas (um conjunto inteiro) contam como uma
+
+
+def equip_moments(c):
+    """[(t, [rótulos dos slots que mudaram])]: o início da gravação e cada troca de equipamento de quem grava."""
+    out = [(0, [])]
+    prev = None
+    for t, state in c.equip_log:
+        if prev is None:
+            prev = state
+            continue
+        changed = [label for bit, label in meter.EQUIP_SLOTS if state.get(bit) is not prev.get(bit)]
+        prev = state
+        if not changed:
+            continue
+        if len(out) > 1 and t - out[-1][0] <= EQUIP_MERGE_MS:
+            out[-1] = (t, out[-1][1] + [x for x in changed if x not in out[-1][1]])
+        else:
+            out.append((t, changed))
+    return out
