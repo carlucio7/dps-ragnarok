@@ -1275,10 +1275,11 @@ class AnalysisWindow:
         self.xp_tiles.pack(fill="x", padx=10, pady=(10, 0))
         self.label(tab, _("O replay não grava a XP ganha: só a XP total no início de cada gravação. A estimativa soma "
                           "a XP de cada monstro que você ajudou a matar (rAthena e Divine Pride), com a penalidade de "
-                          "nível e a sua parte do dano, vezes os bônus. Todos os bônus de XP somam; os manuais e outros "
-                          "consumíveis competem entre si (vale o maior). O replay mostra quando VIP, Cetro, Kafra Buff, "
-                          "manual e Banquete de Njord estão ativos, mas não o evento do servidor nem o Milagre: "
-                          "marque-os. \"Medido\" usa a XP exata entre duas gravações seguidas do mesmo personagem."),
+                          "nível e a sua parte do dano, vezes os bônus. Os bônus de XP somam entre si, e o Milagre "
+                          "multiplica o total (com +100%, dobra); os manuais e outros consumíveis competem entre si "
+                          "(vale o maior). O replay mostra quando VIP, Cetro, Kafra Buff, manual, Banquete de Njord e "
+                          "Milagre estão ativos, mas não o evento do servidor: marque-o. \"Medido\" usa a XP exata "
+                          "entre duas gravações seguidas do mesmo personagem."),
                    "small", "muted", "panel", anchor="w", justify="left", wraplength=1150).pack(fill="x", padx=12,
                                                                                                pady=(6, 2))
         pw = ttk.PanedWindow(tab, orient="horizontal", style="An.TPanedwindow")
@@ -1478,6 +1479,7 @@ class AnalysisWindow:
                 else ("+" if nxt["gain"] >= 0 else "") + full(nxt["gain"]), when)
         # bônus detectados nesta gravação
         seen = xp.detected(c, cfg)
+        wins = xp.windows(c, cfg)
         event_on = xp.settings(cfg)["gear_event"]["on"]
         worn = c.worn_at(self.rng[1] if self.rng else c.now)
         for b in xp.BONUSES:
@@ -1502,6 +1504,9 @@ class AnalysisWindow:
                     "%.0f%%" % (100 * seen[b["key"]]))
             elif seen.get(b["key"]):
                 text = _("ativo em %s da gravação") % dec("%.0f%%" % (100 * seen[b["key"]]))
+                vals = sorted({v for _s, _e, v in wins.get(b["key"], ()) if v > 0}) if b.get("val") else []
+                if vals:                       # o % que o jogo mandou no status vale no lugar do digitado
+                    text += " · " + _("%s no replay") % ", ".join("+%g%%" % v for v in vals)
             else:
                 text = _("não estava ativo")
             self.xp_seen[b["key"]].configure(text=text, fg=self.c["good"] if seen.get(b["key"]) else self.c["muted"])

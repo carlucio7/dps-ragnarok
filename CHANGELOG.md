@@ -2,6 +2,16 @@
 
 Português · [English](#english) · [Español](#español)
 
+## [1.2.5] — 2026-11-06
+
+- **XP com Milagre bem mais certa:** o Milagre não soma com os outros bônus, ele
+  multiplica o total (com +100%, dobra tudo). Conferido num replay de 89 minutos:
+  a estimativa passou de 9,67% para 14,48% do nível, contra 14,49% medidos entre
+  as duas gravações. Muda a linha do gráfico, a XP por minuto e por hora e o "Até
+  o próximo nível", no widget e na análise.
+- **Manual de combate com o % do jogo:** quando o replay traz o valor do manual
+  (ex.: +50%), ele vale no lugar do digitado, e a lista mostra "· +50% no replay".
+
 ## [1.2.4] — 2026-11-06
 
 - **Corrige o widget que parava de atualizar:** passar o mouse na estrela de
@@ -208,6 +218,17 @@ inglês e espanhol.
 
 ## English
 
+### [1.2.5] — 2026-11-06
+
+- **Much more accurate XP with the Miracle:** the Miracle doesn't add to the
+  other bonuses, it multiplies the total (+100% doubles everything). Checked on an
+  89-minute replay: the estimate went from 9.67% to 14.48% of the level, against
+  14.49% measured between the two recordings. This changes the chart line, XP per
+  minute and per hour and "Time to next level", in the widget and the analysis.
+- **Battle manual with the game's %:** when the replay carries the manual's value
+  (e.g. +50%), it replaces the typed one, and the list shows "· +50% in the
+  replay".
+
 ### [1.2.4] — 2026-11-06
 
 - **Fixes the widget that stopped updating:** hovering the favorite star on the
@@ -410,6 +431,17 @@ and Spanish.
 ---
 
 ## Español
+
+### [1.2.5] — 2026-11-06
+
+- **XP con Milagro mucho más precisa:** el Milagro no se suma a los otros bonos,
+  multiplica el total (con +100%, duplica todo). Comprobado en un replay de 89
+  minutos: la estimación pasó de 9,67% a 14,48% del nivel, contra 14,49% medidos
+  entre las dos grabaciones. Cambia la línea del gráfico, la XP por minuto y por
+  hora y el "Hasta el próximo nivel", en el widget y en el análisis.
+- **Manual de combate con el % del juego:** cuando el replay trae el valor del
+  manual (ej.: +50%), vale en lugar del escrito, y la lista muestra "· +50% en el
+  replay".
 
 ### [1.2.4] — 2026-11-06
 

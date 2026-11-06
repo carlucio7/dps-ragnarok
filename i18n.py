@@ -1298,8 +1298,10 @@ CATALOG = {
     "Kafra Buff / Manual Kafra (7 dias)": ("Kafra Buff / Kafra Manual (7 days)", "Kafra Buff / Manual Kafra (7 días)"),
     "Manual de combate (consumível)": ("Battle manual (consumable)", "Manual de combate (consumible)"),
     "Banquete de Njord": ("Njord's Feast", "Banquete de Njord"),
-    "Milagre Solar, Lunar e Estelar (alvos estelares)": ("Miracle of the Sun, Moon and Stars (star targets)",
-                                                         "Milagro Solar, Lunar y Estelar (objetivos estelares)"),
+    "Milagre Solar, Lunar e Estelar (multiplica os outros bônus)": (
+        "Miracle of the Sun, Moon and Stars (multiplies the other bonuses)",
+        "Milagro Solar, Lunar y Estelar (multiplica los otros bonos)"),
+    "%s no replay": ("%s in the replay", "%s en el replay"),
     "Outros (equipamentos, cartas, alvos do ódio...)": ("Others (equipment, cards, hatred targets...)",
                                                         "Otros (equipos, cartas, objetivos del odio...)"),
     "Manual de Combate": ("Field Manual", "Manual de Combate"),
@@ -1310,21 +1312,22 @@ CATALOG = {
     "Manual de Combate x3": ("Battle Manual X3", "Manual de Combate x3"),
     "O replay não grava a XP ganha: só a XP total no início de cada gravação. A estimativa soma a XP de cada monstro "
     "que você ajudou a matar (rAthena e Divine Pride), com a penalidade de nível e a sua parte do dano, vezes os "
-    "bônus. Todos os bônus de XP somam; os manuais e outros consumíveis competem entre si (vale o maior). O replay "
-    "mostra quando VIP, Cetro, Kafra Buff, manual e Banquete de Njord estão ativos, mas não o evento do servidor nem "
-    "o Milagre: marque-os. \"Medido\" usa a XP exata entre duas gravações seguidas do mesmo personagem.": (
+    "bônus. Os bônus de XP somam entre si, e o Milagre multiplica o total (com +100%, dobra); os manuais e outros "
+    "consumíveis competem entre si (vale o maior). O replay mostra quando VIP, Cetro, Kafra Buff, manual, Banquete de "
+    "Njord e Milagre estão ativos, mas não o evento do servidor: marque-o. \"Medido\" usa a XP exata entre duas "
+    "gravações seguidas do mesmo personagem.": (
         "The replay doesn't store XP gained: only the total XP at the start of each recording. The estimate adds up "
         "the XP of each monster you helped kill (rAthena and Divine Pride), with the level penalty and your share of "
-        "the damage, times the bonuses. All XP bonuses add up; manuals and other consumables compete (the highest "
-        "one counts). The replay shows when VIP, Scepter, Kafra Buff, a manual and Njord's Feast are active, but not "
-        "the server event or the Miracle: tick those. \"Measured\" uses the exact XP between two back-to-back "
-        "recordings of the same character.",
+        "the damage, times the bonuses. XP bonuses add up, and the Miracle multiplies the total (+100% doubles it); "
+        "manuals and other consumables compete (the highest one counts). The replay shows when VIP, Scepter, Kafra "
+        "Buff, a manual, Njord's Feast and the Miracle are active, but not the server event: tick it. \"Measured\" "
+        "uses the exact XP between two back-to-back recordings of the same character.",
         "El replay no graba la XP ganada: solo la XP total al inicio de cada grabación. La estimación suma la XP de "
         "cada monstruo que ayudaste a matar (rAthena y Divine Pride), con la penalización de nivel y tu parte del "
-        "daño, por los bonos. Todos los bonos de XP se suman; los manuales y otros consumibles compiten entre sí "
-        "(vale el mayor). El replay muestra cuándo están activos VIP, Cetro, Kafra Buff, un manual y el Banquete de "
-        "Njord, pero no el evento del servidor ni el Milagro: márcalos. \"Medido\" usa la XP exacta entre dos "
-        "grabaciones seguidas del mismo personaje."),
+        "daño, por los bonos. Los bonos de XP se suman, y el Milagro multiplica el total (con +100%, lo duplica); "
+        "los manuales y otros consumibles compiten entre sí (vale el mayor). El replay muestra cuándo están activos "
+        "VIP, Cetro, Kafra Buff, un manual, el Banquete de Njord y el Milagro, pero no el evento del servidor: "
+        "márcalo. \"Medido\" usa la XP exacta entre dos grabaciones seguidas del mismo personaje."),
     # Milagre Solar, Lunar e Estelar e bônus de XP dos itens
     "auto": ("auto", "auto"),
     "lendo os itens do jogo…": ("reading the game's items…", "leyendo los ítems del juego…"),

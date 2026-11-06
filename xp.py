@@ -8,7 +8,8 @@ O replay não grava a XP ganha: só a XP total no início de cada gravação (se
 - XP do monstro: data/mob_exp.json (rAthena, mais os monstros novos com a XP do Divine Pride).
 - Penalidade de nível: a mesma tabela do rAthena e do Divine Pride (nível do monstro − nível do jogador).
 - Parte do dano: quanto do dano no monstro foi de quem grava (grupo dividindo XP não entra).
-- Fator: os bônus somados (servidor, VIP, manuais, equipamentos...). O replay só mostra que um bônus de
+- Fator: os bônus somados (servidor, VIP, manuais, equipamentos...), vezes o Milagre à parte (a Bênção
+  Estelar entra antes dos outros bônus, então +100% dobra o total). O replay só mostra que um bônus de
   período está ativo, não quanto ele dá, então o fator é calibrado com duas gravações seguidas do mesmo
   personagem (a XP exata entre elas ÷ a XP estimada dos abates) ou vem do bônus que a pessoa informa.
 """
@@ -129,18 +130,22 @@ def calibrate(c, cfg, xp_after):
     return f
 
 
-# Bônus de XP (todos somam). Os detectáveis valem só enquanto o status está ativo em quem grava; os
-# consumíveis (manuais) competem entre si: vale só o maior. O Milagre aparece como o status 160 de 1 hora
-# (sem ícone no jogo). Evento do servidor e outros não aparecem no replay: a pessoa marca.
+# Bônus de XP. Os detectáveis valem só enquanto o status está ativo em quem grava; os consumíveis (manuais)
+# competem entre si: vale só o maior. Todos somam entre si, menos o Milagre (mult=True): ele aparece como o
+# status 160 de 1 hora (sem ícone no jogo) e multiplica o total dos outros — o jogo aplica a Bênção Estelar
+# num passo antes dos outros bônus (rAthena mob_dead; conferido no replay de 89 min: 14,48% estimado x 14,49%
+# real). Evento do servidor e outros não aparecem no replay: a pessoa marca. val=True: o % vem do status
+# quando o jogo manda (Njord 60, manual 50...).
 BONUSES = [
     dict(key="server", name="Evento do servidor", pct=100, status=None, on=False),
     dict(key="vip", name="VIP (Bônus de EXP II, 30 dias)", pct=20, status=984, on=True, lasting=True),
     dict(key="scepter", name="Cetro do Coração Lunar (Bônus de EXP, 24 h)", pct=30, status=939, on=True, lasting=True),
     dict(key="kafra", name="Kafra Buff / Manual Kafra (7 dias)", pct=50, status=1085, on=True, lasting=True),
     dict(key="manual", name="Manual de combate (consumível)", pct=50, status=250, on=True, group="consumível",
-         lasting=True),
+         lasting=True, val=True),
     dict(key="njord", name="Banquete de Njord", pct=60, status=78, on=True, val=True),
-    dict(key="miracle", name="Milagre Solar, Lunar e Estelar (alvos estelares)", pct=100, status="milagre", on=True),
+    dict(key="miracle", name="Milagre Solar, Lunar e Estelar (multiplica os outros bônus)", pct=100,
+         status="milagre", on=True, mult=True),
     dict(key="gear", name="Equipamentos, visuais e cartas (texto dos itens)", pct=0, status="equipamento", on=True,
          val=True),
     # bônus "[Durante o Evento]" do texto dos itens (ex.: Carta Baby Shark): o evento do item costuma acabar antes
@@ -179,7 +184,10 @@ def windows(c, cfg=None):
         if b["status"] == "equipamento":
             out[b["key"]] = gear_windows(c, event_on)
             continue
-        if b.get("lasting"):          # bônus de conta/período e manuais não acabam com a morte
+        if b.get("lasting") and b.get("val"):    # manuais: não acabam com a morte e trazem o % no status
+            out[b["key"]] = _lasting_vals(c, b["status"])
+            continue
+        if b.get("lasting"):          # bônus de conta/período não acabam com a morte
             out[b["key"]] = [(s, e, 0) for s, e in c.lasting(b["status"])]
             continue
         out[b["key"]] = sorted((s, e, c.status_val.get((a, ef, s)) or 0)
@@ -187,20 +195,42 @@ def windows(c, cfg=None):
     return out
 
 
+def _lasting_vals(c, efst):
+    """[(início, fim, valor)] de um status de quem grava que não acaba com a morte, com o valor que o jogo
+    mandou (0 = não veio: o status já estava ativo quando a gravação começou)."""
+    out = []
+    for a, ef, st, e in c.statuses(c.me):
+        if ef == efst:
+            ln = c.status_len.get((a, ef, st))
+            out.append((st, min(c.now, max(e, st + ln)) if ln else c.now, c.status_val.get((a, ef, st)) or 0))
+    return sorted(out)
+
+
+def _pct_at(b, t, wins, sets):
+    """% do bônus num instante, ou None se ele não conta (desmarcado ou o status não estava ativo)."""
+    st = sets[b["key"]]
+    if not st["on"]:
+        return None
+    if b["status"] is None:
+        return st["pct"]
+    hit = None
+    for s, e, v in wins.get(b["key"], ()):     # janelas em ordem de início: vale a última que cobre t
+        if s <= t <= e:
+            hit = v
+    if hit is None:
+        return None
+    return hit if b.get("val") and hit > 0 else st["pct"]     # Njord e manuais trazem o % no próprio status
+
+
 def bonus_at(t, wins, sets):
-    """Bônus somado (%) num instante, com a regra dos consumíveis (vale o maior)."""
+    """Bônus que somam (%) num instante, com a regra dos consumíveis (vale o maior). Sem o Milagre."""
     total, group = 0.0, {}
     for b in BONUSES:
-        st = sets[b["key"]]
-        if not st["on"]:
+        if b.get("mult"):
             continue
-        pct = st["pct"]
-        if b["status"] is not None:
-            hit = next((v for s, e, v in wins.get(b["key"], ()) if s <= t <= e), None)
-            if hit is None:
-                continue
-            if b.get("val") and hit > 0:
-                pct = hit                       # o Banquete de Njord traz o % no próprio status
+        pct = _pct_at(b, t, wins, sets)
+        if pct is None:
+            continue
         if b.get("group"):
             group[b["group"]] = max(group.get(b["group"], 0.0), pct)
         else:
@@ -208,12 +238,30 @@ def bonus_at(t, wins, sets):
     return total + sum(group.values())
 
 
+def factor_at(t, wins, sets):
+    """Fator de XP num instante: (100% + bônus que somam) × (100% + Milagre)."""
+    k = 1.0 + bonus_at(t, wins, sets) / 100.0
+    for b in BONUSES:
+        if b.get("mult"):
+            pct = _pct_at(b, t, wins, sets)
+            if pct is not None:
+                k *= 1.0 + pct / 100.0
+    return k
+
+
 def detected(c, cfg=None):
     """{chave: fração da gravação em que o bônus esteve ativo} dos detectáveis (0 = não apareceu)."""
     span = max(1, c.now)
     out = {}
     for key, ws in windows(c, cfg).items():
-        out[key] = min(1.0, sum(max(0, min(e, c.now) - max(0, s)) for s, e, _v in ws) / float(span))
+        merged = []                    # janelas que se sobrepõem (manual renovado) contam uma vez
+        for s, e, _v in sorted(ws):
+            s, e = max(0, s), min(e, c.now)
+            if merged and s <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], e)
+            elif e > s:
+                merged.append([s, e])
+        out[key] = min(1.0, sum(e - s for s, e in merged) / float(span))
     return out
 
 
@@ -242,7 +290,7 @@ def estimate(c, cfg, rng=None):
         if r["xp"] is None:
             r["total"] = None
             continue
-        k = f if f is not None else 1.0 + bonus_at(r["t"], wins, sets) / 100.0
+        k = f if f is not None else factor_at(r["t"], wins, sets)
         r["total"] = r["xp"] * k
         base += r["xp"]
         total += r["total"]

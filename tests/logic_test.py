@@ -862,6 +862,17 @@ sets2 = xpmod.settings({"xp_bonuses": {"manual": {"pct": 50}}})
 check(xpmod.bonus_at(10, {"manual": [(0, 100, 0)], "_teste": [(0, 100, 0)], "vip": []}, sets2) == 100,
       "XP: dois consumíveis ativos não somam (vale o maior)")
 xpmod.BONUSES.pop()
+# Milagre multiplica o total dos outros bônus (replay de 89 min: 14,48% estimado x 14,49% real)
+wins = {"vip": [(0, 100, 0)], "kafra": [(0, 100, 0)], "manual": [(0, 100, 0)], "miracle": [(50, 100, 0)]}
+sets = xpmod.settings({"xp_bonuses": {"server": {"on": True, "pct": 100}}})
+check(abs(xpmod.factor_at(10, wins, sets) - 3.2) < 1e-9 and abs(xpmod.factor_at(60, wins, sets) - 6.4) < 1e-9
+      and xpmod.bonus_at(60, wins, sets) == 220,
+      "XP: Milagre +100%% dobra o total dos outros (1 + 2,2 = ×3,2 -> ×6,4) -> %s" % xpmod.factor_at(60, wins, sets))
+# o manual traz o % no status; sem o valor (já ativo no início da gravação) vale o digitado
+wins = {"manual": [(0, 100, 0), (40, 100, 100)]}
+sets = xpmod.settings({"xp_bonuses": {"manual": {"pct": 50}}})
+check(xpmod.bonus_at(10, wins, sets) == 50 and xpmod.bonus_at(60, wins, sets) == 100,
+      "XP: manual com o %% do status do jogo; sem valor, o digitado")
 
 # --- Milagre Solar, Lunar e Estelar (status 160 de 1 hora, sem ícone) e bônus dos itens ----------------
 ev = [(1000, fr.status(ME, 984, True, 2592000, 2592000, 0)),          # VIP
