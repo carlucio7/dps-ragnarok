@@ -23,6 +23,7 @@ import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
 import clientdata
+import itemkind
 import meter
 import testes
 import xp
@@ -47,6 +48,8 @@ TOP_Y = 15
 BIG_Y = 50
 TABS_Y0, TABS_Y1 = 76, 96
 ROWS_Y0, ROW_H = 102, 21
+PIN_H = 22             # faixa das informações fixadas (abaixo das abas)
+MAX_PINS = 2
 FOOT_H = 28
 MIN_SCALE, MAX_SCALE = 0.7, 2.5
 FONT_PX = {"big": 30, "big_s": 23, "unit": 11, "title": 12, "text": 11, "small": 10, "num": 12, "icon": 11, "tab": 11}
@@ -85,7 +88,14 @@ HINTS = {
     "drops": _("Itens que você pegou"), "xp": _("XP estimada dos seus abates e seu nível"),
     "grip": _("Arraste para mudar a largura e o número de linhas"),
     "where": _("Onde quem grava está (mapa e coordenadas). Clique para copiar o /navi"),
+    "pinbar": _("Informação fixada · botão direito para desafixar"),
+    "row": _("Botão direito: fixar no widget, ocultar..."),
 }
+# o que dá para fixar na faixa abaixo das abas (além dos itens da aba Drops)
+PIN_STATS = [("xp_min", _("XP por minuto")), ("xp_hour", _("XP por hora")), ("xp_total", _("XP estimada")),
+             ("xp_eta", _("Até o próximo nível")), ("kills", _("Abates")), ("level", _("Nível"))]
+PIN_LABELS = {"xp_min": _("XP/min"), "xp_hour": _("XP/h"), "xp_total": _("XP"), "xp_eta": _("Próx. nível"),
+              "kills": _("Abates"), "level": _("Nível")}
 TABS = [("group", _("Grupo")), ("skills", _("Skills")), ("targets", _("Alvos")), ("drops", _("Drops")),
         ("xp", _("XP"))]
 
@@ -112,7 +122,13 @@ DEFAULTS = {
     "xp_bonuses": {},      # {bônus: {"on", "pct"}} da lista de bônus de XP (xp.BONUSES)
     "xp_mode": "lista",    # "lista" (bônus marcados), "medido" ou "fixo"
     "xp_fixed": None,      # bônus fixo (%) do modo "fixo"
+    "xp_event_off": [],    # itens de evento cujo bônus "[Durante o Evento]" não vale mais
     "drop_favs": [],       # itens favoritos (ficam no topo da aba Drops)
+    "drop_hidden": [],     # itens que a pessoa ocultou para sempre (somem das listas de drops)
+    "drop_colors": {},     # {categoria: "#rrggbb" ou ""} cores dos drops por categoria (itemkind)
+    "pins": [],            # informações fixadas na faixa abaixo das abas (até 2): "xp_min", "item:984"...
+    "fusion_sound": False,  # som curto quando o HP fica baixo com a União
+    "fusion_volume": 40,
 }
 
 
@@ -183,18 +199,54 @@ def chime_wav(volume=40):
     return _CHIME[volume]
 
 
-def play_chime(volume=40):
-    """Toca o som do Milagre sem travar o widget (Windows)."""
+def beep_wav(volume=40):
+    """Aviso curto (dois toques descendo, ~0,35 s) para HP baixo com a União. WAV 16 bits mono."""
+    volume = max(0, min(100, int(volume)))
+    key = ("beep", volume)
+    if key in _CHIME:
+        return _CHIME[key]
+    import math
+    import struct as st
+    rate = 22050
+    n = int(rate * 0.36)
+    buf = [0.0] * n
+    for freq, start, length in ((1318.5, 0.00, 0.14), (987.8, 0.17, 0.17)):
+        i0, i1 = int(start * rate), min(n, int((start + length) * rate))
+        for i in range(i0, i1):
+            x = (i - i0) / float(rate)
+            env = min(1.0, x * 400) * min(1.0, (i1 - i) / (rate * 0.03))     # sem estalo no começo e no fim
+            w = 2 * math.pi * freq * x
+            buf[i] += env * (math.sin(w) + 0.3 * math.sin(2 * w))
+    peak = max(abs(v) for v in buf) or 1.0
+    data = b"".join(st.pack("<h", int(32767 * 0.5 * volume / 100.0 * v / peak)) for v in buf)
+    head = (b"RIFF" + st.pack("<I", 36 + len(data)) + b"WAVEfmt " + st.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16)
+            + b"data" + st.pack("<I", len(data)))
+    _CHIME[key] = head + data
+    return _CHIME[key]
+
+
+def play_wav(make, volume=40):
+    """Toca um som gerado (make(volume) -> WAV) sem travar o widget (Windows)."""
     if not IS_WIN or volume <= 0:
         return
 
     def run():
         try:
             import winsound
-            winsound.PlaySound(chime_wav(volume), winsound.SND_MEMORY | winsound.SND_NODEFAULT)
+            winsound.PlaySound(make(volume), winsound.SND_MEMORY | winsound.SND_NODEFAULT)
         except (ImportError, RuntimeError, OSError):
             pass
     threading.Thread(target=run, daemon=True).start()
+
+
+def play_chime(volume=40):
+    """Toca o som do Milagre."""
+    play_wav(chime_wav, volume)
+
+
+def play_beep(volume=40):
+    """Toca o aviso da União."""
+    play_wav(beep_wav, volume)
 
 
 def round_rect_pts(x1, y1, x2, y2, r):
@@ -278,6 +330,7 @@ class DpsApp:
         self.enc_back = 0                   # 0 = encontro atual, 1 = anterior...
         self.drop_scroll = 0                # primeira linha mostrada na aba Drops (roda do mouse)
         self.drop_view = (0, 0, 0)          # (primeira, linhas, total) para a barra de rolagem
+        self.session_hidden = set()         # drops ocultos só até fechar o programa
         self.hover = self.pressed = self.drag = self.resize = None
         self.hwnd = None
         self.menu = None
@@ -343,8 +396,12 @@ class DpsApp:
         except (TypeError, ValueError):
             return BASE_W
 
+    def rows_y0(self):
+        """Onde as linhas começam (sem escala): logo abaixo das abas, ou da faixa fixa quando há algo fixado."""
+        return ROWS_Y0 + (PIN_H if self.cfg.get("pins") else 0)
+
     def size_px(self):
-        h = ROWS_Y0 + self.cfg["rows"] * ROW_H + 6 + FOOT_H
+        h = self.rows_y0() + self.cfg["rows"] * ROW_H + 6 + FOOT_H
         return int(round(self.base_w() * self.s)), int(round(h * self.s))
 
     def icon(self, name):
@@ -534,6 +591,8 @@ class DpsApp:
                     self.miracle_at = now
                     if self.cfg["miracle_sound"]:
                         play_chime(self.cfg["miracle_volume"])
+                elif kind == "fusion" and self.cfg["fusion_sound"]:
+                    play_beep(self.cfg["fusion_volume"])
         if self.alert and now - self.alert[2] > (MIRACLE_FLASH_S if self.alert[1] == "miracle" else ALERT_S):
             self.alert = None
             self.dirty = True
@@ -652,6 +711,9 @@ class DpsApp:
         mw = self.fonts["tab"].measure(mode) + 16 * s
         self.chip(("btn", "view"), max(x + 4 * s, W - 10 * s - mw), mode, False, outline=True)
 
+        # faixa das informações fixadas (sempre visível, em qualquer aba)
+        self.draw_pins(cb)
+
         # linhas
         self.draw_rows(snap)
 
@@ -684,6 +746,8 @@ class DpsApp:
         color = t["muted"]
         hint = HINTS.get(self.hover[1] if self.hover and self.hover[0] in ("btn", "tab") else
                          (self.hover[0] if self.hover else None))
+        if self.hover and self.hover[0] == "fav":
+            hint = _("Clique: favorito · botão direito: fixar ou ocultar")
         if hint and not self.alert:
             text, color = hint, t["fg"]
         elif not self.alert and cb is not None and cb.miracle_left() is not None:
@@ -761,7 +825,7 @@ class DpsApp:
         W = self.W
         n = self.cfg["rows"]
         tab = self.cfg["tab"]
-        y = ROWS_Y0 * s
+        y = self.rows_y0() * s
         msg = None
         rows = []
         if snap is None:
@@ -810,56 +874,22 @@ class DpsApp:
                 msg = (_("Você não causou dano aqui."), "")
         elif tab == "drops":
             cb = self.combat()
-            enc = None if self.cfg["session"] else cb.encounter(self.enc_back)
-            rng = None if enc is None else (enc.start - 2000, enc.last + 30000)
-            favs = set(self.cfg.get("drop_favs") or [])
-            items = [r for r in cb.drop_summary(rng) if r["mine"] or r["mvp"]]
-            items.sort(key=lambda r: (r["item"] not in favs, -(r["mine"] + r["mvp"]), r["name"]))
+            items, favs = self.drop_items(cb)
             top = max([r["mine"] + r["mvp"] for r in items] + [1])
             first = max(0, min(self.drop_scroll, len(items) - n))
             self.drop_scroll, self.drop_view = first, (first, n, len(items))
             for r in items[first:first + n]:
                 rows.append(dict(label=r["name"], value="×%d" % (r["mine"] + r["mvp"]),
                                  right=_("prêmio de MVP") if r["mvp"] else "", frac=(r["mine"] + r["mvp"]) / float(top),
-                                 me=True, item=r["item"], fav=r["item"] in favs))
+                                 me=True, item=r["item"], fav=r["item"] in favs, pin="item:%d" % r["item"],
+                                 color=self.item_color(r["item"])))
             if not items:
+                hidden = self.hidden_items()
                 msg = (_("Você não pegou nenhum item aqui."),
+                       _("%d itens ocultos: botão direito › Itens ocultos") % len(hidden) if hidden else
                        _("O que caiu no chão e o que outros pegaram fica na análise (aba Drops)."))
         elif tab == "xp":
-            cb = self.combat()
-            enc = None if self.cfg["session"] else cb.encounter(self.enc_back)
-            rng = None if enc is None else (enc.start, enc.last)
-            est = xp.estimate(cb, self.cfg, rng)
-            kind, _info = est["source"]
-            how = {"medido": _("×%s medido"), "fixo": _("×%s fixo")}.get(kind, _("×%s pela lista")) % dec(
-                "%.2f" % est["factor"])
-            # "Luta atual" conta só a luta; a análise em "Sessão inteira" conta a gravação toda
-            rows.append(dict(label=_("XP estimada") if enc is None else _("XP nesta luta"), value=num(est["xp"]),
-                             right=how, frac=1.0, me=True))
-            if est["per_min"] is not None:
-                rows.append(dict(label=_("XP por minuto"),
-                                 value=dec("%.3f%%" % est["per_min_pct"]) if est["per_min_pct"] is not None
-                                 else num(est["per_min"]),
-                                 right=(_("do nível · %s/min") % num(est["per_min"])) if est["per_min_pct"] is not None
-                                 else "", frac=1.0, me=True))
-                rows.append(dict(label=_("XP por hora"), value=num(est["per_hour"]), right="", frac=1.0, me=True))
-                eta, left = xp.time_to_level(cb, self.cfg, est["per_min"])
-                if eta is not None:
-                    rows.append(dict(label=_("Até o próximo nível"),
-                                     value=xp.span_text(eta) if eta else _("já subiu"),
-                                     right=(_("faltam %s XP") % num(left)) if left else "", frac=1.0, me=True))
-            rows.append(dict(label=_("Abates"), value="%d" % est["kills"],
-                             right=(_("%d sem XP conhecida") % est["unknown"]) if est["unknown"] else "",
-                             frac=0.0, me=False))
-            prog = meter.level_progress(cb.session)
-            if prog is not None:
-                rows.append(dict(label=_("Nível %d") % cb.session.base_level, value=dec("%.1f%%" % (100 * prog)),
-                                 right=_("no início da gravação"), frac=prog, me=False))
-            nxt = meter.xp_after(getattr(cb, "path", None), cb.session)
-            if nxt and nxt["gain"] is not None:
-                rows.append(dict(label=_("XP real até a próxima gravação"), value="+" + num(nxt["gain"]), right="",
-                                 frac=1.0, me=False))
-            rows = rows[:n]
+            rows = self.xp_rows(self.combat())[:n]
         else:
             tg = snap["targets"]
             top = tg[0]["total"] if tg else 1
@@ -900,16 +930,284 @@ class DpsApp:
                 # área de clique generosa: do começo da linha até depois da estrela, na altura toda da linha
                 self.hits.append((("fav", r["item"]), (x0, y, bx[2] + 6 * s, y1)))
                 lx = bx[2] + 5 * s
-            lid = c.create_text(lx, cy, anchor="w", text=r["label"], font=self.fonts["text"], fill=fg)
+            lid = c.create_text(lx, cy, anchor="w", text=r["label"], font=self.fonts["text"],
+                                fill=self.readable(r.get("color")) or fg)
             self.clip_text(lid, r["label"], c.bbox(vid)[0] - 8 * s)
+            if r.get("pin"):                   # botão direito na linha: fixar, ocultar...
+                self.hits.insert(0, (("row", r["pin"]), (x0, y, x1, y1)))
             y += ROW_H * s
         first, shown, total = self.drop_view if tab == "drops" else (0, 0, 0)
         if total > shown > 0:                  # barrinha de rolagem: tem mais itens (roda do mouse)
-            top_y, h = ROWS_Y0 * s, shown * ROW_H * s - 3 * s
+            top_y, h = self.rows_y0() * s, shown * ROW_H * s - 3 * s
             c.create_line(W - 4 * s, top_y, W - 4 * s, top_y + h, fill=t["track"], width=max(2, int(2 * s)))
             a = top_y + h * first / total
             c.create_line(W - 4 * s, a, W - 4 * s, a + max(8 * s, h * shown / total), fill=t["muted"],
                           width=max(2, int(2 * s)))
+
+    # ------------------------------------------------------------ drops, XP e faixa fixa
+
+    def view_rng(self, cb, pad=False):
+        """Recorte da visão escolhida: None = tudo; senão a luta (pad: com a folga dos drops que caem depois)."""
+        if cb is None or self.cfg["session"]:
+            return None
+        enc = cb.encounter(self.enc_back)
+        if enc is None:
+            return None
+        return (enc.start - 2000, enc.last + 30000) if pad else (enc.start, enc.last)
+
+    def drop_items(self, cb):
+        """Itens que quem grava pegou na visão atual, sem os ocultos, com os favoritos no topo."""
+        marked = self.cfg.get("drop_favs") or []
+        hidden = self.hidden_items()
+        items = [r for r in cb.drop_summary(self.view_rng(cb, pad=True))
+                 if (r["mine"] or r["mvp"]) and r["item"] not in hidden]
+        items = itemkind.favorites_first(items, marked, lambda r: (-(r["mine"] + r["mvp"]), r["name"]))
+        return items, set(marked)
+
+    def item_color(self, item):
+        itemkind.start()
+        return itemkind.color_of(item, self.cfg, meter.ITEMS.get(str(item), {}).get("name"))
+
+    def readable(self, color):
+        """A cor escolhida, escurecida no tema claro para dar para ler."""
+        if not color:
+            return None
+        return mix(color, "#000000", 0.45) if luminance(self.t["bg"]) > 0.5 else color
+
+    def xp_rows(self, cb):
+        """Linhas da aba XP (cada uma com a chave para fixar na faixa)."""
+        if cb is None:
+            return []
+        rng = self.view_rng(cb)
+        est = xp.estimate(cb, self.cfg, rng)
+        kind, _info = est["source"]
+        how = {"medido": _("×%s medido"), "fixo": _("×%s fixo")}.get(kind, _("×%s pela lista")) % dec(
+            "%.2f" % est["factor"])
+        rows = []
+        # porcentagem do nível primeiro, número absoluto depois (quando o jogo mandou quanto falta para o nível)
+        pct = est["pct"] is not None
+        rows.append(dict(label=_("XP estimada") if rng is None else _("XP nesta luta"),
+                         value=dec("%.2f%%" % est["pct"]) if pct else num(est["xp"]),
+                         right=("%s · %s" % (num(est["xp"]), how)) if pct else how, frac=1.0, me=True, pin="xp_total"))
+        if est["per_min"] is not None:
+            rows.append(dict(label=_("XP por minuto"),
+                             value=dec("%.3f%%" % est["per_min_pct"]) if pct else num(est["per_min"]),
+                             right=(_("%s/min") % num(est["per_min"])) if pct else "", frac=1.0, me=True, pin="xp_min"))
+            rows.append(dict(label=_("XP por hora"),
+                             value=dec("%.2f%%" % est["per_hour_pct"]) if pct else num(est["per_hour"]),
+                             right=(_("%s/h") % num(est["per_hour"])) if pct else "", frac=1.0, me=True, pin="xp_hour"))
+            eta, left = xp.time_to_level(cb, self.cfg, est["per_min"])
+            if eta is not None:
+                rows.append(dict(label=_("Até o próximo nível"), value=xp.span_text(eta) if eta else _("já subiu"),
+                                 right=(_("faltam %s") % num(left)) if left else "", frac=1.0, me=True, pin="xp_eta"))
+        per = (_("%s/min") % dec("%.1f" % est["kills_per_min"])) if est["kills_per_min"] is not None else ""
+        if est["unknown"]:
+            per = (per + " · " if per else "") + _("%d sem XP") % est["unknown"]
+        rows.append(dict(label=_("Abates"), value="%d" % est["kills"], right=per, frac=0.0, me=False, pin="kills"))
+        prog = meter.level_progress(cb.session)
+        if prog is not None:
+            rows.append(dict(label=_("Nível %d") % cb.session.base_level, value=dec("%.1f%%" % (100 * prog)),
+                             right=_("no início da gravação"), frac=prog, me=False, pin="level"))
+        nxt = meter.xp_after(getattr(cb, "path", None), cb.session)
+        if nxt and nxt["gain"] is not None:
+            rows.append(dict(label=_("XP real até a próxima gravação"), value="+" + num(nxt["gain"]), right="",
+                             frac=1.0, me=False))
+        return rows
+
+    def pin_texts(self, cb):
+        """[(chave, rótulo, valor, detalhe, cor)] das informações fixadas, na ordem em que foram fixadas."""
+        pins = self.cfg.get("pins") or []
+        stats = {}
+        if any(not p.startswith("item:") for p in pins):
+            stats = {r["pin"]: r for r in self.xp_rows(cb) if r.get("pin")}
+        items = None
+        out = []
+        for key in pins:
+            if key.startswith("item:"):
+                item = int(key[5:])
+                if items is None:
+                    items = {r["item"]: r for r in cb.drop_summary(self.view_rng(cb, pad=True))} if cb else {}
+                r = items.get(item)
+                out.append((key, meter.item_name(item), "×%d" % ((r["mine"] + r["mvp"]) if r else 0), "",
+                            self.item_color(item)))
+            else:
+                r = stats.get(key)
+                out.append((key, PIN_LABELS.get(key, key), r["value"] if r else "—", r["right"] if r else "", None))
+        return out
+
+    def draw_pins(self, cb):
+        """Faixa abaixo das abas com até 2 informações fixadas (botão direito numa linha › Fixar no widget)."""
+        if not self.cfg.get("pins"):
+            return
+        c, s, t, W = self.canvas, self.s, self.t, self.W
+        y0, y1 = ROWS_Y0 * s, (ROWS_Y0 + PIN_H - 4) * s
+        x0, x1 = 10 * s, W - 10 * s
+        c.create_polygon(round_rect_pts(x0, y0, x1, y1, 5 * s), smooth=True, fill=mix(t["bg"], t["accent"], 0.16),
+                         outline="")
+        cy = (y0 + y1) / 2
+        icon = c.create_text(x0 + 7 * s, cy, anchor="w", text=self.icon("pin_on"), font=self.fonts["icon"],
+                             fill=t["accent"])
+        x = c.bbox(icon)[2] + 6 * s
+        parts = self.pin_texts(cb)
+        part = (x1 - 6 * s - x) / max(1, len(parts))
+        for i, (key, label, value, right, color) in enumerate(parts):
+            px0 = x + i * part
+            px1 = px0 + part - 10 * s
+            if i:
+                c.create_line(px0 - 6 * s, y0 + 4 * s, px0 - 6 * s, y1 - 4 * s, fill=mix(t["bg"], t["muted"], 0.5))
+            lid = c.create_text(px0, cy, anchor="w", text=label, font=self.fonts["small"],
+                                fill=self.readable(color) or t["muted"])
+            self.clip_text(lid, label, px1 - 30 * s)
+            text = value + (" · " + right if right else "")
+            vid = c.create_text(c.bbox(lid)[2] + 5 * s, cy, anchor="w", text=text, font=self.fonts["text"],
+                                fill=t["fg"])
+            if c.bbox(vid)[2] > px1 and right:      # sem espaço: fica só o valor
+                c.itemconfigure(vid, text=value)
+            self.clip_text(vid, c.itemcget(vid, "text"), px1)
+            self.hits.append((("pinbar", key), (px0 - 4 * s, y0, px1 + 4 * s, y1)))
+
+    def toggle_pin_stat(self, key):
+        pins = list(self.cfg.get("pins") or [])
+        if key in pins:
+            pins.remove(key)
+        else:
+            pins = (pins + [key])[-MAX_PINS:]          # com 2 fixadas, a mais antiga sai
+        self.cfg["pins"] = pins
+        self.save()
+        self.resize_window()
+
+    def clear_pins(self):
+        self.cfg["pins"] = []
+        self.save()
+        self.resize_window()
+
+    def toggle_fav(self, item):
+        favs = list(self.cfg.get("drop_favs") or [])
+        if item in favs:
+            favs.remove(item)
+        else:
+            favs.append(item)
+        self.cfg["drop_favs"] = favs
+        self.save()
+        self.drops_changed()
+
+    def hidden_items(self):
+        """Itens ocultos: os de sempre (config) e os de agora (até fechar o programa)."""
+        return set(self.cfg.get("drop_hidden") or []) | self.session_hidden
+
+    def hide_item(self, item, always):
+        if always:
+            hidden = list(self.cfg.get("drop_hidden") or [])
+            if item not in hidden:
+                hidden.append(item)
+            self.cfg["drop_hidden"] = hidden
+            self.save()
+        else:
+            self.session_hidden.add(item)
+        self.drops_changed()
+
+    def unhide_item(self, item):
+        self.session_hidden.discard(item)
+        hidden = [i for i in (self.cfg.get("drop_hidden") or []) if i != item]
+        if hidden != (self.cfg.get("drop_hidden") or []):
+            self.cfg["drop_hidden"] = hidden
+            self.save()
+        self.drops_changed()
+
+    def unhide_all(self):
+        self.session_hidden.clear()
+        self.cfg["drop_hidden"] = []
+        self.save()
+        self.drops_changed()
+
+    def drops_changed(self):
+        """Favorito, oculto ou cor mudou: redesenha o widget e a análise."""
+        self.dirty = True
+        if self.analysis is not None:
+            self.analysis.refresh(force=True)
+
+    def hidden_menu(self, parent):
+        """Submenu com cada item oculto (clique mostra de novo) e "Mostrar todos"; None se não há."""
+        always = list(self.cfg.get("drop_hidden") or [])
+        items = always + sorted(i for i in self.session_hidden if i not in always)
+        if not items:
+            return None
+        hm = self.new_menu(parent)
+        for item in items:
+            when = _("sempre") if item in always else _("até fechar o programa")
+            hm.add_command(label=_("Mostrar de novo: %s (%s)") % (meter.item_name(item), when),
+                           command=lambda i=item: self.unhide_item(i))
+        hm.add_separator()
+        hm.add_command(label=_("Mostrar todos os itens ocultos"), command=self.unhide_all)
+        return hm
+
+    def pins_menu(self, parent):
+        """Submenu "Faixa fixa": as informações que dá para fixar e as fixadas agora."""
+        pm = self.new_menu(parent)
+        pins = self.cfg.get("pins") or []
+        for key, label in PIN_STATS:
+            var = self.keep(tk.BooleanVar(self.root, key in pins))
+            pm.add_checkbutton(label=label, variable=var, command=lambda k=key: self.toggle_pin_stat(k))
+        for key in pins:
+            if key.startswith("item:"):
+                var = self.keep(tk.BooleanVar(self.root, True))
+                pm.add_checkbutton(label=_("Drop: %s") % meter.item_name(int(key[5:])), variable=var,
+                                   command=lambda k=key: self.toggle_pin_stat(k))
+        pm.add_separator()
+        pm.add_command(label=_("Até %d. Também dá para fixar com o botão direito numa linha das abas XP e Drops.")
+                       % MAX_PINS, state="disabled")
+        if pins:
+            pm.add_command(label=_("Desafixar tudo"), command=self.clear_pins)
+        return pm
+
+    def sound_menu(self, parent):
+        """Sons do Milagre e da União (liga/desliga e volume, com teste)."""
+        sm = self.new_menu(parent)
+        for key, vol_key, label, vol_label, play in (
+                ("miracle_sound", "miracle_volume", _("Tocar um som no Milagre"), _("Volume do Milagre"), play_chime),
+                ("fusion_sound", "fusion_volume", _("Tocar um som com HP baixo na União"), _("Volume da União"),
+                 play_beep)):
+            var = self.keep(tk.BooleanVar(self.root, self.cfg[key]))
+            sm.add_checkbutton(label=label, variable=var, command=lambda k=key: self.toggle_cfg(k))
+            vm = self.new_menu(sm)
+            vvar = self.keep(tk.IntVar(self.root, self.cfg[vol_key]))
+            for v in CHIME_VOLUMES:
+                vm.add_radiobutton(label="%d%%" % v, variable=vvar, value=v,
+                                   command=lambda v=v, k=vol_key, p=play: self.set_volume(k, v, p))
+            vm.add_separator()
+            vm.add_command(label=_("Tocar o som agora"), command=lambda k=vol_key, p=play: p(self.cfg[k]))
+            sm.add_cascade(label=vol_label, menu=vm)
+            sm.add_separator()
+        sm.add_command(label=_("Os sons só tocam com o aviso do Milagre ou da União ligado."), state="disabled")
+        return sm
+
+    def row_menu(self, target):
+        """Botão direito numa linha das abas XP e Drops (ou na faixa fixa)."""
+        m = self.new_menu()
+        kind, key = target
+        pins = self.cfg.get("pins") or []
+        if kind == "pinbar":
+            m.add_command(label=_("Desafixar"), command=lambda: self.toggle_pin_stat(key))
+            if len(pins) > 1:
+                m.add_command(label=_("Desafixar tudo"), command=self.clear_pins)
+        else:
+            pin = key if kind == "row" else "item:%d" % key
+            m.add_command(label=_("Desafixar do widget") if pin in pins else _("Fixar no widget"),
+                          command=lambda: self.toggle_pin_stat(pin))
+            if pin.startswith("item:"):
+                item = int(pin[5:])
+                fav = item in (self.cfg.get("drop_favs") or [])
+                m.add_command(label=_("Tirar dos favoritos") if fav else _("Favoritar (fica no topo)"),
+                              command=lambda: self.toggle_fav(item))
+                m.add_separator()
+                m.add_command(label=_("Ocultar até fechar o programa"), command=lambda: self.hide_item(item, False))
+                m.add_command(label=_("Ocultar sempre"), command=lambda: self.hide_item(item, True))
+        hm = self.hidden_menu(m)
+        if hm is not None:
+            m.add_cascade(label=_("Itens ocultos"), menu=hm)
+        m.add_separator()
+        m.add_cascade(label=_("Todas as opções"), menu=self.main_menu(m))
+        return m
 
     def chip(self, target, x, label, active, outline=False):
         c, s, t = self.canvas, self.s, self.t
@@ -1130,20 +1428,10 @@ class DpsApp:
                        state="disabled")
         return rm
 
-    def volume_menu(self, parent):
-        """Volume do som do Milagre, com um teste."""
-        vm = self.new_menu(parent)
-        var = self.keep(tk.IntVar(self.root, self.cfg["miracle_volume"]))
-        for v in CHIME_VOLUMES:
-            vm.add_radiobutton(label="%d%%" % v, variable=var, value=v, command=lambda v=v: self.set_volume(v))
-        vm.add_separator()
-        vm.add_command(label=_("Tocar o som agora"), command=lambda: play_chime(self.cfg["miracle_volume"]))
-        return vm
-
-    def set_volume(self, value):
-        self.cfg["miracle_volume"] = value
+    def set_volume(self, key, value, play):
+        self.cfg[key] = value
         self.save()
-        play_chime(value)
+        play(value)
 
     def set_rate(self, value):
         self.cfg["rate"] = value
@@ -1235,14 +1523,7 @@ class DpsApp:
             self.set_tab(key)
             return
         if kind == "fav":                      # estrela na aba Drops: favorito fica sempre no topo
-            favs = list(self.cfg.get("drop_favs") or [])
-            if key in favs:
-                favs.remove(key)
-            else:
-                favs.append(key)
-            self.cfg["drop_favs"] = favs
-            self.save()
-            self.dirty = True
+            self.toggle_fav(key)
             return
         actions = {
             "pin": self.toggle_pin, "min": self.minimize, "close": self.quit,
@@ -1302,11 +1583,14 @@ class DpsApp:
                            ("alert_death", _("Avisar quando eu morrer (com overkill)")),
                            ("alert_fusion", _("Avisar HP baixo com a União Solar (Mestre Taekwon)")),
                            ("alert_miracle", _("Festejar o Milagre Solar, Lunar e Estelar (Mestre Taekwon)")),
-                           ("miracle_sound", _("Tocar um som no Milagre")),
                            ("auto_tests", _("Salvar testes no boneco sozinho"))):
             var = self.keep(tk.BooleanVar(self.root, cfg[key]))
             m.add_checkbutton(label=label, variable=var, command=lambda k=key: self.toggle_cfg(k))
-        m.add_cascade(label=_("Volume do som do Milagre"), menu=self.volume_menu(m))
+        m.add_cascade(label=_("Sons"), menu=self.sound_menu(m))
+        m.add_cascade(label=_("Faixa fixa"), menu=self.pins_menu(m))
+        hm = self.hidden_menu(m)
+        if hm is not None:
+            m.add_cascade(label=_("Drops ocultos"), menu=hm)
 
         m.add_command(label=_("Abrir replay salvo…"), command=self.open_file)
         if self.watcher.pinned:
@@ -1427,7 +1711,7 @@ class DpsApp:
                 return
             s = self.s
             width = int(round((w0 + e.x_root - x0) / s))
-            rows = int(round(((h0 + e.y_root - y0) / s - ROWS_Y0 - 6 - FOOT_H) / ROW_H))
+            rows = int(round(((h0 + e.y_root - y0) / s - self.rows_y0() - 6 - FOOT_H) / ROW_H))
             width = max(MIN_W, min(MAX_W, width))
             rows = max(MIN_ROWS, min(MAX_ROWS, rows))
             if width != self.base_w() or rows != self.cfg["rows"]:
@@ -1451,7 +1735,11 @@ class DpsApp:
             self.save()
 
     def on_right_click(self, e):
-        self.popup(self.main_menu, e.x_root, e.y_root)
+        tgt = self.target_at(e.x, e.y)
+        if tgt and tgt[0] in ("row", "fav", "pinbar"):
+            self.popup(lambda: self.row_menu(tgt), e.x_root, e.y_root)
+        else:
+            self.popup(self.main_menu, e.x_root, e.y_root)
 
     def on_wheel(self, e):
         if e.state & 0x4:                                   # Ctrl

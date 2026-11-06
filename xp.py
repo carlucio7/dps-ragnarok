@@ -174,6 +174,7 @@ def windows(c, cfg=None):
     """Quando cada bônus detectável esteve ativo em quem grava: {chave: [(início, fim, valor)]}.
     cfg: para saber se os bônus "[Durante o Evento]" dos itens estão marcados."""
     event_on = settings(cfg or {})["gear_event"]["on"]
+    off = event_off(cfg or {})
     out = {}
     for b in BONUSES:
         if b["status"] is None:
@@ -182,7 +183,7 @@ def windows(c, cfg=None):
             out[b["key"]] = [(s, e, 0) for s, e in c.miracle_windows()]
             continue
         if b["status"] == "equipamento":
-            out[b["key"]] = gear_windows(c, event_on)
+            out[b["key"]] = gear_windows(c, event_on, off)
             continue
         if b.get("lasting") and b.get("val"):    # manuais: não acabam com a morte e trazem o % no status
             out[b["key"]] = _lasting_vals(c, b["status"])
@@ -295,11 +296,15 @@ def estimate(c, cfg, rng=None):
         base += r["xp"]
         total += r["total"]
     span = (rng[1] - rng[0]) if rng else c.now
-    per_min = total * 60000.0 / span if span and span > 60000 else None
+    long_enough = span and span > 60000
+    per_min = total * 60000.0 / span if long_enough else None
     nxt = c.session.next_exp
+    pct_min = (100.0 * per_min / nxt) if per_min is not None and nxt else None
     return dict(xp=total, base=base, kills=len(rows), unknown=unknown, factor=(total / base) if base else (f or 1.0),
                 source=source, per_hour=per_min * 60 if per_min is not None else None, per_min=per_min,
-                per_min_pct=(100.0 * per_min / nxt) if per_min is not None and nxt else None, rows=rows)
+                per_min_pct=pct_min, per_hour_pct=pct_min * 60 if pct_min is not None else None,
+                pct=(100.0 * total / nxt) if nxt else None,
+                kills_per_min=len(rows) * 60000.0 / span if long_enough else None, span=span, rows=rows)
 
 
 def timeline(c, cfg, rng=None, bucket_ms=60000):
@@ -368,7 +373,7 @@ class _Gear:
     """Tabela dos bônus dos itens, lida numa thread (o iteminfo leva ~1 s)."""
 
     def __init__(self):
-        self.table, self.names, self._thread = None, {}, None
+        self.table, self.names, self.kinds, self._thread = None, {}, {}, None
 
     def start(self, path):
         if self.table is not None or self._thread is not None or not path:
@@ -382,6 +387,8 @@ class _Gear:
                 self.names = {i: _norm(v.get("identifiedDisplayName")) for i, v in items.items()
                               if isinstance(i, int) and isinstance(v, dict)}
                 self.table = parse_gear(items)
+                import itemkind                  # categorias dos itens (cores dos drops), do mesmo arquivo
+                self.kinds = itemkind.parse_kinds(items)
             except (OSError, ValueError, IndexError, KeyError):
                 self.table = {}
             finally:
@@ -406,8 +413,34 @@ def _iteminfo_path():
     return os.path.join(os.path.dirname(grf), "System", "iteminfo_new.lub") if grf else None
 
 
-def gear_bonus(worn, event_on, table=None, names=None):
-    """(% de XP dos itens vestidos, [itens que deram bônus]) para {bit do slot: Item}."""
+def event_off(cfg):
+    """Itens cujo bônus "[Durante o Evento]" a pessoa desmarcou (o evento daquele item já acabou)."""
+    out = set()
+    for i in cfg.get("xp_event_off") or []:
+        try:
+            out.add(int(i))
+        except (TypeError, ValueError):
+            pass
+    return frozenset(out)
+
+
+def event_items(c):
+    """{item: %} dos itens com bônus "[Durante o Evento]" vestidos em algum momento da gravação."""
+    GEAR.start(_iteminfo_path())
+    table = GEAR.table or {}
+    out = {}
+    for _t, state in getattr(c, "equip_log", None) or []:
+        for it in state.values():
+            for i in [it.item_id] + [x for x in it.cards if x]:
+                pct = sum(p for p, _g, ev in table.get(i, ()) if ev)
+                if pct:
+                    out[i] = pct
+    return out
+
+
+def gear_bonus(worn, event_on, table=None, names=None, event_off=frozenset()):
+    """(% de XP dos itens vestidos, [itens que deram bônus]) para {bit do slot: Item}.
+    event_off: itens cujo bônus de evento não conta mesmo com event_on."""
     table = GEAR.table if table is None else table
     names = GEAR.names if names is None else names
     if not table or not worn:
@@ -421,7 +454,7 @@ def gear_bonus(worn, event_on, table=None, names=None):
     for i in sorted(ids):
         got = 0
         for pct, group, event in table.get(i, ()):
-            if event and not event_on:
+            if event and (not event_on or i in event_off):
                 continue
             if group and not all(_norm(n) in worn_names for n in group):
                 continue
@@ -432,7 +465,7 @@ def gear_bonus(worn, event_on, table=None, names=None):
     return total, who
 
 
-def gear_windows(c, event_on):
+def gear_windows(c, event_on, event_off=frozenset()):
     """[(início, fim, %)] do bônus dos itens vestidos, a cada troca de equipamento."""
     GEAR.start(_iteminfo_path())
     if GEAR.table is None:
@@ -441,10 +474,43 @@ def gear_windows(c, event_on):
     log = getattr(c, "equip_log", None) or [(0, {})]
     for i, (t, state) in enumerate(log):
         end = log[i + 1][0] if i + 1 < len(log) else max(c.now, t)
-        pct, _who = gear_bonus(state, event_on)
+        pct, _who = gear_bonus(state, event_on, event_off=event_off)
         if pct:
             out.append((t, end, pct))
     return out
+
+
+def recordings_before(path, session, limit=20):
+    """Gravações anteriores do mesmo personagem na mesma pasta, da mais nova para a mais velha:
+    [{"path", "when"}]."""
+    import meter
+    if not path or not session.gid:
+        return []
+    folder = os.path.dirname(path)
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return []
+    out = []
+    for name in names:
+        p = os.path.join(folder, name)
+        if not name.lower().endswith(".rrf") or os.path.normcase(p) == os.path.normcase(path):
+            continue
+        info = meter._xp_info(p)
+        if info and info[0] == session.gid and info[1] < session.recorded_at:
+            out.append(dict(path=p, when=info[1]))
+    out.sort(key=lambda r: r["when"], reverse=True)
+    return out[:limit]
+
+
+def summary(c, cfg, rng=None):
+    """Números para comparar duas gravações: duração, XP (total, por minuto e por hora, em % do nível quando dá),
+    abates, abates por minuto e fator."""
+    est = estimate(c, cfg, rng)
+    return dict(span=est["span"], xp=est["xp"], pct=est["pct"], per_min=est["per_min"],
+                per_min_pct=est["per_min_pct"], per_hour=est["per_hour"], per_hour_pct=est["per_hour_pct"],
+                kills=est["kills"], kills_per_min=est["kills_per_min"], factor=est["factor"],
+                level=c.session.base_level, unknown=est["unknown"])
 
 
 def time_to_level(c, cfg, per_min):

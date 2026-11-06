@@ -562,6 +562,9 @@ class TimelineTab:
             head(_("Só na lista de eventos"))
             for lane in only:
                 check(lane["key"], lane["name"], lane["color"] or col["fg"], lane["on"], self.on)
+            win.label(self.side, _("Dano: cada golpe, que acertou ou errou. Outras skills: o que foi usado sem causar "
+                                   "dano (buffs, curas, debuffs) e as conjurações."), "small", "muted", "panel",
+                      anchor="w", justify="left", wraplength=int(205 * win.dpi)).pack(fill="x", padx=8, pady=(2, 0))
         head(_("Marcações de fase"))
         check("marks", _("Fases e clímax"), col["fg"], True, self.on)
 
@@ -663,8 +666,8 @@ class TimelineTab:
                 continue
             if who == "mob" and not (e.get("mob") or e["kind"] == "status"):
                 continue
-            if who == "marked" and not (e.get("mob") or e["kind"] == "status") and                     e["aid"] not in marked and e.get("target") not in marked:
-                continue                          # segue os jogadores marcados em "DPS de cada jogador"
+            if who == "marked" and e["aid"] not in marked and e.get("target") not in marked:
+                continue                          # só o que os jogadores marcados fizeram ou receberam
             if who not in (None, "mob", "marked") and e["aid"] != who and e.get("target") != who:
                 continue
             rows.append(e)

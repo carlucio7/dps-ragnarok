@@ -591,6 +591,20 @@ check(d2["starts"] == [(0, None)] and "3,0 s depois do começo da fase" in early
 kinds = collections.Counter(e["kind"] for e in d2["events"])
 check(kinds["death"] == 1 and kinds["res"] == 1 and kinds["claw"] == 1 and kinds["strong"] == 3 and kinds["elo"] == 1,
       "linha do tempo: morte, ressurreição, Garra, golpes fortes e Elo Celestial: %s" % dict(kinds))
+status_ev = [e for e in d2["lane_events"] if e["lane"] == "st%d" % dd.DARK_CLAW]
+check(status_ev and all(e["who"] == "" and e["what"].startswith("No chefe:") for e in status_ev),
+      "linha do tempo: Garra Sombria é status no chefe, não skill do chefe -> %s" % [e["what"] for e in status_ev])
+c3 = combat_of(fr.build(ME, sorted(ev + [(1500, fr.skill_use(0, ME, 28)),
+                                         (1400, fr.status(ME, 1197, True, 30000, 30000, 1))],
+                                   key=lambda e: e[0]), player="Eu")[0], gap_ms=15000)
+d3 = tl.build(c3, BOSS2)
+heal = [e for e in d3["events"] if e["t"] == 1500 and e["lane"] == "pskills"]
+check(len(heal) == 1 and heal[0]["aid"] == ME and heal[0]["what"] == "recebeu cura de um efeito"
+      and meter.skill_name(5269) in heal[0]["detail"] and not any(e.get("who") == "#0" for e in d3["events"]),
+      "linha do tempo: cura sem autor vira 'recebeu cura' de quem tem o Mediale Votum -> %s" % heal)
+marked = [e for e in d3["events"] + d3["lane_events"] if e["aid"] == ME or e.get("target") == ME]
+check(not any(e["kind"] in ("boss", "status", "reflect") for e in marked),
+      "linha do tempo: 'Jogadores marcados' não traz skills nem status do chefe")
 ts2, vals = tl.series([(1000, 500), (1500, 500), (9000, 1000)], 0, 10000, 1000, 1000)
 check(vals[1] == 1000.0 and vals[9] == 1000.0 and sum(vals) == 2000.0, "curva: dano por segundo por balde")
 
@@ -842,6 +856,15 @@ with tempfile.TemporaryDirectory() as tmp:
           "XP: tempo até o próximo nível = XP que falta ÷ XP por minuto -> %s" % xpmod.span_text(eta))
     est = xpmod.estimate(rf.combat, {"xp_bonuses": {"server": {"on": True, "pct": 100}}})
     check(round(est["xp"]) == 204 and est["source"][0] == "lista", "XP: pela lista, evento +100%% = ×2 -> %s" % est["xp"])
+    check(abs(est["pct"] - 100.0 * est["xp"] / 10 ** 9) < 1e-9 and est["kills_per_min"] is None,
+          "XP: % do nível ao lado da XP; abates por minuto só com mais de 1 min")
+    est = xpmod.estimate(rf.combat, {}, (0, 120000))
+    check(est["kills_per_min"] == 1.5 and abs(est["per_hour_pct"] - est["per_min_pct"] * 60) < 1e-12,
+          "XP: 3 abates em 2 min = 1,5 por minuto; %% por hora = %% por minuto × 60 -> %s" % est["kills_per_min"])
+    rb = rrf.read_session(os.path.join(tmp, "b.rrf"))
+    before = xpmod.recordings_before(os.path.join(tmp, "b.rrf"), rb)
+    check([os.path.basename(r["path"]) for r in before] == ["a.rrf"],
+          "XP: comparar com a gravação anterior do mesmo personagem -> %s" % before)
 
 c0 = combat_of(fr.build(ME, [(0, fr.spawn(52100, "mob", 21539, "Rgan")), (300, fr.skill_damage(ME, 52100, 5000)),
                              (400, fr.vanish(52100, 1)), (500, fr.spawn(52101, "mob", 3445, "Esqueleto")),
@@ -931,6 +954,33 @@ names = {i: xpmod._norm(v["identifiedDisplayName"]) for i, v in items.items()}
 worn = {4096: rrf.Item(1, 31975), 1024: rrf.Item(2, 31368), 4: rrf.Item(3, 480146, cards=(300834,))}
 check(xpmod.gear_bonus(worn, True, table, names)[0] == 5 + 5 + 15 and xpmod.gear_bonus(worn, False, table, names)[0] == 15,
       "XP dos itens: +5% da Batata, +5% do conjunto com o chapéu (sem o Espetinhos), +15% da carta; sem evento só a carta")
+check(xpmod.gear_bonus(worn, True, table, names, event_off=frozenset({31975}))[0] == 15
+      and xpmod.event_off({"xp_event_off": [31975, "x"]}) == frozenset({31975}),
+      "XP dos itens: evento desmarcado só na Batata -> fica só a carta")
+
+# --- categorias dos itens (cores dos drops) --------------------------------------
+import itemkind  # noqa: E402
+kinds = itemkind.parse_kinds({
+    4001: {"identifiedDescriptionName": {1: "SOR +2.", 2: "^777777Tipo:^000000 Carta"}},
+    1201: {"identifiedDescriptionName": {1: "Uma faca.", 2: "Tipo: Adaga"}},
+    5912: {"identifiedDescriptionName": {1: "Tipo: Visual"}},
+    984: {"identifiedDescriptionName": {1: "Oridecon refinado.", 2: "Refinarias:"}},
+    9001: {"identifiedDescriptionName": {1: "Tipo: Ovo de Mascote"}}})
+check(kinds == {4001: "card", 1201: "equip", 984: "refine"},
+      "drops: carta, arma e refino pela descrição do jogo (visual e ovo não contam) -> %s" % kinds)
+saved_kinds, xpmod.GEAR.kinds = xpmod.GEAR.kinds, kinds
+check(itemkind.kind(4147) == "mvpcard" and itemkind.kind(4001) == "card" and itemkind.kind(507) == "alch"
+      and itemkind.kind(1000813) == "episode" and itemkind.kind(1001037) == "episode" and itemkind.kind(25723) == "episode"
+      and itemkind.kind(940) is None and itemkind.kind(7134) == "alch" and itemkind.kind(1000275) == "alch"
+      and itemkind.kind(984) == "refine" and itemkind.kind(1) is None and itemkind.kind(9, "Carta Nova") == "card",
+      "drops: carta de MVP, carta, alquimia (só as 4 skills), episódios 17+, refino e sem categoria")
+xpmod.GEAR.kinds = saved_kinds
+rows = [dict(item=i, n=n) for i, n in ((1, 50), (2, 10), (3, 99), (4, 5))]
+got = [r["item"] for r in itemkind.favorites_first(rows, [4, 2], lambda r: -r["n"])]
+check(got == [4, 2, 3, 1], "drops: favoritos na ordem em que foram marcados, o resto pela quantidade -> %s" % got)
+cols = itemkind.colors({"drop_colors": {"card": "#123456", "equip": "", "alch": "azul"}})
+check(cols["card"] == "#123456" and cols["equip"] is None and cols["alch"] == itemkind.DEFAULT_COLORS["alch"],
+      "drops: cor escolhida, sem cor e cor inválida volta à padrão -> %s" % cols)
 
 # --- todo texto da interface tem tradução -------------------------------------
 import ast  # noqa: E402

@@ -19,6 +19,9 @@ from i18n import _
 PAD_MS = 3000                 # folga antes e depois da luta
 REFLECT_JOIN_MS = 150         # reflexos da mesma Dor Máxima chegam juntos: viram um ponto só
 RELIEVE = 1166                # Alívio no chefe: val1 = redução de dano em % (10 por nível; cada Alma viva +1 nível)
+HEAL = 28                     # Curar: o servidor manda curas de efeitos sem quem lançou (fonte 0)
+# curas sem autor: status no curado -> skill que cura sozinha (Mediale Votum a cada 2 s, Talismã de Proteção a cada 3 s)
+HEAL_EFFECTS = ((1197, 5269), (1356, 5418))
 HP_STEP_MS = 1000             # sem golpes, a curva de HP ganha um ponto por segundo (a regeneração aparece)
 # faixas ligadas ao abrir (as outras aparecem desligadas na lista)
 DEFAULT_ON = {dd.DARK_CLAW, dd.FLORESCER, 1402, dd.MAX_PAIN}
@@ -146,9 +149,25 @@ def build(c, key, rng=None):
         elif not h.out:
             ev(h.t, "mobhit", "mobhits", None, what, detail, value=h.dmg)
             events[-1].update(who=c.name_of(h.raw), mob=True, target=h.dst)
+    effects = collections.defaultdict(list)       # curado -> [(status, início, fim)] dos efeitos que curam sozinhos
+    for a, ef, st, en in c.statuses():
+        if ef in dict(HEAL_EFFECTS):
+            effects[a].append((ef, st, en))
     for u in c.uses:
         if t0 <= u[0] <= t1 and u[4] != 717:
             tgt = _(" em %s") % c.name_of(u[3]) if u[3] and u[3] != u[2] else ""
+            if not u[2] and u[3] in pset:
+                # sem quem lançou: o jogo mostra o efeito no curado (Mediale Votum, Talismã de Proteção...)
+                if u[4] == HEAL:
+                    seen = [sk for ef, sk in HEAL_EFFECTS
+                            if any(e2 == ef and st <= u[0] <= en for e2, st, en in effects.get(u[3], ()))]
+                    src = " / ".join(meter.skill_name(sk) for sk in (seen or [sk for _ef, sk in HEAL_EFFECTS]))
+                    ev(u[0], "pskill", "pskills", u[3], _("recebeu cura de um efeito"),
+                       (_("de %s") if seen else _("provavelmente de %s")) % src)
+                else:
+                    ev(u[0], "pskill", "pskills", u[3], _("recebeu %s de um efeito") % meter.skill_name(u[4]), "")
+                events[-1]["target"] = u[3]
+                continue
             if u[2] in pset or c.is_friendly(u[2]):
                 ev(u[0], "pskill", "pskills", u[1] if u[1] in pset else u[2], _("usou %s") % meter.skill_name(u[4]),
                    (c.name_of(u[2]) if u[2] != u[1] else "") + tgt)
@@ -182,10 +201,12 @@ def build(c, key, rng=None):
                                [e for e in events if e["lane"] == k]))
     # só na lista (são muitos para o gráfico). As skills dos jogadores começam ligadas: a lista segue os jogadores
     # marcados (quem gravou, de início), então dá para ver cada skill usada, inclusive as novas como Poder Esmagador
-    for k, name, color, on in (("hits", _("Golpes dos jogadores"), None, False),
-                               ("pskills", _("Skills dos jogadores"), None, True),
-                               ("mobhits", _("Golpes dos monstros"), EVENT_COLORS["boss"], False),
-                               ("mobskills", _("Skills dos monstros"), EVENT_COLORS["boss"], False)):
+    # "dano" = cada golpe que acertou ou errou; "outras skills" = o que foi usado sem causar dano (buffs, curas,
+    # debuffs) e as conjurações
+    for k, name, color, on in (("hits", _("Dano dos jogadores, golpe a golpe"), None, False),
+                               ("pskills", _("Outras skills dos jogadores"), None, True),
+                               ("mobhits", _("Dano dos monstros, golpe a golpe"), EVENT_COLORS["boss"], False),
+                               ("mobskills", _("Outras skills dos monstros"), EVENT_COLORS["boss"], False)):
         if k in used:
             lanes.append(_lane(k, name, "list", color, on, []))
     starts = [(p["appear"], x.phase_name(p) if x.multi else None) for p in x.phases]
@@ -209,15 +230,17 @@ def status_events(c, lanes):
             continue
         for item in lane["items"]:
             s, e = item[0], item[1]
+            # status que está NO chefe (Garra Sombria, Pólen...): quem pôs nem sempre aparece, então "Quem" fica vazio
             if len(item) > 2:                   # trecho com valor (Alívio): só a mudança, com o valor novo
-                out.append(dict(t=s, kind="status", lane=lane["key"], aid=None, who=_("chefe"),
-                                what="%s: %s" % (lane["name"], item[2]), detail=_("durou %s") % dd._secs(e - s),
-                                value=None))
+                out.append(dict(t=s, kind="status", lane=lane["key"], aid=None, who="",
+                                what=_("No chefe: %s %s") % (lane["name"], item[2]),
+                                detail=_("durou %s") % dd._secs(e - s), value=None))
                 continue
-            out.append(dict(t=s, kind="status", lane=lane["key"], aid=None, who=_("chefe"),
-                            what=_("%s começou") % lane["name"], detail="", value=None))
-            out.append(dict(t=e, kind="status", lane=lane["key"], aid=None, who=_("chefe"),
-                            what=_("%s acabou") % lane["name"], detail=_("durou %s") % dd._secs(e - s), value=None))
+            out.append(dict(t=s, kind="status", lane=lane["key"], aid=None, who="",
+                            what=_("No chefe: %s começou") % lane["name"], detail="", value=None))
+            out.append(dict(t=e, kind="status", lane=lane["key"], aid=None, who="",
+                            what=_("No chefe: %s acabou") % lane["name"], detail=_("durou %s") % dd._secs(e - s),
+                            value=None))
     return out
 
 
