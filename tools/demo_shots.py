@@ -80,7 +80,7 @@ def shots(out, lang, replay):
     s.shot("widget_" + lang)
     app.open_analysis()
     w = app.analysis
-    w.top.geometry("1180x860+60+40")
+    w.top.geometry("1280x900+60+40")
     w.select_tab("resumo")
     w.refresh(force=True)
     s.shot_window(w.top, "resumo_" + lang)

@@ -2,6 +2,14 @@
 
 Português · [English](#english) · [Español](#español)
 
+## [1.2.1] — 2026-11-06
+
+- **Abas da análise sem nomes cortados:** com as 13 abas da 1.2.0, a janela de
+  análise no tamanho padrão cortava os últimos nomes ("Linha do tempc", "Dedo
+  Durc"). Agora o espaço em volta de cada nome (e, se precisar, a letra) diminui
+  até todas caberem na largura da janela, e a janela não fica mais estreita do
+  que o necessário para elas.
+
 ## [1.2.0] — 2026-11-05
 
 - **Novo nome: Replay Master** (antes DPS Ragnarok). O programa já faz bem mais
@@ -145,6 +153,13 @@ inglês e espanhol.
 
 ## English
 
+### [1.2.1] — 2026-11-06
+
+- **Analysis tabs no longer cut off:** with 1.2.0's 13 tabs, the analysis window
+  at its default size clipped the last names. Now the space around each name
+  (and, if needed, the font) shrinks until every tab fits the window width, and
+  the window can't get narrower than they need.
+
 ### [1.2.0] — 2026-11-05
 
 - **New name: Replay Master** (formerly DPS Ragnarok). The program does a lot
@@ -287,6 +302,14 @@ and Spanish.
 ---
 
 ## Español
+
+### [1.2.1] — 2026-11-06
+
+- **Pestañas del análisis sin nombres cortados:** con las 13 pestañas de la
+  1.2.0, la ventana del análisis en su tamaño por defecto cortaba los últimos
+  nombres. Ahora el espacio alrededor de cada nombre (y, si hace falta, la
+  letra) se reduce hasta que todas caben en el ancho de la ventana, y la ventana
+  ya no se vuelve más estrecha de lo que necesitan.
 
 ### [1.2.0] — 2026-11-05
 

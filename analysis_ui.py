@@ -644,7 +644,7 @@ class AnalysisWindow:
         self.top.configure(bg=bg)
         geo = app.cfg.get("an_geometry")
         self.top.geometry(geo if geo else "%dx%d" % (int(1120 * self.dpi), int(800 * self.dpi)))
-        self.top.minsize(int(720 * self.dpi), int(500 * self.dpi))
+        self.top.minsize(int(900 * self.dpi), int(500 * self.dpi))   # abaixo disso as 13 abas não cabem
         self.top.protocol("WM_DELETE_WINDOW", self.close)
         self.top.bind("<Escape>", lambda e: self.close())
         self.top.bind("<Control-MouseWheel>", lambda e: self.set_zoom(1 if e.delta > 0 else -1))
@@ -679,6 +679,8 @@ class AnalysisWindow:
         for tiles in (self.sum_tiles, self.dps_tiles, self.head_tiles):
             tiles.cols = 0
             tiles.reflow()
+        self.tab_pad, self.tab_font = 16, "head"     # a letra mudou: recalcula o que cabe
+        self.fit_tabs()
         self.refresh(force=True)
 
     def color_of(self, aid):
@@ -716,8 +718,8 @@ class AnalysisWindow:
         s.configure("An.Vertical.TScrollbar", background=c["btn"], troughcolor=c["panel"], borderwidth=0,
                     arrowcolor=c["muted"], bordercolor=c["panel"], lightcolor=c["btn"], darkcolor=c["btn"])
         s.configure("An.TNotebook", background=c["bg"], borderwidth=0, tabmargins=(8, 6, 8, 0))
-        s.configure("An.TNotebook.Tab", background=c["bg"], foreground=c["muted"], padding=(16, 7), font=f["head"],
-                    borderwidth=0)
+        s.configure("An.TNotebook.Tab", background=c["bg"], foreground=c["muted"],
+                    padding=(getattr(self, "tab_pad", 16), 7), font=f[getattr(self, "tab_font", "head")], borderwidth=0)
         s.map("An.TNotebook.Tab", background=[("selected", c["panel"])], foreground=[("selected", c["fg"])])
         s.configure("Sub.TNotebook", background=c["panel"], borderwidth=0, tabmargins=(6, 4, 6, 0))
         s.configure("Sub.TNotebook.Tab", background=c["panel"], foreground=c["muted"], padding=(12, 5),
@@ -780,6 +782,7 @@ class AnalysisWindow:
         self.nb = ttk.Notebook(self.top, style="An.TNotebook")
         self.nb.pack(fill="both", expand=True, padx=8, pady=(4, 8))
         self.nb.bind("<<NotebookTabChanged>>", lambda e: self.tab_changed())
+        self.nb.bind("<Configure>", lambda e: self.fit_tabs())
         self.build_summary()
         self.build_players()
         self.build_equip()
@@ -1597,6 +1600,31 @@ class AnalysisWindow:
     def scope_changed(self):
         self.dps_sel = None
         self.refresh(force=True)
+
+    def fit_tabs(self):
+        """Com muitas abas, a janela no tamanho padrão cortava os nomes ("Dedo Durc"): diminui o espaço em volta
+        de cada nome e, se ainda não couber, a letra, até todas caberem na largura da janela."""
+        try:
+            n = self.nb.index("end")
+            texts = [self.nb.tab(i, "text") for i in range(n)]
+        except tk.TclError:
+            return
+        width = self.nb.winfo_width()
+        if width <= 1 or not n:
+            return
+        choice = None
+        for key in ("head", "small"):
+            text_w = sum(self.f[key].measure(t) for t in texts)
+            for pad in (16, 12, 9, 6, 4):
+                if text_w + n * (2 * pad + 8) + 24 <= width:
+                    choice = (pad, key)
+                    break
+            if choice:
+                break
+        pad, key = choice or (4, "small")
+        if (pad, key) != (getattr(self, "tab_pad", 16), getattr(self, "tab_font", "head")):
+            self.tab_pad, self.tab_font = pad, key
+            ttk.Style(self.top).configure("An.TNotebook.Tab", padding=(pad, 7), font=self.f[key])
 
     def tab_changed(self):
         try:
