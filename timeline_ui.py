@@ -546,6 +546,8 @@ class TimelineTab:
         head(_("DPS de cada jogador"))
         for aid in d["players"]:
             mark = "" if aid in d["party"] or aid == c.me else _(" (fora do grupo)")
+            if not d["dmg"].get(aid):
+                mark += _(" (sem dano)")
             check(aid, c.name_of(aid) + mark, win.color_of(aid), False, self.players_on)
         spans = [l for l in d["lanes"] if l["kind"] == "span"]
         if spans:

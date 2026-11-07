@@ -26,6 +26,9 @@ import xp
 from fmt import num, full, dur, dec
 from i18n import _
 
+# cor de cada efeito no gráfico "Por jogador" (o dano próprio usa a cor do jogador)
+EFFECT_COLORS = {1142: "#22d3ee", 1183: "#4ade80", 730: "#a78bfa", 1402: "#f59e0b", 1403: "#fbbf24", 22: "#f472b6",
+                 1182: "#a3e635", 608: "#ef4444", 1319: "#94a3b8"}
 # cores bem diferentes entre si; cada jogador fica com a mesma cor em todas as tabelas e gráficos
 PALETTE = ["#ff7a59", "#5b9cff", "#4ade80", "#c084fc", "#fbbf24", "#22d3ee", "#f472b6",
            "#a3e635", "#d6a38f", "#94a3b8", "#e11d48", "#2dd4bf"]
@@ -2350,15 +2353,23 @@ class AnalysisWindow:
         self.bf_player_box.pack(side="left", padx=6)
         self.bf_player_box.bind("<<ComboboxSelected>>", lambda e: self.refresh(force=True))
         self.bf_fights, self.bf_players, self.bf_cache = {}, {}, (None, None)
-        # ranking: quanto do dano cada efeito rendeu
+        # ranking: quanto do dano cada efeito rendeu, ou o dano creditado a cada jogador
+        modes = tk.Frame(tab, bg=c["panel"])
+        modes.pack(fill="x", padx=10, pady=(6, 0))
+        self.label(modes, _("Gráfico:"), color="muted", bg="panel").pack(side="left")
+        self.bf_mode = tk.StringVar(self.top, "efeito")
+        for value, text in (("efeito", _("Quanto cada efeito rendeu")), ("jogador", _("Dano creditado a cada jogador"))):
+            tk.Radiobutton(modes, text=text, variable=self.bf_mode, value=value, command=self.bf_mode_changed,
+                           bg=c["panel"], fg=c["fg"], selectcolor=c["btn"], activebackground=c["panel"],
+                           activeforeground=c["fg"], font=self.f["text"], highlightthickness=0).pack(side="left", padx=(8, 0))
+        self.bf_credit = ([], 0)
         self.bf_chart = tk.Canvas(tab, height=int(150 * self.dpi * self.zoom), bg=c["panel"], highlightthickness=0, bd=0)
         self.bf_chart.pack(fill="x", padx=12, pady=(6, 0))
         self.bf_chart.bind("<Configure>", lambda e: self.draw_contrib())
         self.bf_rows = []
-        self.label(tab, _("Rendeu = quanto o dano cairia sem o efeito, pela fórmula de cada um (rAthena e textos do "
-                          "jogo), golpe a golpe e só onde ele vale (fogo, físico, corpo a corpo...). É estimativa: "
-                          "os que não mudam o dano direto (Bênção, Agilidade...) aparecem só com o tempo ativo."),
-                   "small", "muted", "panel", anchor="w", justify="left", wraplength=1150).pack(fill="x", padx=12, pady=(4, 2))
+        self.bf_note = self.label(tab, "", "small", "muted", "panel", anchor="w", justify="left", wraplength=1150)
+        self.bf_note.pack(fill="x", padx=12, pady=(4, 2))
+        self.bf_mode_changed(redraw=False)
         pw = ttk.PanedWindow(tab, orient="horizontal", style="An.TPanedwindow")
         pw.pack(fill="both", expand=True, pady=(4, 0))
         left = tk.Frame(pw, bg=c["panel"])
@@ -2420,6 +2431,10 @@ class AnalysisWindow:
             self.bf_cache = (sig, contrib.fight(c, key, rng, aid) if key is not None else ([], 0))
         rows, total = self.bf_cache[1]
         self.bf_rows = rows
+        csig = (id(c), c.version, key, rng)
+        if self.bf_mode.get() == "jogador" and getattr(self, "bf_credit_sig", None) != csig:
+            self.bf_credit_sig = csig
+            self.bf_credit = contrib.credit(c, key, rng) if key is not None else ([], 0)
         self.draw_contrib()
         # debuffs no chefe: os estimados primeiro, depois os outros que apareceram nele
         deb = [dict(r) for r in rows if r["where"] == "boss"]
@@ -2437,7 +2452,15 @@ class AnalysisWindow:
         self.t_debuffs.set_rows(deb, lambda r: r["key"], lambda r: ["good"] if r["contrib"] else [])
         # buffs do jogador escolhido (ou de quem gravou): tempo ativo, e quanto rendeu quando dá para estimar
         who = aid if aid is not None else c.me
-        brows, btotal = an.buff_uptime(c, who, rng)
+        # mesmo recorte do gráfico e dos debuffs: a luta escolhida (ou a fase), não a sessão inteira; senão o
+        # combate de antes (outro mapa, outro grupo) entra na conta e derruba o tempo ativo dos buffs da luta
+        buff_rng = rng
+        if key is not None and not phases.get(self.bf_phase.get()):
+            x = self.bf_ctx[1]
+            buff_rng = (x.start, x.end)
+            if self.rng:
+                buff_rng = (max(buff_rng[0], self.rng[0]), min(buff_rng[1], self.rng[1]))
+        brows, btotal = an.buff_uptime(c, who, buff_rng)
         est = {r["efst"]: r for r in rows if r["where"] == "me"}
         out = []
         for r in brows:
@@ -2456,15 +2479,94 @@ class AnalysisWindow:
         out.sort(key=lambda r: (-(r["contrib"] or 0), tier.get(r["kind"], 1), -(r["uptime"] or 0), r["name"]))
         for i, r in enumerate(out):
             r["rank"] = i + 1
-        self.buffs_title.configure(text=_("Buffs de %s — %% do tempo em combate, vivo (%s)") % (c.name_of(who),
-                                                                                             dur(btotal)))
+        title = _("Buffs de %s na luta — %% do tempo em combate, vivo (%s)") if buff_rng is not rng else             _("Buffs de %s — %% do tempo em combate, vivo (%s)")
+        self.buffs_title.configure(text=title % (c.name_of(who), dur(btotal)))
         self.t_buffs.set_rows(out, lambda r: r["key"],
                               lambda r: ["good"] if r["contrib"] else (
                                   ["warn"] if r["kind"] in ("Grupo/suporte", "Consumível") and r["uptime"] is not None
                                   and r["uptime"] < 0.8 else []))
 
+    def bf_mode_changed(self, redraw=True):
+        if self.bf_mode.get() == "jogador":
+            text = _("Creditado = a parte do dano que é do próprio jogador (os golpes dele sem os efeitos dos outros) "
+                     "mais o que os efeitos que ele pôs renderam nos golpes de todos: Cometa, Pólen, Garra Sombria, "
+                     "Avanço Sísmico, Lex Aeterna... Quando vários efeitos valem no mesmo golpe, o ganho é dividido "
+                     "entre eles, então tudo soma 100%. Buffs que não mudam o dano direto (Bênção, Agilidade...) não "
+                     "entram. É estimativa, e só conta o que aparece no replay.")
+        else:
+            text = _("Rendeu = quanto o dano cairia sem o efeito, pela fórmula de cada um (rAthena e textos do "
+                     "jogo), golpe a golpe e só onde ele vale (fogo, físico, corpo a corpo...). É estimativa: "
+                     "os que não mudam o dano direto (Bênção, Agilidade...) aparecem só com o tempo ativo.")
+        self.bf_note.configure(text=text)
+        if redraw:
+            self.refresh(force=True)
+
+    def draw_credit(self):
+        """Barras empilhadas: o dano creditado a cada jogador (próprio + cada efeito que ele pôs)."""
+        cv, col, f = self.bf_chart, self.c, self.f
+        cv.delete("all")
+        W = cv.winfo_width()
+        d = self.dpi * self.zoom
+        rows, total = self.bf_credit
+        rows = [r for r in rows if r["total"] >= total * 0.0005][:12] if total else []
+        if not rows:
+            cv.configure(height=int(40 * d))
+            cv.create_text(8, 20 * d, anchor="w", fill=col["muted"], font=f["text"],
+                           text=_("Nenhuma luta contra chefe no recorte."))
+            return
+        c = self.combat()
+        name = lambda aid: c.name_of(aid) if aid is not None else _("(quem pôs não aparece)")
+        rh = 24 * d
+        legend_h = 22 * d
+        cv.configure(height=int(rh * len(rows) + legend_h + 10 * d))
+        label_w = max(f["text"].measure(name(r["aid"])) for r in rows) + 16 * d
+        top = max(r["total"] for r in rows) or 1
+
+        def text_of(r):
+            bits = [dec("%.1f%%" % (100.0 * r["total"] / total)), full(round(r["total"]))]
+            bits += ["%s %s" % (meter.status_name(ef), dec("%.1f%%" % (100.0 * v / total)))
+                     for ef, v in sorted(r["via"].items(), key=lambda kv: -kv[1]) if v >= total * 0.0005]
+            if r["via"] and r["own"] >= total * 0.0005:
+                bits.append(_("próprio %s") % dec("%.1f%%" % (100.0 * r["own"] / total)))
+            return " · ".join(bits)
+        texts = [text_of(r) for r in rows]
+        # a barra mais comprida de cada linha + o texto dela cabem na largura
+        bar_w = min([W - label_w - 14 * d - f["small"].measure(t) for t in texts[:1]] +
+                    [(W - label_w - 14 * d - f["small"].measure(t)) * top / (r["total"] or 1)
+                     for r, t in zip(rows, texts)])
+        bar_w = max(60, bar_w)
+        used = []
+        for i, r in enumerate(rows):
+            y = 4 * d + i * rh
+            cv.create_text(label_w - 8 * d, y + rh / 2, anchor="e", text=name(r["aid"]), fill=col["fg"], font=f["text"])
+            x = label_w
+            parts = [(None, r["own"])] + sorted(r["via"].items(), key=lambda kv: -kv[1])
+            for ef, v in parts:
+                w = bar_w * v / top
+                if w < 0.5:
+                    continue
+                color = self.color_of(r["aid"]) if ef is None else EFFECT_COLORS.get(ef, col["accent"])
+                cv.create_rectangle(x, y + 4 * d, x + w, y + rh - 4 * d, fill=color, outline="")
+                x += w
+                if ef is not None and ef not in used:
+                    used.append(ef)
+            cv.create_text(x + 8 * d, y + rh / 2, anchor="w", fill=col["fg"], font=f["small"], text=texts[i])
+        # legenda das cores dos efeitos
+        y = 6 * d + len(rows) * rh + legend_h / 2
+        x = label_w
+        cv.create_text(x, y, anchor="w", fill=col["muted"], font=f["small"], text=_("cor do jogador = dano próprio"))
+        x += f["small"].measure(_("cor do jogador = dano próprio")) + 16 * d
+        for ef in used:
+            cv.create_rectangle(x, y - 5 * d, x + 10 * d, y + 5 * d, fill=EFFECT_COLORS.get(ef, col["accent"]), outline="")
+            label = meter.status_name(ef)
+            cv.create_text(x + 14 * d, y, anchor="w", fill=col["muted"], font=f["small"], text=label)
+            x += 14 * d + f["small"].measure(label) + 14 * d
+
     def draw_contrib(self):
         """Barras: quanto do dano cada efeito rendeu (do maior para o menor)."""
+        if self.bf_mode.get() == "jogador":
+            self.draw_credit()
+            return
         cv, col, f = self.bf_chart, self.c, self.f
         cv.delete("all")
         W = cv.winfo_width()
@@ -2487,9 +2589,10 @@ class AnalysisWindow:
             color = col["accent"] if r["where"] == "boss" else col["good"]
             cv.create_rectangle(label_w, y + 4 * d, label_w + max(2, w), y + rh - 4 * d, fill=color, outline="")
             cv.create_text(label_w + w + 8 * d, y + rh / 2, anchor="w", fill=col["fg"], font=f["small"],
-                           text=_("%s do dano · %s · ativo %s") % (
+                           text=_("%s do dano · %s · %s") % (
                                dec("%.1f%%" % (100 * r["share"])), full(round(r["contrib"])),
-                               dec("%.0f%%" % (100 * r["uptime"]))))
+                               (_("ativo %s") % dec("%.0f%%" % (100 * r["uptime"]))) if r["uptime"] is not None
+                               else _("%d golpes dobrados") % r["hits"]))
 
     # ------------------------------------------------------------ mortes
 

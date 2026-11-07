@@ -1486,4 +1486,35 @@ CATALOG = {
     "Refino, grau e reforma": ("Refine, grade and reform", "Refinamiento, grado y reforma"),
     "Alquimia e culinária": ("Alchemy and cooking", "Alquimia y cocina"),
     "Episódios 17 em diante": ("Episode 17 onward", "Episodios 17 en adelante"),
+    " (sem dano)": (" (no damage)", " (sin daño)"),
+    "Buffs de %s na luta — %% do tempo em combate, vivo (%s)": (
+        "%s's buffs in the fight — %% of combat time alive (%s)",
+        "Buffs de %s en la pelea — %% del tiempo en combate, vivo (%s)"),
+    "Gráfico:": ("Chart:", "Gráfico:"),
+    "Quanto cada efeito rendeu": ("How much each effect added", "Cuánto aportó cada efecto"),
+    "Dano creditado a cada jogador": ("Damage credited to each player", "Daño atribuido a cada jugador"),
+    "Creditado = a parte do dano que é do próprio jogador (os golpes dele sem os efeitos dos outros) mais o que os "
+    "efeitos que ele pôs renderam nos golpes de todos: Cometa, Pólen, Garra Sombria, Avanço Sísmico, Lex Aeterna... "
+    "Quando vários efeitos valem no mesmo golpe, o ganho é dividido entre eles, então tudo soma 100%. Buffs que não "
+    "mudam o dano direto (Bênção, Agilidade...) não entram. É estimativa, e só conta o que aparece no replay.": (
+        "Credited = the player's own share of the damage (their hits without the others' effects) plus what the "
+        "effects they applied added to everyone's hits: Comet, Pólen, Garra Sombria, Avanço Sísmico, Lex Aeterna... "
+        "When several effects count on the same hit, the gain is split between them, so everything adds up to 100%. "
+        "Buffs that don't change damage directly (Blessing, Agility...) aren't included. It's an estimate, and only "
+        "counts what shows in the replay.",
+        "Atribuido = la parte del daño que es del propio jugador (sus golpes sin los efectos de los demás) más lo "
+        "que los efectos que puso aportaron a los golpes de todos: Cometa, Pólen, Garra Sombria, Avanço Sísmico, Lex "
+        "Aeterna... Cuando varios efectos valen en el mismo golpe, la ganancia se reparte entre ellos, así que todo "
+        "suma 100%. Los buffs que no cambian el daño directo (Bendición, Agilidad...) no entran. Es una estimación, y "
+        "solo cuenta lo que aparece en el replay."),
+    "Nenhuma luta contra chefe no recorte.": ("No boss fight in the range.", "Ninguna pelea contra jefe en el recorte."),
+    "(quem pôs não aparece)": ("(applier not in the replay)", "(quien lo puso no aparece)"),
+    "próprio %s": ("own %s", "propio %s"),
+    "cor do jogador = dano próprio": ("player color = own damage", "color del jugador = daño propio"),
+    "%s do dano · %s · %s": ("%s of damage · %s · %s", "%s del daño · %s · %s"),
+    "ativo %s": ("active %s", "activo %s"),
+    "%d golpes dobrados": ("%d hits doubled", "%d golpes duplicados"),
+    "dobra o próximo golpe depois de cada uso: %d golpes dobrados": (
+        "doubles the next hit after each use: %d hits doubled",
+        "duplica el próximo golpe después de cada uso: %d golpes duplicados"),
 }

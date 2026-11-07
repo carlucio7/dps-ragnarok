@@ -2,6 +2,15 @@
 
 Português · [English](#english) · [Español](#español)
 
+## 1.3.1
+
+Lex Aeterna contada certo, dano creditado a cada jogador e o grupo todo na Linha do tempo.
+
+- Buffs e Debuffs: cada Lex Aeterna dobra o próximo golpe, mesmo com o Cardeal usando várias por segundo. Antes só a primeira de cada sequência contava.
+- Linha do tempo: o grupo todo aparece na lista de jogadores, inclusive quem não bate, como o Cardeal.
+- Buffs e Debuffs: a tabela de buffs mede a luta escolhida, não a sessão inteira (o combate de antes derrubava o tempo ativo).
+- Buffs e Debuffs: novo gráfico com o dano creditado a cada jogador, somando o que os efeitos dele renderam (Cometa e Pólen do Magus, Garra do Executor, Lex do Cardeal...).
+
 ## 1.3.0
 
 Drops coloridos e que dá para ocultar, informações fixas no widget e XP comparada entre gravações.
@@ -105,6 +114,15 @@ Primeira versão pública.
 
 ## English
 
+### 1.3.1
+
+Lex Aeterna counted right, damage credited to each player and the whole party on the Timeline.
+
+- Buffs and Debuffs: each Lex Aeterna doubles the next hit, even with the Cardinal casting several per second. Before, only the first of each streak counted.
+- Timeline: the whole party shows in the player list, including those who don't attack, like the Cardinal.
+- Buffs and Debuffs: the buff table measures the chosen fight, not the whole session (earlier combat pulled the active time down).
+- Buffs and Debuffs: new chart with the damage credited to each player, including what their effects added (the Arch Mage's Comet and All Bloom, Dark Claw, the Cardinal's Lex...).
+
 ### 1.3.0
 
 Colored drops you can hide, pinned info on the widget and XP compared between recordings.
@@ -207,6 +225,15 @@ First public version.
 ---
 
 ## Español
+
+### 1.3.1
+
+Lex Aeterna contada bien, daño atribuido a cada jugador y todo el grupo en la Línea de tiempo.
+
+- Buffs y Debuffs: cada Lex Aeterna duplica el próximo golpe, aunque el Cardenal use varias por segundo. Antes solo contaba la primera de cada secuencia.
+- Línea de tiempo: todo el grupo aparece en la lista de jugadores, incluso quien no ataca, como el Cardenal.
+- Buffs y Debuffs: la tabla de buffs mide la pelea elegida, no la sesión entera (el combate de antes bajaba el tiempo activo).
+- Buffs y Debuffs: nuevo gráfico con el daño atribuido a cada jugador, sumando lo que aportaron sus efectos (Cometa y Explosión Floreciente del Archimago, Garra Tenebrosa, Lex del Cardenal...).
 
 ### 1.3.0
 

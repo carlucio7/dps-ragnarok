@@ -214,11 +214,17 @@ def build(c, key, rng=None):
     if x.climax < x.end:
         marks.append((x.climax, _("Clímax")))
     dmg = collections.Counter(a for _t, a, _d in out)
+    # quem bateu, do maior dano para o menor, e depois o resto do grupo, que não bate mas aparece na lista de
+    # eventos (o Cardeal com a Lex Aeterna, por exemplo)
+    order = sorted(dmg, key=lambda a: -dmg[a])
+    for a in [c.me] + list(x.party):
+        if a not in dmg and a not in order:
+            order.append(a)
     return dict(key=key, name=c.target_name(key), t0=t0, t1=t1, start=x.start, end=x.end, killed=x.killed,
                 out=out, taken=taken, hp=hp, hp_known=True, hp_max=x.hp, hp_label=x.hp_label, lanes=lanes,
                 events=events,
-                marks=sorted(marks), players=sorted(dmg, key=lambda a: -dmg[a]), party=set(x.party), dmg=dmg,
-                names={a: c.name_of(a) for a in dmg}, starts=starts, phase_dmg=dd.phase_damage(x),
+                marks=sorted(marks), players=order, party=set(x.party), dmg=dmg,
+                names={a: c.name_of(a) for a in order}, starts=starts, phase_dmg=dd.phase_damage(x),
                 lane_events=status_events(c, lanes))
 
 

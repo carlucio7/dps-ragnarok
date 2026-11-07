@@ -749,6 +749,28 @@ rows, total = contrib.fight(c, 61000)
 got = {r["efst"]: round(r["contrib"]) for r in rows}
 check(total == 5250000 and got.get(1183) == 1000000 and got.get(1142) == 500000 and got.get(730) == 750000,
       "contribuição: Pólen 100/250, Vício 50/250 do golpe de fogo; Garra 75/175 só no corpo a corpo -> %s" % got)
+# Lex Aeterna em sequência: o jogo liga o status uma vez e só desliga no fim, mas cada uso dobra o próximo golpe
+ev = [(0, fr.spawn(61000, "mob", BETEL, "Betelgeuse", boss=2)),
+      (1000, fr.skill_use(OTHER, 61000, 78)), (1000, fr.status(61000, 22, True, 600000, 600000, 1)),
+      (1100, fr.skill_damage(ME, 61000, 1000, skill=5473, hits=1)),
+      (1300, fr.skill_use(OTHER, 61000, 78)), (1350, fr.skill_damage(ME, 61000, 3000, skill=5473, hits=1)),
+      (1400, fr.skill_damage(ME, 61000, 5000, skill=5473, hits=1)),               # sem Lex: não dobra
+      (1600, fr.skill_use(OTHER, 61000, 78)), (1650, fr.skill_damage(ME, 61000, 2000, skill=5473, hits=1)),
+      (1650, fr.status(61000, 22, False)),
+      (2000, fr.status(61000, 22, True, 600000, 600000, 1)), (2100, fr.status(61000, 22, False)),   # gasta fora da tela
+      (2500, fr.skill_damage(ME, 61000, 7000, skill=5473, hits=1))]
+c = combat_of(fr.build(ME, ev)[0])
+rows, total = contrib.fight(c, 61000)
+lex = next(r for r in rows if r["efst"] == contrib.LEX)
+check(lex["hits"] == 3 and round(lex["contrib"]) == 3000 and lex["uptime"] is None,
+      "Lex Aeterna: 3 usos seguidos dobram 3 golpes (metade de 1000+3000+2000); a que sumiu sem golpe visto não "
+      "dobra o seguinte -> %d golpes, %s" % (lex["hits"], round(lex["contrib"])))
+crows, ctotal = contrib.credit(c, 61000)
+cred = {r["aid"]: r for r in crows}
+check(ctotal == 18000 and round(cred[OTHER]["total"]) == 3000 and round(cred[OTHER]["via"][contrib.LEX]) == 3000
+      and round(cred[ME]["own"]) == 15000 and round(sum(r["total"] for r in crows)) == 18000,
+      "dano creditado: quem pôs a Lex fica com o ganho dela (3000), quem bateu com o resto; soma 100%% -> %s"
+      % {k: round(v["total"]) for k, v in cred.items()})
 
 # --- visual de quem gravou (sprites do jogo) ------------------------------------
 import sprites  # noqa: E402

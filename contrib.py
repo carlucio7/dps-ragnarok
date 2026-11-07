@@ -14,6 +14,7 @@ import meter
 from i18n import _
 
 LEX = 22
+LEX_SKILLS = (78, 5072)       # Lex Aeterna e Vituperatum aplicam o status 22
 
 
 def _ele(bonus):
@@ -57,6 +58,36 @@ def _spans(c, aid, efst):
     return sorted((s, e, c.status_val.get((a, ef, s))) for a, ef, s, e in c.statuses(aid) if ef == efst)
 
 
+def lex_consumed(c, x):
+    """Golpes (id) que gastaram uma Lex Aeterna: cada aplicação no chefe dobra o próximo golpe com dano nele.
+
+    A aplicação é o uso da skill no chefe (Lex Aeterna, Vituperatum) ou o status ligando sem uso visto. Não dá para
+    usar só o status: com o Cardeal lançando várias por segundo, o jogo liga o status uma vez e só desliga no fim da
+    sequência, embora cada Lex seja gasta pelo golpe seguinte (no replay de 4 min, 2 trechos de status e 21 Lex
+    gastas, cada uma até ~200 ms depois do uso). Lex de novo num alvo que ainda tem uma não acumula."""
+    aids = set(x.boss_aids)
+    events = [(u[0], 0, u[3]) for u in c.uses if u[4] in LEX_SKILLS and u[3] in aids]
+    seen = {(t, a) for t, _k, a in events}
+    for a, ef, s, e in c.statuses():
+        if ef == LEX and a in aids:
+            if not any(abs(s - t) <= 300 and a == b for t, b in seen):
+                events.append((s, 0, a))
+            events.append((e, 2, a))                 # o status desligou: a Lex foi gasta (talvez fora da tela)
+    events += [(h.t, 1, h) for h in x.hits if h.dmg > 0]
+    events.sort(key=lambda e: (e[0], e[1]))          # no mesmo ms: uso, golpe e só depois o status desligando
+    # as fases do chefe nunca estão vivas juntas: uma Lex pendente vale para a luta
+    pending, out = False, set()
+    for _t, kind, obj in events:
+        if kind == 0:
+            pending = True
+        elif kind == 2:
+            pending = False
+        elif pending:
+            pending = False
+            out.add(id(obj))
+    return out
+
+
 def fight(c, key, rng=None, player=None):
     """Contribuição de cada efeito numa luta contra `key` (todos os jogadores ou só `player`).
     Devolve (linhas, dano total considerado)."""
@@ -75,7 +106,7 @@ def fight(c, key, rng=None, player=None):
         if k not in spans:
             spans[k] = _spans(c, aid, efst)
         return next((v for s, e_, v in spans[k] if s <= t < e_), False)
-    lex_used = set()
+    lex_hits = lex_consumed(c, x)
     for h in hits:
         if h.dmg <= 0:
             continue
@@ -98,14 +129,10 @@ def fight(c, key, rng=None, player=None):
             contrib[efst] += h.dmg * b / (100.0 + b)
             affected[efst] += h.dmg
             n[efst] += 1
-        # Lex Aeterna: dobra o primeiro golpe depois de aplicada
-        for s, e_, _v in spans.setdefault((h.dst_raw, LEX), _spans(c, h.dst_raw, LEX)):
-            if s <= h.t < e_ and (h.dst_raw, s) not in lex_used:
-                lex_used.add((h.dst_raw, s))
-                contrib[LEX] += h.dmg / 2.0
-                affected[LEX] += h.dmg
-                n[LEX] += 1
-                break
+        if id(h) in lex_hits:               # Lex Aeterna: este golpe veio dobrado
+            contrib[LEX] += h.dmg / 2.0
+            affected[LEX] += h.dmg
+            n[LEX] += 1
     rows = []
     wins = [w for p in x.phases for w in p["win"]]
     win_ms = dd._total(wins) or 1
@@ -116,15 +143,118 @@ def fight(c, key, rng=None, player=None):
         else:
             on = [(s, e_) for a in ([player] if player else x.party) for s, e_, _v in _spans(c, a, efst)]
         up = dd._total(dd._intersect(dd._merge(on), wins)) / float(win_ms) if on else 0.0
-        rule = EFFECTS[efst][1] if efst in EFFECTS else _("dobra o 1º golpe depois de aplicada")
+        rule = EFFECTS[efst][1] if efst in EFFECTS else _("dobra o próximo golpe depois de cada uso: %d golpes dobrados") % n[efst]
         if not on and not contrib[efst]:
             used = efst == dd.VOLCANIC_ASH and any(u[4] == dd.ASH_SKILL and x.start - 5000 <= u[0] <= x.end
                                                    for u in c.casts)
             if not used:
                 continue
             rule = _("usada, mas o status nunca apareceu no chefe: imune")
+        if efst == LEX:
+            up = None           # o status fica ligado na sequência inteira de Lex: "ativo" não diz nada aqui
         rows.append(dict(key=efst, efst=efst, name=meter.status_name(efst), where=where, rule=rule,
                          uptime=up, affected=affected[efst], contrib=contrib[efst], hits=n[efst],
                          share=contrib[efst] / float(total) if total else 0.0))
     rows.sort(key=lambda r: -r["contrib"])
+    return rows, total
+
+
+# --- dano creditado a cada jogador ------------------------------------------------------------------------------
+
+# skills que põem cada efeito no chefe (data/efst.json, do rAthena); o Avanço Sísmico deixa um status no chefe
+# (1402) que o rAthena não liga à skill
+APPLY_SKILLS = {1402: (5296,)}
+APPLY_WINDOW = (4000, 300)    # quem usou a skill até 4 s antes (ou 0,3 s depois) de o status aparecer no chefe
+
+
+def _apply_skills(efst):
+    if efst in APPLY_SKILLS:
+        return set(APPLY_SKILLS[efst])
+    return set((meter.EFST.get(str(efst)) or {}).get("s") or ())
+
+
+def appliers(c, x, efst):
+    """[(início, fim, quem pôs ou None)] dos trechos de um efeito no chefe: quem usou a skill que põe o efeito
+    logo antes de ele aparecer (uso, conjuração ou golpe da skill)."""
+    sk = _apply_skills(efst)
+    acts = sorted([(u[0], u[2]) for u in c.uses if u[4] in sk] + [(u[0], u[2]) for u in c.casts if u[4] in sk]
+                  + [(h.t, h.src) for h in c.hits if h.out and h.skill in sk])
+    before, after = APPLY_WINDOW
+    out = []
+    for p in x.phases:
+        for s, e, v in _spans(c, p["aid"], efst):
+            who = None
+            for t, a in acts:
+                if s - before <= t <= s + after:
+                    who = a
+            out.append((s, e, who, v))
+    return out
+
+
+def credit(c, key, rng=None):
+    """Dano creditado a cada jogador numa luta contra `key`: a parte do dano que é dele (os golpes dele sem os
+    efeitos dos outros) mais o que os efeitos que ele pôs renderam nos golpes de todo mundo.
+
+    Num golpe com vários efeitos, o ganho (dano − dano sem nenhum) é dividido entre eles pelo peso de cada
+    multiplicador (log): Lex ×2 e Pólen ×2 no mesmo golpe ficam com metade do ganho cada. Assim nada é contado
+    duas vezes e tudo soma 100% do dano. Devolve (linhas, dano total); linha: aid (None = quem pôs não aparece no
+    replay), own, via {efeito: dano}, total."""
+    import math
+    if not any(h.out and h.dst == key and an._in(rng, h.t) for h in c.hits):
+        return [], 0
+    x = dd.Ctx(c, key, rng)
+    e = c.entities.get(key)
+    boss = bool(e and (e.boss or c.is_mvp(key)))
+    boss_fx = {efst: appliers(c, x, efst) for efst, (where, _r, _f) in EFFECTS.items() if where == "boss"}
+    lex_hits = lex_consumed(c, x)
+    lex_uses = sorted((u[0], u[2]) for u in c.uses if u[4] in LEX_SKILLS and u[3] in x.boss_aids)
+    me_spans = {}
+    own, via = collections.Counter(), collections.defaultdict(collections.Counter)
+    total = 0
+    for h in x.hits:
+        if h.dmg <= 0:
+            continue
+        total += h.dmg
+        info = classify(x, h)
+        ele, mul = [], []
+        for efst, (where, _rule, fn) in EFFECTS.items():
+            if where == "boss":
+                on = [(who, v) for s, e_, who, v in boss_fx[efst] if s <= h.t < e_]
+                if not on:
+                    continue
+                who, v = on[-1]
+            else:
+                k = (h.src, efst)
+                if k not in me_spans:
+                    me_spans[k] = _spans(c, h.src, efst)
+                v = next((vv for s, e_, vv in me_spans[k] if s <= h.t < e_), False)
+                if v is False:
+                    continue
+                who = h.src                     # buff no próprio jogador (ex.: Investida do Engenheiro)
+            r = fn(info, v, boss)
+            if r is not None:
+                (ele if r[0] == "ele" else mul).append((efst, who, r[1]))
+        factors = []                            # (efeito, quem, multiplicador)
+        sum_ele = sum(b for _e, _w, b in ele)
+        if sum_ele:
+            whole = (100.0 + sum_ele) / 100.0   # os de elemento somam numa parcela só e dividem o log dela
+            factors += [(ef, who, whole ** (b / sum_ele)) for ef, who, b in ele]
+        factors += [(ef, who, (100.0 + b) / 100.0) for ef, who, b in mul]
+        if id(h) in lex_hits:
+            prev = [w for t, w in lex_uses if t <= h.t]
+            factors.append((LEX, prev[-1] if prev else None, 2.0))
+        f_all = 1.0
+        for _e, _w, m in factors:
+            f_all *= m
+        base = h.dmg / f_all
+        own[h.src] += base
+        if f_all > 1:
+            gain, ln_all = h.dmg - base, math.log(f_all)
+            for ef, who, m in factors:
+                via[who][ef] += gain * math.log(m) / ln_all
+    rows = []
+    for aid in set(own) | set(via):
+        v = dict(via.get(aid) or {})
+        rows.append(dict(aid=aid, own=own.get(aid, 0.0), via=v, total=own.get(aid, 0.0) + sum(v.values())))
+    rows.sort(key=lambda r: -r["total"])
     return rows, total

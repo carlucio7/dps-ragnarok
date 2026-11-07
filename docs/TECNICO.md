@@ -120,6 +120,8 @@ ranking** copia o ranking do recorte em texto (para colar no Discord/WhatsApp).
   (o efeito aparece só no curado): o Mediale Votum a cada 2 s e o Talismã de Proteção
   a cada 3 s (rAthena: `clif_skill_nodamage(nullptr, ...)`). A lista mostra "recebeu
   cura de um efeito", com a fonte provável pelo status ativo no curado.
+- **Lex Aeterna:** cada uso da skill no chefe (ou o status ligando sem uso visto) dobra o próximo golpe com dano nele; o status desligando sem golpe visto descarta a Lex. Não dá para contar pelo status: com várias Lex por segundo, o jogo liga o status uma vez e só desliga no fim da sequência (`contrib.lex_consumed`).
+- **Dano creditado a cada jogador** (`contrib.credit`): cada golpe vira dano próprio (o golpe sem nenhum efeito estimado) mais o ganho, que é dividido entre os efeitos pelo log do multiplicador de cada um (os de elemento dividem o log da parcela deles pelo bônus de cada um), então nada conta duas vezes e tudo soma 100%. O ganho de um efeito no chefe vai para quem usou a skill que o põe até 4 s antes de ele aparecer; a Lex, para quem usou a última Lex antes do golpe que a gastou. Por isso a Lex creditada pode ser menor que o "Rendeu" dela, que é quanto o dano cairia só sem ela.
 - **Comparar XP:** a outra gravação é a mesma pasta e o mesmo personagem (o id do
   personagem no cabeçalho), lida inteira numa thread; as duas usam a mesma lista de
   bônus.
