@@ -12,7 +12,7 @@ Medidor de DPS e análise de replays para Ragnarok Online (ROLatam).
 
 Um widget que mostra o seu DPS e o ranking do grupo em tempo real, lendo a gravação de replay do próprio jogo.
 
-- **Widget:** DPS ao vivo, ranking do grupo, skills, alvos, drops e XP. Fixe até duas informações para ver em qualquer aba.
+- **Widget:** DPS ao vivo, ranking do grupo, skills, alvos, drops e XP. Fixe até duas informações para ver em qualquer aba. Quando você morre, ele mostra o que te matou.
 - **Análise completa:** jogadores, monstros, equipamento, drops, XP, DPS no tempo, buffs, mortes e testes de build.
 - **Linha do tempo:** cada luta contra chefe com DPS, HP do chefe, debuffs, mortes e skills.
 - **Dedo Duro:** o que faltou nas lutas contra chefe (buffs, debuffs, Garra Sombria, mortes).
@@ -42,7 +42,7 @@ Um widget que mostra o seu DPS e o ranking do grupo em tempo real, lendo a grava
 
 A widget that shows your DPS and the party ranking in real time by reading the game's own replay recording.
 
-- **Widget:** live DPS, party ranking, skills, targets, drops and XP. Pin up to two pieces of info to see on any tab.
+- **Widget:** live DPS, party ranking, skills, targets, drops and XP. Pin up to two pieces of info to see on any tab. When you die, it shows what killed you.
 - **Full analysis:** players, monsters, equipment, drops, XP, DPS over time, buffs, deaths and build tests.
 - **Timeline:** each boss fight with DPS, boss HP, debuffs, deaths and skills.
 - **Snitch:** what was missing in boss fights (buffs, debuffs, Dark Claw, deaths).
@@ -59,7 +59,7 @@ A widget that shows your DPS and the party ranking in real time by reading the g
 
 Un widget que muestra tu DPS y el ranking del grupo en tiempo real, leyendo la grabación de replay del propio juego.
 
-- **Widget:** DPS en vivo, ranking del grupo, habilidades, objetivos, drops y XP. Fija hasta dos datos para verlos en cualquier pestaña.
+- **Widget:** DPS en vivo, ranking del grupo, habilidades, objetivos, drops y XP. Fija hasta dos datos para verlos en cualquier pestaña. Cuando mueres, muestra qué te mató.
 - **Análisis completo:** jugadores, monstruos, equipo, drops, XP, DPS en el tiempo, buffs, muertes y pruebas de build.
 - **Línea de tiempo:** cada pelea contra jefe con DPS, HP del jefe, debuffs, muertes y habilidades.
 - **Soplón:** qué faltó en las peleas contra jefes (buffs, debuffs, Garra Tenebrosa, muertes).

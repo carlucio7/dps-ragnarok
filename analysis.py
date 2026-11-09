@@ -133,10 +133,22 @@ def player_skills(c, rng, aid, dur_ms):
 # máxima). O replay não diz a dificuldade: ela é deduzida do dano (ver boss_hp) ou escolhida na análise.
 BOSS_LEVELS = {20994: [(_("Selado"), 500000000), (_("Nível 1"), 800000000), (_("Nível 2"), 1100000000),
                        (_("Nível 3"), 1400000000), (_("Nível 4"), 1700000000), (_("Nível 5"), 2000000000)]}
-BOSS_USUAL = {20994: 1}       # o nível que os grupos costumam fazer (Betelgeuse: todos os abates dos replays)
+# Aquila (Destruição da Aeronave): vida da wiki por dificuldade. A dificuldade vem da redução de dano do chefe
+# no estado normal (Alívio: 10% Econômica, 50% Executiva, 80% Primeira Classe; 99% é o modo de defesa).
+AQUILA = (21531, 21588)       # normal e em sobrecarga
+for _mob in AQUILA:
+    BOSS_LEVELS[_mob] = [(_("Econômica"), 300000000), (_("Executiva"), 500000000), (_("Primeira Classe"), 600000000)]
+RELIEVE_LEVEL = {_mob: {10: 0, 50: 1, 80: 2} for _mob in AQUILA}
+BOSS_USUAL = {20994: 1, 21531: 1, 21588: 1}   # o nível que os grupos costumam fazer (Betelgeuse: todos os abates)
 # Regeneração (fração do HP máx. por segundo). O replay não mostra o HP, mas nos abates o dano além do HP
 # cresce com a duração da luta: ~0,8M/s no Nível 1 (~6% do HP por minuto), mais ~18M de overkill.
 BOSS_REGEN = {20994: 0.001}
+# Chefes com regeneração só numa forma e dano que o replay não mostra (frações do HP máx.). Aquila: os valores mais
+# prováveis, ajustados em 5 lutas (2 abates e 1 luta incompleta na Executiva, 2 sem abate na Primeira Classe;
+# fecham com folga de ~0,5% do HP): regenera ~1,1% por segundo só em sobrecarga, e cada quebra de defesa (o
+# Tetra Vortex que ele lança em si mesmo) tira ~12%. Não é certeza: o replay não mostra o HP dele.
+BOSS_MODEL = {_mob: dict(regen=0.011, form=21588, hidden=0.12, hidden_skills=(2218, 2219, 2220, 2221))
+              for _mob in AQUILA}
 LEVEL_SLACK = 0.05            # folga do dano: overkill de cada fase, ou a morte que o replay não mostrou
 HP_CHOICE = {}                # (gravação, chave do chefe) -> nível escolhido na análise
 
@@ -167,6 +179,10 @@ def boss_hp(c, key, total, killed, dur_ms=0):
         pick = HP_CHOICE.get(_choice_key(c, key))
         if pick is not None:
             return levels[pick][1], levels[pick][0], _("escolhido")
+        by_relief = relieve_level(c, key)
+        if by_relief is not None:
+            i, pct = by_relief
+            return levels[i][1], levels[i][0], _("pela redução de dano do chefe (%d%%)") % pct
         grow = 1 + BOSS_REGEN.get(mob_id, 0) * dur_ms / 1000.0      # HP + o que regenerou na luta
         when = _dur(dur_ms)
         if killed and not midway:
@@ -192,6 +208,50 @@ def boss_hp(c, key, total, killed, dur_ms=0):
     if max_hp >= total:
         return max_hp, "", _("da base de dados")
     return total, "", _("no mínimo o dano visto")
+
+
+def relieve_level(c, key):
+    """(índice da dificuldade, %) pela redução de dano do chefe no estado normal, ou None (chefe sem essa regra)."""
+    e = c.entities.get(key)
+    table = RELIEVE_LEVEL.get(e.job if e is not None else 0)
+    if not table:
+        return None
+    aids = {key} | {k for k, v in c.alias.items() if v == key}
+    vals = sorted({c.status_val.get((a, ef, s), 0) for a, ef, s, _e in c.statuses() if a in aids and ef == 1166})
+    for v in vals:
+        if v in table:
+            return table[v], v
+    return None
+
+
+def form_windows(c, aids, form, start, end):
+    """[(início, fim)] em que o chefe estava na forma `form` (pelas trocas de sprite; a forma ao aparecer conta)."""
+    out, on, since = [], False, start
+    first = [c.entities[a].job for a in aids if a in c.entities]
+    if first and first[0] == form:
+        on = True
+    for t, cls in sorted(x for a in aids for x in c.sprite_log.get(a, ())):
+        if t > end:
+            break
+        if cls == form and not on:
+            on, since = True, max(start, t)
+        elif cls != form and on:
+            on = False
+            if t > since:
+                out.append((since, t))
+    if on:
+        out.append((since, end))
+    return out
+
+
+def hidden_hits(c, aids, skills, start, end):
+    """Instantes em que o chefe usou em si mesmo uma skill que tira vida sem pacote de dano (um por quebra)."""
+    out = []
+    for u in sorted(c.uses):
+        if start <= u[0] <= end and u[4] in skills and (u[1] in aids or u[2] in aids) and u[3] in aids:
+            if not out or u[0] - out[-1] > 2000:
+                out.append(u[0])
+    return out
 
 
 def hp_levels(c, key):
@@ -597,6 +657,11 @@ def death_recap(c, aid, t):
     if killing is not None:
         before = [s for s in hp if s[0] <= killing.t]
         hp_before = before[-1][1] if before else None
+        # o pacote do golpe chega antes de a vida cair (às vezes mais de 1 s, ex.: Dor Máxima); uma cura no meio
+        # muda a vida que ele encontrou, então vale a última leitura (com vida) antes da morte
+        later = [s for s in hp if killing.t < s[0] < t and s[1] > 1]
+        if later:
+            hp_before = later[-1][1]
     overkill = max(0, killing.dmg - hp_before) if killing is not None and hp_before is not None else 0
     # o último golpe visível não bastava para matar: foi algo fora da tela ou um efeito
     unclear = killing is not None and hp_before is not None and killing.dmg < hp_before
@@ -677,6 +742,144 @@ def death_recap(c, aid, t):
         no_hit=killing is None and lethal is None, hp_loss=hp_loss, unclear=unclear,
         fusion=fusion, hp_last=hp_last, hp_pct=hp_pct, fusion_cost=fusion_cost,
     )
+
+
+DEATH_CARD_MS = 5000      # o resumo de morte do widget olha os 5 s antes da morte
+HEALED_FRAC = 0.95        # ...mas se a vida voltou a 95% ou mais nesse meio tempo, o que veio antes não conta
+MAXPAIN_ATK = 717         # reflexo da Dor Máxima: ~11% de um golpe no chefe, no mesmo instante, em todos em volta
+MAXPAIN_RATIO = (0.08, 0.14, 0.11)
+MIXED_ELEMENT_SKILLS = {2217}   # Tetra Vortex: um golpe de cada propriedade (fogo, água, vento, terra)
+
+
+def element_name(el):
+    """Nome da propriedade para mostrar ('' quando não se sabe)."""
+    if not el:
+        return ""
+    if el == "Mixed":
+        return _("várias")
+    import dedoduro
+    return dedoduro.ELEMENT_PT.get(el, el)
+
+
+def attack_element(c, src, skill):
+    """Propriedade de um ataque de monstro: a fixa da skill; ataque básico e skills que usam a arma são neutros
+    (monstro não tem arma). Para jogadores (arma desconhecida) devolve None."""
+    import dedoduro                     # importa aqui: dedoduro importa este módulo
+    if skill in MIXED_ELEMENT_SKILLS:
+        return "Mixed"
+    el = dedoduro.hit_element(skill)
+    if el != "Weapon":
+        return el
+    e = c.entities.get(src)
+    return None if src == c.me or (e is not None and e.kind == "pc") else "Neutral"
+
+
+def death_window_start(c, aid, t, max_hp=None, window=DEATH_CARD_MS):
+    """Desde quando o dano conta para a morte em `t`: os `window` ms antes, cortados na última vez que a vida
+    voltou a 95% ou mais (ex.: tomou um Cometa, se curou e morreu num Tetra Vortex: só o Tetra conta) ou
+    na morte anterior (morreu, voltou e morreu de novo)."""
+    start = t - window
+    prev = None
+    for st, hp, mx in c.hp_log.get(aid, []):
+        if hp is None or st >= t:
+            continue
+        top = mx or max_hp
+        # só uma subida até 95%+ é cura: uma leitura de vida cheia logo depois de um golpe pode ser só o dano que
+        # ainda não caiu (o jogo manda o golpe antes de tirar a vida), e esse golpe tem que contar
+        if start < st and top and hp >= HEALED_FRAC * top and prev is not None and hp > prev:
+            start = st
+        prev = hp
+    for dt, a in c.death_log:
+        if a == aid and start < dt < t:
+            start = dt
+    return start
+
+
+def death_card(c, aid, t, window=DEATH_CARD_MS):
+    """Resumo curto de uma morte para o widget: o golpe final e as principais fontes de dano nos `window` ms antes
+    (desde a última cura até 95% da vida, se houve), agrupadas por (monstro, skill), com a propriedade do ataque e a
+    parte de cada uma no dano recebido."""
+    rec = death_recap(c, aid, t)
+    start = death_window_start(c, aid, t, rec["max_hp"], window)
+    groups = collections.OrderedDict()
+
+    def add(name, skill, element, dmg, src=None):
+        g = groups.setdefault((name, skill), dict(source=name, skill=skill, element=element, dmg=0, hits=0,
+                                                  mobs=set(), killing=False, job=None))
+        g["dmg"] += dmg
+        g["hits"] += 1
+        if src is not None:
+            g["mobs"].add(src)
+            e = c.entities.get(src)
+            if g["job"] is None and e is not None and e.kind != "pc" and src != c.me:
+                g["job"] = e.job
+
+    # o golpe que matou sempre conta: às vezes a vida só cai mais de 1 s depois do pacote do golpe, e uma cura no
+    # meio desse tempo pareceria "antes" dele
+    kh = next((h for h in reversed(c.hits) if not h.out and h.dst_raw == aid and h.dmg > 0 and not h.miss
+               and t - 3000 <= h.t <= t + 300), None)
+    for h in c.hits:
+        if h.out or h.dst_raw != aid or h.miss or h.dmg <= 0 or not (start < h.t <= t + 300 or h is kh):
+            continue
+        add(c.name_of(h.src), meter.skill_name(h.skill), attack_element(c, h.src, h.skill), h.dmg, h.src)
+    for r in rec["rows"]:                # armadilhas e HP perdido sem golpe visível
+        if r["kind"] == "dano" and t + r["rel"] > start and r["dmg"] and r["source"] in (
+                TRAP_NAME, _("Sem golpe visível")):
+            add(r["source"], _("Armadilha") if r["source"] == TRAP_NAME else _("HP perdido"), None, r["dmg"])
+    hp_seen = [(st, hp) for st, hp, mx in c.hp_log.get(aid, []) if start <= st <= t + 300 and hp is not None]
+    if not groups and rec["no_hit"]:
+        # a vida caiu sem nenhum golpe no replay (efeito do mapa, algo fora da tela...): mostra quanto caiu
+        before = [hp for st, hp in hp_seen if st < t and hp]
+        if before:
+            add(_("Sem golpe visível"), _("HP perdido"), None, before[-1])
+    fusion = None
+    if rec["fusion"]:
+        # União Solar, Lunar e Estelar: cada ataque custa 2% da vida e atacar com 20% ou menos mata. O que a vida
+        # caiu além dos golpes é dela, e é ela que matou
+        drops = sum(max(0, a[1] - b[1]) for a, b in zip(hp_seen, hp_seen[1:]))
+        hit_dmg = sum(g["dmg"] for g in groups.values())
+        cost = max(0, drops - hit_dmg) or rec["hp_last"] or 0
+        add(_("União Solar"), _("custo de HP dos ataques"), None, cost)
+        fusion = groups[(_("União Solar"), _("custo de HP dos ataques"))]
+    total = sum(g["dmg"] for g in groups.values())
+    killer = c.name_of(_killer_aid(c, aid, t) or 0)
+    for g in groups.values():
+        g["share"] = g["dmg"] / float(total) if total else 0.0
+        g["count"] = len(g["mobs"])
+        if fusion is not None:
+            g["killing"] = g is fusion
+        else:
+            g["killing"] = (g["source"] == (TRAP_NAME if rec["trap"] else killer) and g["skill"] == rec["skill"])
+        del g["mobs"]
+    sources = sorted(groups.values(), key=lambda g: -g["dmg"])
+    # Dor Máxima: o golpe no chefe que foi refletido (mesmo instante, o reflexo é ~11% dele)
+    reflected = None
+    if kh is not None and kh.skill == MAXPAIN_ATK and fusion is None:
+        lo, hi, mid = MAXPAIN_RATIO
+        trig = [h for h in c.hits if h.out and h.dst == kh.src and h.dmg > 0 and kh.t - 60 <= h.t <= kh.t + 30
+                and lo <= kh.dmg / float(h.dmg) <= hi]
+        if trig:
+            h = min(trig, key=lambda x: abs(kh.dmg / float(x.dmg) - mid))
+            reflected = dict(who=c.name_of(h.src), mine=h.src == aid, skill=meter.skill_name(h.skill), dmg=h.dmg)
+    # o monstro do desenho: o do golpe final; numa armadilha, o que mais bateu; na União, nenhum (foi ela que matou)
+    kill = next((g for g in sources if g["killing"]), None)
+    sprite_mob = kill["job"] if kill is not None and kill["job"] else (None if fusion is not None else next(
+        (g["job"] for g in sources if g["job"]), None))
+    # quantas vezes `aid` já morreu neste encontro (contando esta): o título do widget vai mudando
+    encs = [e for e in c.encounters() if e.start <= t]
+    since = encs[-1].start if encs else 0
+    nth = max(1, sum(1 for dt, a in c.death_log if a == aid and since <= dt <= t))
+    return dict(rec, sources=sources, total=total, hits=sum(g["hits"] for g in sources), window=t - start, nth=nth,
+                healed=start > t - window, reflected=reflected,
+                killing_element=kill["element"] if kill is not None else None, sprite_mob=sprite_mob)
+
+
+def _killer_aid(c, aid, t):
+    """Quem deu o último golpe com dano (até 3 s antes da morte)."""
+    for h in reversed(c.hits):
+        if not h.out and h.dst_raw == aid and h.dmg > 0 and t - 3000 <= h.t <= t + 300:
+            return h.src
+    return None
 
 
 def deaths(c, rng=None):

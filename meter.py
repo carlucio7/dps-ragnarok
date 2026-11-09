@@ -522,11 +522,14 @@ class Combat:
         self._miracle = None          # o que está valendo agora
         self.status_len = {}          # (aid, efst, início) -> duração prevista (ms)
         self.alert_seq = 0
+        self.death_alerts = {}        # nº do aviso de morte -> (aid, t), para o resumo da morte no widget
+        self.level_ups = []           # (t, nível novo) de quem grava
         self._alerted = {}
         self.bag = {}                 # slot da bolsa -> Item
         self.worn = {}                # bit do slot -> Item
         self.equip_log = [(0, {})]    # (t, {bit: Item}) a cada troca
         self.options = collections.defaultdict(list)   # aid -> [(t, opções)] (União = OPTION_FLYING)
+        self.sprite_log = collections.defaultdict(list)  # aid -> [(t, forma nova)] (monstros que mudam de forma)
         self.max_hp_seen = {}
         self._fusion_armed = [True, True]
         if session.option:
@@ -657,6 +660,11 @@ class Combat:
                 if r[1] in rrf.MAP_DAMAGE_EFFECTS:
                     self.trap_log.append((t, r[0]))
                     self.version += 1
+        elif pid == rrf.P_SPRITE:
+            if len(d) >= 11:
+                aid, _kind, cls = struct.unpack_from("<IBI", d, 2)
+                self.sprite_log[aid].append((t, cls))
+                self.version += 1
         elif pid == rrf.P_OPTION:
             r = rrf.parse_option(d)
             if r is not None:
@@ -722,6 +730,12 @@ class Combat:
             r = rrf.parse_param(d)
             if r is not None and r[0] in (rrf.SP_HP, rrf.SP_MAXHP):
                 self.on_hp(t, self.me, r[1] if r[0] == rrf.SP_HP else None, r[1] if r[0] == rrf.SP_MAXHP else None)
+            elif r is not None and r[0] == rrf.SP_BASELEVEL:
+                # subiu de nível: a XP volta a ser exata (o jogo não grava a XP, mas a de cada nível é conhecida)
+                last = self.level_ups[-1][1] if self.level_ups else self.session.base_level
+                if last and r[1] > last:
+                    self.level_ups.append((t, r[1]))
+                    self.version += 1
         elif pid == rrf.P_PARTY_HP:
             r = rrf.parse_party_hp(d)
             if r is not None:
@@ -950,6 +964,7 @@ class Combat:
         if rec["overkill"] and not rec["fusion"] and not rec["trap"]:
             text += _(" · overkill %s") % _num(rec["overkill"])
         self.alert(t, "death", text)
+        self.death_alerts[self.alert_seq] = (self.me, t)     # o widget monta o resumo da morte com isso
 
     def alert(self, t, kind, text):
         self.alert_seq += 1
@@ -1429,7 +1444,7 @@ def xp_after(path, session):
         gain = exp - session.base_exp
     elif level == session.base_level + 1 and session.next_exp:
         gain = session.next_exp - session.base_exp + exp
-    return dict(path=p, when=when, gain=gain, levels=level - session.base_level)
+    return dict(path=p, when=when, gain=gain, levels=level - session.base_level, level=level, exp=exp)
 
 
 def level_progress(session):

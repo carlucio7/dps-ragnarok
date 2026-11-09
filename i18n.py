@@ -244,6 +244,60 @@ CATALOG = {
     "Você": ("You", "Tú"),
     "%s acabou": ("%s ended", "%s terminó"),
     "Você morreu": ("You died", "Moriste"),
+    "VOCÊ MORREU": ("YOU DIED", "MORISTE"),
+    "MORREU DE NOVO": ("DEAD AGAIN", "MORISTE OTRA VEZ"),
+    "DE NOVO?!": ("AGAIN?!", "¿¡OTRA VEZ!?"),
+    "MELHORE": ("GIT GUD", "MEJORA"),
+    "JÁ É HÁBITO": ("IT'S A HABIT NOW", "YA ES COSTUMBRE"),
+    "O CHÃO TE CONHECE": ("THE FLOOR KNOWS YOU", "EL SUELO TE CONOCE"),
+    "SALVOU NA KAFRA?": ("SAVED AT KAFRA?", "¿GUARDASTE EN KAFRA?"),
+    "MODO TAPETE ATIVADO": ("RUG MODE: ON", "MODO ALFOMBRA: ON"),
+    "%d MORTES. RESPEITO.": ("%d DEATHS. RESPECT.", "%d MUERTES. RESPETO."),
+    "várias": ("mixed", "varias"),
+    "HP perdido": ("HP lost", "HP perdido"),
+    "custo de HP dos ataques": ("HP cost of attacking", "costo de HP de los ataques"),
+    "União Solar": ("Solar Union", "Unión Solar"),
+    "Clique: fechar · botão direito: desligar o resumo da morte": (
+        "Click: close · right-click: turn off the death summary",
+        "Clic: cerrar · clic derecho: desactivar el resumen de la muerte"),
+    "%s em %d golpes nos últimos %s": ("%s in %d hits in the last %s", "%s en %d golpes en los últimos %s"),
+    "%s em %d golpe nos últimos %s": ("%s in %d hit in the last %s", "%s en %d golpe en los últimos %s"),
+    "overkill %s": ("overkill %s", "overkill %s"),
+    "Fechar este resumo": ("Close this summary", "Cerrar este resumen"),
+    "Não mostrar mais o resumo da morte": ("Stop showing the death summary", "No mostrar más el resumen de la muerte"),
+    "Ver todas as mortes na análise…": ("See every death in the analysis…", "Ver todas las muertes en el análisis…"),
+    "Mostrar o que me matou por 10 s (resumo da morte)": ("Show what killed me for 10 s (death summary)",
+                                                          "Mostrar qué me mató por 10 s (resumen de la muerte)"),
+    "União Solar: atacou com %s de HP": ("Solar Union: attacked with %s HP", "Unión Solar: atacó con %s de HP"),
+    "Golpe final: %s": ("Final blow: %s", "Golpe final: %s"),
+    "Último golpe visível: %s": ("Last visible hit: %s", "Último golpe visible: %s"),
+    "agora (estimado)": ("now (estimated)", "ahora (estimado)"),
+    "calculando…": ("calculating…", "calculando…"),
+    "10 min de farm ou 1%": ("10 min of farming or 1%", "10 min de farmeo o 1%"),
+    "depois de 10 min de farm ou 1% do nível": ("after 10 min of farming or 1% of the level",
+                                                "después de 10 min de farmeo o 1% del nivel"),
+    "%s agora (estimado)": ("%s now (estimated)", "%s ahora (estimado)"),
+    "lista × %s, da subida de nível desta gravação": ("list × %s, from this recording's level-up",
+                                                      "lista × %s, de la subida de nivel de esta grabación"),
+    "lista × %s, de %d medidas": ("list × %s, from %d measurements", "lista × %s, de %d medidas"),
+    "lista × %s (subida de nível nesta gravação)": ("list × %s (level-up in this recording)",
+                                                    "lista × %s (subida de nivel en esta grabación)"),
+    "lista × %s (%d medidas de 10 min ou mais)": ("list × %s (%d measurements of 10 min or more)",
+                                                  "lista × %s (%d medidas de 10 min o más)"),
+    "ainda sem subida de nível ou duas gravações seguidas de 10 min ou mais": (
+        "no level-up or two back-to-back recordings of 10 min or more yet",
+        "todavía sin subida de nivel ni dos grabaciones seguidas de 10 min o más"),
+    "↩ refletiu %s · %s · %s": ("↩ reflected %s · %s · %s", "↩ reflejó %s · %s · %s"),
+    "você": ("you", "tú"),
+    "Econômica": ("Economy", "Económica"),
+    "Executiva": ("Business", "Ejecutiva"),
+    "Primeira Classe": ("First Class", "Primera Clase"),
+    "pela redução de dano do chefe (%d%%)": ("from the boss's damage reduction (%d%%)",
+                                             "por la reducción de daño del jefe (%d%%)"),
+    "Sem golpe visível: a vida caiu sem um ataque no replay": (
+        "No visible hit: HP dropped with no attack in the replay", "Sin golpe visible: la vida bajó sin un ataque en el replay"),
+    "Causa incerta: o último golpe visível não bastava": ("Unclear cause: the last visible hit wasn't enough",
+                                                         "Causa incierta: el último golpe visible no bastaba"),
     ": armadilha do mapa": (": map trap", ": trampa del mapa"),
     ": União Solar (atacou com %s de HP)": (": União Solar (attacked at %s HP)", ": União Solar (atacó con %s de HP)"),
     "pouco": ("low", "poco"),
@@ -1095,14 +1149,15 @@ CATALOG = {
     # buffs e debuffs: quanto cada efeito rendeu
     "Buffs e Debuffs": ("Buffs and Debuffs", "Buffs y Debuffs"),
     "Rendeu = quanto o dano cairia sem o efeito, pela fórmula de cada um (rAthena e textos do jogo), golpe a golpe e "
-    "só onde ele vale (fogo, físico, corpo a corpo...). É estimativa: os que não mudam o dano direto (Bênção, "
-    "Agilidade...) aparecem só com o tempo ativo.": (
+    "só onde ele vale (fogo, físico, corpo a corpo...). É estimativa: os buffs cujo ganho depende de atributos que o "
+    "replay não mostra (Competentia, Benedictum, Bênção, Agilidade...) aparecem só com o tempo ativo.": (
         "Gain = how much damage would drop without the effect, by each one's formula (rAthena and the game's texts), "
-        "hit by hit and only where it applies (fire, physical, melee...). It's an estimate: the ones that don't change "
-        "damage directly (Blessing, Agility...) only show their active time.",
+        "hit by hit and only where it applies (fire, physical, melee...). It's an estimate: buffs whose gain depends "
+        "on stats the replay doesn't show (Competentia, Benedictum, Blessing, Agility...) only show their active time.",
         "Rindió = cuánto bajaría el daño sin el efecto, según la fórmula de cada uno (rAthena y textos del juego), "
-        "golpe a golpe y solo donde aplica (fuego, físico, cuerpo a cuerpo...). Es una estimación: los que no cambian "
-        "el daño directo (Bendición, Agilidad...) solo muestran el tiempo activo."),
+        "golpe a golpe y solo donde aplica (fuego, físico, cuerpo a cuerpo...). Es una estimación: los buffs cuya "
+        "ganancia depende de atributos que el replay no muestra (Competentia, Benedictum, Bendición, Agilidad...) solo "
+        "muestran el tiempo activo."),
     "Rendeu": ("Gain", "Rindió"),
     "Ativo": ("Active", "Activo"),
     "Como conta": ("How it counts", "Cómo cuenta"),
@@ -1314,20 +1369,23 @@ CATALOG = {
     "que você ajudou a matar (rAthena e Divine Pride), com a penalidade de nível e a sua parte do dano, vezes os "
     "bônus. Os bônus de XP somam entre si, e o Milagre multiplica o total (com +100%, dobra); os manuais e outros "
     "consumíveis competem entre si (vale o maior). O replay mostra quando VIP, Cetro, Kafra Buff, manual, Banquete de "
-    "Njord e Milagre estão ativos, mas não o evento do servidor: marque-o. \"Medido\" usa a XP exata entre duas "
-    "gravações seguidas do mesmo personagem.": (
+    "Njord e Milagre estão ativos, mas não o evento do servidor: marque-o. \"Medido\" corrige a lista com a XP "
+    "exata: cada subida de nível (a XP de cada nível é conhecida) e duas gravações seguidas do mesmo personagem; "
+    "trechos com menos de 10 min não contam.": (
         "The replay doesn't store XP gained: only the total XP at the start of each recording. The estimate adds up "
         "the XP of each monster you helped kill (rAthena and Divine Pride), with the level penalty and your share of "
         "the damage, times the bonuses. XP bonuses add up, and the Miracle multiplies the total (+100% doubles it); "
         "manuals and other consumables compete (the highest one counts). The replay shows when VIP, Scepter, Kafra "
         "Buff, a manual, Njord's Feast and the Miracle are active, but not the server event: tick it. \"Measured\" "
-        "uses the exact XP between two back-to-back recordings of the same character.",
+        "corrects the list with exact XP: every level-up (each level's XP is known) and two back-to-back recordings "
+        "of the same character; stretches shorter than 10 min don't count.",
         "El replay no graba la XP ganada: solo la XP total al inicio de cada grabación. La estimación suma la XP de "
         "cada monstruo que ayudaste a matar (rAthena y Divine Pride), con la penalización de nivel y tu parte del "
         "daño, por los bonos. Los bonos de XP se suman, y el Milagro multiplica el total (con +100%, lo duplica); "
         "los manuales y otros consumibles compiten entre sí (vale el mayor). El replay muestra cuándo están activos "
         "VIP, Cetro, Kafra Buff, un manual, el Banquete de Njord y el Milagro, pero no el evento del servidor: "
-        "márcalo. \"Medido\" usa la XP exacta entre dos grabaciones seguidas del mismo personaje."),
+        "márcalo. \"Medido\" corrige la lista con la XP exacta: cada subida de nivel (la XP de cada nivel se "
+        "conoce) y dos grabaciones seguidas del mismo personaje; los tramos de menos de 10 min no cuentan."),
     # Milagre Solar, Lunar e Estelar e bônus de XP dos itens
     "auto": ("auto", "auto"),
     "lendo os itens do jogo…": ("reading the game's items…", "leyendo los ítems del juego…"),
@@ -1495,18 +1553,19 @@ CATALOG = {
     "Dano creditado a cada jogador": ("Damage credited to each player", "Daño atribuido a cada jugador"),
     "Creditado = a parte do dano que é do próprio jogador (os golpes dele sem os efeitos dos outros) mais o que os "
     "efeitos que ele pôs renderam nos golpes de todos: Cometa, Pólen, Garra Sombria, Avanço Sísmico, Lex Aeterna... "
-    "Quando vários efeitos valem no mesmo golpe, o ganho é dividido entre eles, então tudo soma 100%. Buffs que não "
-    "mudam o dano direto (Bênção, Agilidade...) não entram. É estimativa, e só conta o que aparece no replay.": (
+    "Quando vários efeitos valem no mesmo golpe, o ganho é dividido entre eles, então tudo soma 100%. Ficam de fora "
+    "os buffs cujo ganho depende de atributos que o replay não mostra (Competentia, Benedictum, Bênção, Agilidade...). "
+    "É estimativa, e só conta o que aparece no replay.": (
         "Credited = the player's own share of the damage (their hits without the others' effects) plus what the "
         "effects they applied added to everyone's hits: Comet, Pólen, Garra Sombria, Avanço Sísmico, Lex Aeterna... "
         "When several effects count on the same hit, the gain is split between them, so everything adds up to 100%. "
-        "Buffs that don't change damage directly (Blessing, Agility...) aren't included. It's an estimate, and only "
-        "counts what shows in the replay.",
+        "Buffs whose gain depends on stats the replay doesn't show (Competentia, Benedictum, Blessing, Agility...) "
+        "are left out. It's an estimate, and only counts what shows in the replay.",
         "Atribuido = la parte del daño que es del propio jugador (sus golpes sin los efectos de los demás) más lo "
         "que los efectos que puso aportaron a los golpes de todos: Cometa, Pólen, Garra Sombria, Avanço Sísmico, Lex "
         "Aeterna... Cuando varios efectos valen en el mismo golpe, la ganancia se reparte entre ellos, así que todo "
-        "suma 100%. Los buffs que no cambian el daño directo (Bendición, Agilidad...) no entran. Es una estimación, y "
-        "solo cuenta lo que aparece en el replay."),
+        "suma 100%. Quedan fuera los buffs cuya ganancia depende de atributos que el replay no muestra (Competentia, "
+        "Benedictum, Bendición, Agilidad...). Es una estimación, y solo cuenta lo que aparece en el replay."),
     "Nenhuma luta contra chefe no recorte.": ("No boss fight in the range.", "Ninguna pelea contra jefe en el recorte."),
     "(quem pôs não aparece)": ("(applier not in the replay)", "(quien lo puso no aparece)"),
     "próprio %s": ("own %s", "propio %s"),

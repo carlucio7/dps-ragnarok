@@ -349,6 +349,7 @@ P_WEAR = 0x0999            # equipou
 P_TAKEOFF = 0x099A         # desequipou
 P_ITEM_ADD = 0x0A37        # item entrou na bolsa
 P_OPTION = 0x0229          # opções visuais de uma unidade (montaria, falcão, "voando" da União...)
+P_SPRITE = 0x01B0          # ZC_SPRITE_CHANGE: monstro trocou de forma (ex.: Aquila em sobrecarga = 21588)
 P_EFFECT = 0x01F3          # efeito especial numa unidade
 P_RESURRECT = 0x0148       # jogador ressuscitou
 # Efeitos de mapa que tiram HP sem pacote de dano (o replay só traz o efeito e a queda de HP).
@@ -375,7 +376,7 @@ POSITION_PACKETS = {P_MOVE_SELF, P_STOP} | P_SLIDE
 STATUS_PACKETS = {P_STATUS, P_STATUS2, P_STATUS3}
 WANTED = DAMAGE_PACKETS | SPAWN_PACKETS | SKILL_USE_PACKETS | CAST_PACKETS | STATUS_PACKETS | POSITION_PACKETS | ITEM_PACKETS | {
     P_VANISH, P_MAPMOVE, P_GROUND_UNIT, P_HP_INFO, 0x010F, P_PARAM, P_PARTY_HP, P_WEAR, P_TAKEOFF, P_ITEM_ADD,
-    P_OPTION, P_EFFECT, P_RESURRECT}
+    P_OPTION, P_EFFECT, P_RESURRECT, P_SPRITE}
 
 
 def posdir(b):
@@ -405,6 +406,7 @@ def spawn_move(pid, d):
     except (struct.error, IndexError):
         return None
 SP_HP, SP_MAXHP = 5, 6
+SP_BASELEVEL = 11          # 0x00b0: nível de base (chega quando quem grava sobe de nível)
 
 OBJ_KIND = {0: "pc", 5: "mob", 6: "npc", 7: "pet", 8: "homun", 9: "merc", 10: "elem",
             0xD: "abr", 0xE: "bionic"}

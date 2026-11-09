@@ -350,6 +350,47 @@ check(len(dr) == 1 and dr[0]["hit"] == 50000 and dr[0]["hp_before"] == 30000 and
       "recap de morte: golpe 50.000 com 30.000 de HP = overkill 20.000")
 check(any(t.startswith("Você morreu") and "overkill 20,0K" in t for t in texts), "aviso de morte com overkill")
 
+# --- resumo da morte no widget: 5 s antes, cortados na última cura até 95% da vida ---------------------
+COMET, TETRA = 2213, 2217
+
+
+def death_events(heal, to=98000):
+    ev = [(0, fr.spawn(MOB, "mob", 1002, "Poring")),
+          (100, fr.hp(100000, rrf.SP_MAXHP)), (110, fr.hp(100000)),
+          (500, fr.skill_damage(MOB, ME, 5000, skill=COMET, hits=1)),     # mais de 5 s antes da morte
+          (550, fr.hp(95000)),
+          (2000, fr.skill_damage(MOB, ME, 60000, skill=COMET, hits=1)),
+          (2050, fr.hp(35000))]
+    if heal:
+        ev.append((3000, fr.hp(to)))                                      # curou até 98% (ou só 90%)
+    ev += [(6000, fr.skill_damage(MOB, ME, 120000, skill=TETRA, hits=1)), (6100, fr.vanish(ME, 1))]
+    return ev
+
+
+for heal in (True, False):
+    cd = combat_of(fr.build(ME, death_events(heal))[0])
+    dt = next(t for t, a in cd.death_log if a == ME)
+    card = an.death_card(cd, ME, dt)
+    skills = sorted(g["skill"] for g in card["sources"])
+    if heal:
+        check(skills == ["Tetra Vortex"] and card["healed"] and card["window"] == dt - 3000 and cd.death_alerts,
+              "resumo da morte: curou até 98%% depois do Cometa, só o Tetra Vortex conta (%s, %d ms)" % (
+                  skills, card["window"]))
+    else:
+        check(skills == ["Cometa", "Tetra Vortex"] and not card["healed"] and card["window"] == 5000
+              and card["sources"][0]["skill"] == "Tetra Vortex" and card["sources"][1]["dmg"] == 60000,
+              "resumo da morte: sem cura, os 5 s antes (o Cometa de 5,6 s antes fica de fora): %s" % skills)
+cd = combat_of(fr.build(ME, death_events(True, to=90000))[0])
+dt = next(t for t, a in cd.death_log if a == ME)
+card = an.death_card(cd, ME, dt)
+check(sorted(g["skill"] for g in card["sources"]) == ["Cometa", "Tetra Vortex"] and not card["healed"],
+      "resumo da morte: curou só até 90% (menos de 95%), o Cometa continua contando")
+again = death_events(False) + [(7000, fr.resurrect(ME)), (7100, fr.hp(50000)),
+                               (8000, fr.skill_damage(MOB, ME, 90000, skill=TETRA, hits=1)), (8100, fr.vanish(ME, 1))]
+cd = combat_of(fr.build(ME, again)[0])
+nths = [an.death_card(cd, ME, t)["nth"] for t, a in cd.death_log if a == ME]
+check(nths == [1, 2], "resumo da morte: a 2ª morte no mesmo encontro é contada (muda o título): %s" % nths)
+
 # --- União Solar, Lunar e Estelar (Mestre Taekwon) -----------------------------
 MAXHP = 100000
 events = [(0, fr.spawn(MOB, "mob", 21068, "Dummy - Dragão")), (100, fr.hp(MAXHP, rrf.SP_MAXHP)), (100, fr.hp(MAXHP))]
@@ -853,13 +894,13 @@ check(xpmod.penalty(255 - 246) == 135 and xpmod.penalty(44 - 240) == 10 and xpmo
       "XP: penalidade de nível (rAthena / Divine Pride)")
 with tempfile.TemporaryDirectory() as tmp:
     ev = []
-    for i, aid in enumerate((52001, 52002, 52003)):
-        ev += [(i * 1000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 1000 + 300, fr.skill_damage(ME, aid, 5000)),
-               (i * 1000 + 400, fr.vanish(aid, 1))]
-    ev += [(3500, fr.spawn(52004, "mob", 1124, "Goblin")), (3600, fr.skill_damage(OTHER, 52004, 5000)),
-           (3700, fr.vanish(52004, 1))]                                    # morto por outro: sem XP
+    for i, aid in enumerate((52001, 52002, 52003)):                       # 3 abates em 10 min (trecho que calibra)
+        ev += [(i * 300000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 300000 + 300, fr.skill_damage(ME, aid, 5000)),
+               (i * 300000 + 400, fr.vanish(aid, 1))]
+    ev += [(620000, fr.spawn(52004, "mob", 1124, "Goblin")), (620100, fr.skill_damage(OTHER, 52004, 5000)),
+           (620200, fr.vanish(52004, 1))]                                  # morto por outro: sem XP
     for name, date, exp, events in (("a.rrf", (2026, 11, 5, 19, 35, 0), 1000, ev),
-                                    ("b.rrf", (2026, 11, 5, 19, 35, 20), 1000 + 306, [])):
+                                    ("b.rrf", (2026, 11, 5, 19, 45, 40), 1000 + 306, [])):
         data, _off = fr.build(ME, events, date=date, xp=(7100, exp, 10 ** 9))
         with open(os.path.join(tmp, name), "wb") as f:
             f.write(data)
@@ -870,23 +911,83 @@ with tempfile.TemporaryDirectory() as tmp:
     f = xpmod.calibrate(rf.combat, cfg, meter.xp_after)
     est = xpmod.estimate(rf.combat, dict(cfg, xp_mode="medido"))
     check(len(rows) == 3 and unknown == 0 and rows[0]["xp"] == 34 and f == 3.0 and round(est["xp"]) == 306
-          and est["source"][0] == "medido",
-          "XP: 3 Goblins a 10%% = 102, +306 na gravação seguinte = fator medido ×3 -> %s %s" % (f, est["source"]))
+          and est["source"][0] == "medido" and est["correction"] == 3.0,
+          "XP: 3 Goblins a 10%% = 102, +306 na gravação seguinte = lista ×3 medida -> %s %s" % (f, est["source"]))
     check(xpmod.factor(rf.combat, {"xp_mode": "fixo", "xp_fixed": 200})[0] == 3.0, "XP: valor fixo +200% = ×3")
     eta, left = xpmod.time_to_level(rf.combat, {"xp_mode": "fixo", "xp_fixed": 200}, 1000.0)
     check(left == 10 ** 9 - 1000 - 306 and abs(eta - left / 1000.0 * 60000) < 1,
           "XP: tempo até o próximo nível = XP que falta ÷ XP por minuto -> %s" % xpmod.span_text(eta))
     est = xpmod.estimate(rf.combat, {"xp_bonuses": {"server": {"on": True, "pct": 100}}})
     check(round(est["xp"]) == 204 and est["source"][0] == "lista", "XP: pela lista, evento +100%% = ×2 -> %s" % est["xp"])
-    check(abs(est["pct"] - 100.0 * est["xp"] / 10 ** 9) < 1e-9 and est["kills_per_min"] is None,
+    check(abs(est["pct"] - 100.0 * est["xp"] / 10 ** 9) < 1e-9
+          and xpmod.estimate(rf.combat, {}, (0, 30000))["kills_per_min"] is None,
           "XP: % do nível ao lado da XP; abates por minuto só com mais de 1 min")
-    est = xpmod.estimate(rf.combat, {}, (0, 120000))
-    check(est["kills_per_min"] == 1.5 and abs(est["per_hour_pct"] - est["per_min_pct"] * 60) < 1e-12,
-          "XP: 3 abates em 2 min = 1,5 por minuto; %% por hora = %% por minuto × 60 -> %s" % est["kills_per_min"])
+    est = xpmod.estimate(rf.combat, {}, (0, 1200000))
+    check(abs(est["kills_per_min"] - 0.15) < 1e-12 and abs(est["per_hour_pct"] - est["per_min_pct"] * 60) < 1e-12,
+          "XP: 3 abates em 20 min = 0,15 por minuto; %% por hora = %% por minuto × 60 -> %s" % est["kills_per_min"])
+    # gravação curta (30 s) não calibra: 30 s davam um fator 20% errado na sessão real
+    short = [(i * 10000 + d, p) for i, aid in enumerate((52011, 52012, 52013)) for d, p in (
+        (0, fr.spawn(aid, "mob", 1124, "Goblin")), (300, fr.skill_damage(ME, aid, 5000)), (400, fr.vanish(aid, 1)))]
+    for name, date, exp, events in (("c.rrf", (2026, 11, 5, 20, 0, 0), 1000, short),
+                                    ("d.rrf", (2026, 11, 5, 20, 0, 40), 1500, [])):
+        data, _off = fr.build(ME, events, date=date, xp=(7100, exp, 10 ** 9))
+        with open(os.path.join(tmp, name), "wb") as f:
+            f.write(data)
+    rc = meter.ReplayFile(os.path.join(tmp, "c.rrf"))
+    rc.poll(max_bytes=1 << 30)
+    check(xpmod.calibrate(rc.combat, cfg, meter.xp_after) is None and len(cfg["xp_corr"]["7100"]["samples"]) == 1,
+          "XP: gravação de 30 s não entra na calibração")
     rb = rrf.read_session(os.path.join(tmp, "b.rrf"))
     before = xpmod.recordings_before(os.path.join(tmp, "b.rrf"), rb)
     check([os.path.basename(r["path"]) for r in before] == ["a.rrf"],
           "XP: comparar com a gravação anterior do mesmo personagem -> %s" % before)
+
+# --- Aquila: dificuldade pela redução de dano, regeneração só em sobrecarga e a quebra de defesa ------------
+AQ = 52400
+ev = [(0, fr.spawn(AQ, "mob", 21531, "Aquila", boss=True)), (50, fr.status(AQ, 1166, True, 0, 0, 50)),
+      (1000, fr.skill_damage(ME, AQ, 100000000)),
+      (2000, struct.pack("<HIBI", rrf.P_SPRITE, AQ, 0, 21588)),                  # entrou em sobrecarga
+      (12000, struct.pack("<HIBI", rrf.P_SPRITE, AQ, 0, 21531)),                 # saiu: 10 s regenerando
+      (13000, fr.skill_use(AQ, AQ, 2218)), (13200, fr.skill_use(AQ, AQ, 2220)),  # quebra de defesa
+      (14000, fr.skill_damage(ME, AQ, 1000000))]
+ca = combat_of(fr.build(ME, ev)[0])
+xa = dd.Ctx(ca, AQ, None)
+wins = an.form_windows(ca, xa.boss_aids, 21588, xa.start, xa.end)
+hid = an.hidden_hits(ca, xa.boss_aids, (2218, 2219, 2220, 2221), xa.start, xa.end)
+curve = tl.build(ca, AQ)["hp"]
+end = curve[-1][1]
+# 500M - 100M = 80%; +10 s × 1,1% = 91%; quebra -12% = 79%; -1M = 78,8%
+check(xa.hp == 500000000 and xa.hp_label == "Executiva" and wins == [(2000, 12000)] and hid == [13000]
+      and abs(end - (0.8 + 0.11 - 0.12 - 0.002)) < 1e-6,
+      "Aquila: Executiva pela redução de 50%%; regenera só em sobrecarga e a quebra de defesa tira 12%% -> %.4f" % end)
+
+# --- subida de nível no meio da gravação: ponto exato, correção na hora e a XP do nível novo pela tabela ---
+check(xpmod.table_need(4302, 244) == 99691521069 and xpmod.table_need(4302, 248) == 220850071960
+      and xpmod.table_need(4302, 250) is None and xpmod.table_need(4060, 244) is None,
+      "XP: tabela das classes 4 do LATAM (×1,22 por nível; conferida com os replays)")
+ev = []
+for i, aid in enumerate((52201, 52202, 52203, 52204, 52205)):
+    ev += [(i * 60000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 60000 + 300, fr.skill_damage(ME, aid, 5000)),
+           (i * 60000 + 400, fr.vanish(aid, 1))]
+    if i == 2:
+        ev.append((i * 60000 + 500, fr.hp(241, rrf.SP_BASELEVEL)))      # subiu do 240 para o 241
+data, _off = fr.build(ME, ev, xp=(7200, 1000 - 204, 1000))               # faltavam 204 de XP no nível 240
+cl = combat_of(data)
+cfg_l = {"xp_mode": "medido"}
+sc = xpmod.session_correction(cl, cfg_l)
+pr = xpmod.progress(cl, cfg_l)
+check(cl.level_ups and cl.level_ups[0][1] == 241 and sc and abs(sc[0] - 2.0) < 1e-9 and pr["level"] == 241
+      and pr["need"] == xpmod.table_need(4302, 241) and abs(pr["xp"] - 2 * 68) < 1e-6,
+      "XP: subida de nível = ponto exato (3 Goblins = 102 pela lista, faltavam 204 -> ×2); depois dela conta do zero "
+      "no 241 -> %s %s" % (sc, pr and (pr["level"], round(pr["xp"]))))
+
+ev = []
+for i, aid in enumerate((52301, 52302, 52303)):                           # 3 abates no 1º minuto de farm
+    ev += [(60000 + i * 20000, fr.spawn(aid, "mob", 1124, "Goblin")), (60000 + i * 20000 + 300, fr.skill_damage(ME, aid, 5000)),
+           (60000 + i * 20000 + 400, fr.vanish(aid, 1))]
+cw = combat_of(fr.build(ME, ev, xp=(7300, 1000, 10 ** 9))[0])
+check(xpmod.warming_up(cw, {}) and xpmod.time_to_level(cw, {}) == (None, None) and xpmod.farm_start(cw) == 60400,
+      "XP: sem previsão antes de 10 min de farm ou 1% do nível (o começo costuma ser preparação)")
 
 c0 = combat_of(fr.build(ME, [(0, fr.spawn(52100, "mob", 21539, "Rgan")), (300, fr.skill_damage(ME, 52100, 5000)),
                              (400, fr.vanish(52100, 1)), (500, fr.spawn(52101, "mob", 3445, "Esqueleto")),

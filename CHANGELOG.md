@@ -2,6 +2,21 @@
 
 Português · [English](#english) · [Español](#español)
 
+## 1.4.0
+
+Resumo da morte no widget, previsão de XP muito mais precisa em sessões longas e a vida do Aquila na Linha do tempo.
+
+- Quando você morre, o widget mostra por 10 s o que te matou: o monstro com o sprite do jogo, o golpe final com a propriedade e as maiores fontes de dano dos 5 s antes. Clique para fechar; dá para desligar no menu.
+- O resumo também cobre armadilha, União Solar, Dor Máxima (com o golpe que foi refletido) e vida perdida sem golpe visível, e a mensagem muda se você morrer de novo na mesma luta.
+- XP: previsão do próximo nível bem mais precisa. Nas duas sessões de quase 1 hora que testamos, o erro médio caiu de 5 a 12 min para 1 a 2,5 min, e a previsão ficou a até 2 min do horário real em 52% a 90% do tempo (antes, 10% a 20%). A XP estimada, que errava uns 20%, passou a errar uns 3%.
+- XP: cada subida de nível acerta a estimativa na hora, e a conta continua no nível novo.
+- XP: gravações com menos de 10 min ou 1% do nível não calibram mais, e a previsão aparece depois desse tempo.
+- Aquila: a dificuldade é reconhecida sozinha, e a Linha do tempo mostra a vida dele com a regeneração e as quebras de defesa (valores estimados com as lutas que temos).
+- Mortes: overkill e causa certos mesmo quando a vida cai com atraso, como na Dor Máxima.
+- Linha do tempo: conjurações instantâneas não aparecem mais repetidas.
+- Buffs e Debuffs: os gráficos explicam quais buffs ficam de fora.
+- Milagre no rodapé legível no tema Claro.
+
 ## 1.3.1
 
 Lex Aeterna contada certo, dano creditado a cada jogador e o grupo todo na Linha do tempo.
@@ -114,6 +129,21 @@ Primeira versão pública.
 
 ## English
 
+### 1.4.0
+
+Death summary on the widget, a much more accurate XP forecast in long sessions and Aquila's HP on the Timeline.
+
+- When you die, the widget shows what killed you for 10 s: the monster with its in-game sprite, the final blow with its element and the biggest damage sources of the 5 s before. Click to close; you can turn it off in the menu.
+- The summary also covers traps, Solar Union, Max Pain (with the hit that was reflected) and HP lost with no visible hit, and the message changes if you die again in the same fight.
+- XP: a much more accurate next-level forecast. In the two almost hour-long sessions we tested, the average error fell from 5–12 min to 1–2.5 min, and the forecast stayed within 2 min of the real time 52%–90% of the time (before, 10%–20%). The estimated XP, which was off by about 20%, is now off by about 3%.
+- XP: every level-up corrects the estimate on the spot, and the count carries on in the new level.
+- XP: recordings shorter than 10 min or 1% of a level no longer calibrate, and the forecast shows up after that.
+- Aquila: the difficulty is recognized on its own, and the Timeline shows its HP with the regeneration and the defense breaks (values estimated from the fights we have).
+- Deaths: correct overkill and cause even when HP drops late, as with Max Pain.
+- Timeline: instant casts no longer show up twice.
+- Buffs and Debuffs: the charts explain which buffs are left out.
+- Miracle footer readable on the Light theme.
+
 ### 1.3.1
 
 Lex Aeterna counted right, damage credited to each player and the whole party on the Timeline.
@@ -225,6 +255,21 @@ First public version.
 ---
 
 ## Español
+
+### 1.4.0
+
+Resumen de la muerte en el widget, una previsión de XP mucho más precisa en sesiones largas y la vida del Aquila en la Línea de tiempo.
+
+- Cuando mueres, el widget muestra por 10 s qué te mató: el monstruo con el sprite del juego, el golpe final con su propiedad y las mayores fuentes de daño de los 5 s anteriores. Clic para cerrar; se puede desactivar en el menú.
+- El resumen también cubre trampas, Unión Solar, Dolor Máximo (con el golpe que se reflejó) y vida perdida sin golpe visible, y el mensaje cambia si vuelves a morir en la misma pelea.
+- XP: previsión del próximo nivel mucho más precisa. En las dos sesiones de casi 1 hora que probamos, el error medio bajó de 5 a 12 min a 1 a 2,5 min, y la previsión quedó a menos de 2 min de la hora real en el 52% al 90% del tiempo (antes, 10% a 20%). La XP estimada, que fallaba un 20%, ahora falla un 3%.
+- XP: cada subida de nivel corrige la estimación al momento, y la cuenta sigue en el nivel nuevo.
+- XP: las grabaciones de menos de 10 min o 1% del nivel ya no calibran, y la previsión aparece después de ese tiempo.
+- Aquila: la dificultad se reconoce sola, y la Línea de tiempo muestra su vida con la regeneración y las rupturas de defensa (valores estimados con las peleas que tenemos).
+- Muertes: overkill y causa correctos aunque la vida baje con retraso, como con Dolor Máximo.
+- Línea de tiempo: los lanzamientos instantáneos ya no aparecen repetidos.
+- Buffs y Debuffs: los gráficos explican qué buffs quedan fuera.
+- Milagro en el pie legible en el tema Claro.
 
 ### 1.3.1
 

@@ -9,9 +9,11 @@ O replay não grava a XP ganha: só a XP total no início de cada gravação (se
 - Penalidade de nível: a mesma tabela do rAthena e do Divine Pride (nível do monstro − nível do jogador).
 - Parte do dano: quanto do dano no monstro foi de quem grava (grupo dividindo XP não entra).
 - Fator: os bônus somados (servidor, VIP, manuais, equipamentos...), vezes o Milagre à parte (a Bênção
-  Estelar entra antes dos outros bônus, então +100% dobra o total). O replay só mostra que um bônus de
-  período está ativo, não quanto ele dá, então o fator é calibrado com duas gravações seguidas do mesmo
-  personagem (a XP exata entre elas ÷ a XP estimada dos abates) ou vem do bônus que a pessoa informa.
+  Estelar entra antes dos outros bônus, então +100% dobra o total). Os bônus que aparecem como status (manual,
+  Njord, Milagre, VIP...) são seguidos golpe a golpe; o que o replay não mostra (evento do servidor, algum item)
+  vira uma correção sobre a lista, medida com XP exata: duas gravações seguidas do mesmo personagem (a XP no
+  começo da seguinte) ou uma subida de nível no meio da gravação (o jogo manda o nível novo, e a XP de cada nível
+  é conhecida). Gravações curtas não calibram, e cada medida pesa pela XP que ela cobre.
 """
 
 import datetime
@@ -35,6 +37,28 @@ PENALTY_UP = ((16, 40), (15, 115), (14, 120), (13, 125), (12, 130), (11, 135), (
 PENALTY_DOWN = ((-31, 10), (-26, 35), (-21, 60), (-16, 85), (-11, 90), (-6, 95))
 CALIBRATE_GAP_S = 60          # a próxima gravação começou até 1 min depois do fim desta
 CALIBRATE_MIN_KILLS = 3
+CALIBRATE_MIN_MS = 10 * 60000  # trecho curto não calibra (30 s de gravação davam um fator 20% errado)...
+CALIBRATE_MIN_FRAC = 0.01     # ...a não ser que já tenha rendido 1% do nível (o que vier primeiro)
+CALIBRATE_KEEP = 12           # medidas guardadas por personagem (a média pesa cada uma pela XP que cobre)
+PACE_MS = 10 * 60000          # o tempo até o nível usa o ritmo dos últimos 10 min de farm
+WARMUP_MS, WARMUP_FRAC = 10 * 60000, 0.01   # a previsão só aparece depois de 10 min de farm ou 1% do nível
+FARM_FRAC = 0.4               # o farm começa no 1º minuto que rende 40% do melhor minuto (antes: preparação)
+
+# XP de cada nível nas classes 4 do LATAM: a do nível anterior × 1,22, arredondada para baixo. Conferido nos
+# replays: a partir do 224 (1.868.364.511) sai exatamente o que o jogo mandou do 240 ao 248. 250 é o máximo.
+FOURTH_JOBS = set(range(4252, 4265)) | set(range(4278, 4282)) | set(range(4302, 4309)) | {4316}
+TABLE_4TH_FROM = (224, 1868364511)
+MAX_LEVEL_4TH = 250
+
+
+def table_need(job, level):
+    """XP do nível `level` (para chegar ao seguinte) pela tabela conhecida, ou None."""
+    lv, need = TABLE_4TH_FROM
+    if job not in FOURTH_JOBS or not lv <= level < MAX_LEVEL_4TH:
+        return None
+    for _i in range(level - lv):
+        need = need * 122 // 100
+    return need
 
 
 def penalty(diff):
@@ -53,22 +77,36 @@ _CACHE = {}
 def kills(c, rng=None):
     """Abates em que quem grava bateu: (linhas, abates sem XP conhecida).
     linha: t, aid, mob, name, lv, share (parte do dano), pen (%), xp (sem o fator)."""
-    sig = (id(c), c.version, rng)
+    sig = (id(c), c.version)
     hit = _CACHE.get("k")
-    if hit and hit[0] == sig:
+    if not hit or hit[0] != sig:
+        hit = _CACHE["k"] = (sig, _all_kills(c))
+    rows, _unknown = hit[1]
+    if rng is None:
         return hit[1]
-    dead = {aid for t, aid in c.death_log if rng is None or rng[0] <= t <= rng[1]}
+    rows = [r for r in rows if rng[0] <= r["t"] <= rng[1]]
+    return rows, sum(1 for r in rows if r["xp"] is None)
+
+
+def level_at(c, t):
+    """Nível de base de quem grava no instante t (o do começo, mais as subidas no meio da gravação)."""
+    lv = c.session.base_level or 1
+    for when, new in getattr(c, "level_ups", ()):
+        if when <= t:
+            lv = new
+    return lv
+
+
+def _all_kills(c):
+    dead = {aid for t, aid in c.death_log}
     mine, total = {}, {}
     for h in c.hits:
         if h.dst in dead and h.dmg > 0:
             total[h.dst] = total.get(h.dst, 0) + h.dmg
             if h.src == c.me:
                 mine[h.dst] = mine.get(h.dst, 0) + h.dmg
-    level = c.session.base_level or 1
     rows, unknown = [], 0
     for t, aid in c.death_log:
-        if rng is not None and not rng[0] <= t <= rng[1]:
-            continue
         e = c.entities.get(aid)
         if e is None or e.kind != "mob" or c.is_friendly(aid) or not mine.get(aid):
             continue
@@ -79,12 +117,10 @@ def kills(c, rng=None):
             rows.append(dict(t=t, aid=aid, mob=e.job, name=c.name_of(aid), lv=data[0] if data else None,
                              share=share, pen=None, xp=None))
             continue
-        pen = penalty(data[0] - level)
+        pen = penalty(data[0] - level_at(c, t))
         rows.append(dict(t=t, aid=aid, mob=e.job, name=c.name_of(aid), lv=data[0], share=share, pen=pen,
                          xp=(data[1] * pen // 100) * share))
-    res = (rows, unknown)
-    _CACHE["k"] = (sig, res)
-    return res
+    return rows, unknown
 
 
 def by_monster(rows):
@@ -108,26 +144,126 @@ def _seconds(when):
         return None
 
 
+def need(c, cfg, level):
+    """XP do nível `level` para quem grava: a que o jogo mandou no começo da gravação, a da tabela conhecida ou a
+    que já apareceu em outra gravação dessa classe (cfg["xp_levels"]). None se não se sabe."""
+    ses = c.session
+    if level == ses.base_level and ses.next_exp:
+        return ses.next_exp
+    n = table_need(ses.job, level)
+    if n:
+        return n
+    return ((cfg or {}).get("xp_levels") or {}).get(str(ses.job), {}).get(str(level))
+
+
+def anchors(c):
+    """Pontos em que a XP de quem grava é exata: [(t, nível, XP no nível)] — o começo da gravação e cada subida
+    de nível (XP 0 no nível novo; a sobra do abate que subiu fica de fora, é pouca)."""
+    ses = c.session
+    if ses.base_exp is None or not ses.base_level:
+        return []
+    return [(0, ses.base_level, ses.base_exp)] + [(t, lv, 0) for t, lv in getattr(c, "level_ups", ())]
+
+
+def level_segments(c, cfg):
+    """Trechos da gravação com a XP real exata: de um ponto exato até a subida de nível seguinte.
+    [(início, fim, XP real)]."""
+    out = []
+    an = anchors(c)
+    for (t0, lv, x0), (t1, lv1, _x) in zip(an, an[1:]):
+        nd = need(c, cfg, lv)
+        if lv1 == lv + 1 and nd:
+            out.append((t0, t1, nd - x0))
+    return out
+
+
+def _list_xp(c, cfg, rng):
+    est = estimate(c, dict(cfg or {}, xp_mode="lista"), rng)
+    return None if est["unknown"] or not est["xp"] else est["xp"]
+
+
+def session_correction(c, cfg):
+    """(real ÷ lista, XP real coberta) das subidas de nível desta gravação, ou None."""
+    # os trechos já fecharam (terminam numa subida de nível): não mudam com o que chega depois
+    sig = (id(c), len(getattr(c, "level_ups", ())), repr(sorted((cfg or {}).get("xp_bonuses", {}).items())))
+    hit = _CACHE.get("sc")
+    if hit and hit[0] == sig:
+        return hit[1]
+    real = est = 0.0
+    for t0, t1, gain in level_segments(c, cfg):
+        e = _list_xp(c, cfg, (t0, t1))
+        if e:
+            real += gain
+            est += e
+    res = (real / est, real) if est else None
+    _CACHE["sc"] = (sig, res)
+    return res
+
+
+def stored_correction(c, cfg):
+    """(correção média das gravações longas deste personagem, nº de medidas) ou None."""
+    entry = ((cfg or {}).get("xp_corr") or {}).get(str(c.session.gid))
+    samples = (entry or {}).get("samples") or []
+    w = sum(x[1] for x in samples)
+    if not w:
+        return None
+    return sum(x[0] * x[1] for x in samples) / w, len(samples)
+
+
+def correction(c, cfg):
+    """A correção que vale agora: a das subidas de nível desta gravação, senão a média guardada.
+    (correção, origem) ou (None, None)."""
+    sc = session_correction(c, cfg)
+    if sc:
+        return sc[0], "nivel"
+    st = stored_correction(c, cfg)
+    if st:
+        return st[0], st[1]
+    return None, None
+
+
 def calibrate(c, cfg, xp_after):
-    """Se a próxima gravação do personagem começou logo depois desta, guarda o fator real ÷ estimado
-    em cfg["xp_factor"][personagem] = [fator, quando, arquivo]. Devolve o fator novo ou None."""
+    """Guarda em cfg["xp_corr"][personagem] as medidas de "XP real ÷ XP pela lista" desta gravação: cada trecho
+    até uma subida de nível e o trecho até a gravação seguinte (se ela começou logo depois). Trecho com menos de
+    10 min não conta. Também anota a XP do nível que o jogo mandou (cfg["xp_levels"]). Devolve a correção média
+    nova ou None."""
     s = c.session
     if not getattr(c, "path", None) or not s.gid:
         return None
+    if s.base_level and s.next_exp and s.next_exp != 999999999:
+        cfg.setdefault("xp_levels", {}).setdefault(str(s.job), {})[str(s.base_level)] = s.next_exp
+    segs = [(t0, t1, gain, "%d" % i) for i, (t0, t1, gain) in enumerate(level_segments(c, cfg))]
+    an = anchors(c)
     nxt = xp_after(c.path, s)
-    if not nxt or not nxt["gain"] or nxt["gain"] <= 0:
+    if an and nxt and nxt.get("exp") is not None:
+        start, other = _seconds(s.recorded_at), _seconds(nxt["when"])
+        if start is not None and other is not None and other - (start + c.now / 1000.0) <= CALIBRATE_GAP_S:
+            t0, lv, x0 = an[-1]                 # do último ponto exato até o começo da gravação seguinte
+            gain = None
+            if nxt["level"] == lv:
+                gain = nxt["exp"] - x0
+            elif nxt["level"] == lv + 1 and need(c, cfg, lv):
+                gain = need(c, cfg, lv) - x0 + nxt["exp"]
+            if gain and gain > 0:
+                segs.append((t0, c.now, gain, "fim"))
+    when = "%04d-%02d-%02d %02d:%02d" % tuple(s.recorded_at[:5])
+    name = os.path.basename(c.path)
+    new = []
+    for t0, t1, gain, tag in segs:
+        rows, _u = kills(c, (t0, t1))
+        est = _list_xp(c, cfg, (t0, t1))
+        lv = level_at(c, t0)
+        nd = need(c, cfg, lv)
+        big = t1 - t0 >= CALIBRATE_MIN_MS or (nd and gain >= CALIBRATE_MIN_FRAC * nd)
+        if not big or len(rows) < CALIBRATE_MIN_KILLS or not est:
+            continue
+        new.append([round(gain / est, 4), gain, when, "%s#%s" % (name, tag)])
+    if not new:
         return None
-    start, other = _seconds(s.recorded_at), _seconds(nxt["when"])
-    if start is None or other is None or other - (start + c.now / 1000.0) > CALIBRATE_GAP_S:
-        return None
-    rows, unknown = kills(c)
-    est = sum(r["xp"] for r in rows if r["xp"] is not None)
-    if unknown or len(rows) < CALIBRATE_MIN_KILLS or est <= 0:
-        return None
-    f = round(nxt["gain"] / est, 4)
-    table = cfg.setdefault("xp_factor", {})
-    table[str(s.gid)] = [f, "%04d-%02d-%02d %02d:%02d" % tuple(s.recorded_at[:5]), os.path.basename(c.path)]
-    return f
+    entry = cfg.setdefault("xp_corr", {}).setdefault(str(s.gid), {})
+    keep = [x for x in entry.get("samples", []) if not x[3].startswith(name + "#")] + new
+    entry["samples"] = keep[-CALIBRATE_KEEP:]
+    return stored_correction(c, cfg)[0]
 
 
 # Bônus de XP. Os detectáveis valem só enquanto o status está ativo em quem grava; os consumíveis (manuais)
@@ -267,23 +403,23 @@ def detected(c, cfg=None):
 
 
 def factor(c, cfg):
-    """(fator fixo ou None, origem). None = pela lista de bônus, golpe a golpe.
-    origem: ("lista", None) | ("medido", "AAAA-MM-DD HH:MM") | ("fixo", bônus %)."""
+    """(fator fixo ou None, origem, correção sobre a lista). None = pela lista de bônus, golpe a golpe.
+    origem: ("lista", None) | ("medido", "nivel" ou nº de medidas) | ("fixo", bônus %)."""
     mode = cfg.get("xp_mode") if cfg.get("xp_mode") in MODES else "lista"
     if mode == "medido":
-        cal = (cfg.get("xp_factor") or {}).get(str(c.session.gid))
-        if cal:
-            return float(cal[0]), ("medido", cal[1])
+        corr, how = correction(c, cfg)
+        if corr:
+            return None, ("medido", how), corr
     if mode == "fixo" and isinstance(cfg.get("xp_fixed"), (int, float)):
-        return (100.0 + cfg["xp_fixed"]) / 100.0, ("fixo", cfg["xp_fixed"])
-    return None, ("lista", None)
+        return (100.0 + cfg["xp_fixed"]) / 100.0, ("fixo", cfg["xp_fixed"]), 1.0
+    return None, ("lista", None), 1.0
 
 
 def estimate(c, cfg, rng=None):
     """XP de base estimada no recorte: dict(xp, base, kills, unknown, factor (médio), source, per_hour,
     per_min, per_min_pct (% do nível por minuto), rows (com "total" de cada abate))."""
     rows, unknown = kills(c, rng)
-    f, source = factor(c, cfg)
+    f, source, corr = factor(c, cfg)
     if f is None:
         wins, sets = windows(c, cfg), settings(cfg)
     total = base = 0.0
@@ -291,7 +427,7 @@ def estimate(c, cfg, rng=None):
         if r["xp"] is None:
             r["total"] = None
             continue
-        k = f if f is not None else factor_at(r["t"], wins, sets)
+        k = f if f is not None else factor_at(r["t"], wins, sets) * corr
         r["total"] = r["xp"] * k
         base += r["xp"]
         total += r["total"]
@@ -301,7 +437,7 @@ def estimate(c, cfg, rng=None):
     nxt = c.session.next_exp
     pct_min = (100.0 * per_min / nxt) if per_min is not None and nxt else None
     return dict(xp=total, base=base, kills=len(rows), unknown=unknown, factor=(total / base) if base else (f or 1.0),
-                source=source, per_hour=per_min * 60 if per_min is not None else None, per_min=per_min,
+                source=source, correction=corr, per_hour=per_min * 60 if per_min is not None else None, per_min=per_min,
                 per_min_pct=pct_min, per_hour_pct=pct_min * 60 if pct_min is not None else None,
                 pct=(100.0 * total / nxt) if nxt else None,
                 kills_per_min=len(rows) * 60000.0 / span if long_enough else None, span=span, rows=rows)
@@ -513,16 +649,68 @@ def summary(c, cfg, rng=None):
                 level=c.session.base_level, unknown=est["unknown"])
 
 
-def time_to_level(c, cfg, per_min):
-    """(ms até o próximo nível no ritmo `per_min`, XP que falta) ou (None, None). Usa a XP do início da gravação
-    mais a XP estimada até agora; 0 se a estimativa já passou do nível."""
-    ses = c.session
-    if not per_min or per_min <= 0 or ses.base_exp is None or not ses.next_exp:
+def progress(c, cfg, t=None):
+    """Onde quem grava está no nível no instante t (agora): dict(level, xp, need, pct, since) ou None. Parte do
+    último ponto exato (começo da gravação ou a última subida de nível) mais a XP estimada desde então."""
+    t = c.now if t is None else t
+    an = [a for a in anchors(c) if a[0] <= t]
+    if not an:
+        return None
+    ta, lv, x0 = an[-1]
+    nd = need(c, cfg, lv)
+    xpv = x0 + (estimate(c, cfg, (ta, t))["xp"] if t > ta else 0.0)
+    return dict(level=lv, xp=xpv, need=nd, pct=(100.0 * xpv / nd) if nd else None, since=ta)
+
+
+def farm_start(c):
+    """Quando o farm começou de verdade: o começo do 1º minuto que rendeu pelo menos 40% do melhor minuto até agora
+    (os primeiros minutos costumam ser preparação: buffs, ir até o mapa, alguns abates no caminho). None sem abates."""
+    rows = [r for r in kills(c)[0] if r["t"] <= c.now and r["xp"]]
+    if not rows:
+        return None
+    mins = {}
+    for r in rows:
+        mins[r["t"] // 60000] = mins.get(r["t"] // 60000, 0.0) + r["xp"]
+    best = max(mins.values())
+    first = min(m for m, v in mins.items() if v >= FARM_FRAC * best)
+    return max(rows[0]["t"], first * 60000)
+
+
+def warming_up(c, cfg):
+    """True enquanto a previsão ainda não vale: menos de 10 min de farm e menos de 1% do nível ganho."""
+    start = farm_start(c)
+    if start is None:
+        return True
+    if c.now - start >= WARMUP_MS:
+        return False
+    nd = need(c, cfg, c.session.base_level) if c.session.base_level else None
+    return not (nd and estimate(c, cfg, (0, c.now))["xp"] >= WARMUP_FRAC * nd)
+
+
+def recent_pace(c, cfg):
+    """XP por minuto nos últimos 10 min de farm (contando do começo do farm, não da gravação), ou None enquanto
+    aquece (warming_up)."""
+    start = farm_start(c)
+    if start is None or warming_up(c, cfg):
+        return None
+    span = min(PACE_MS, c.now - start)
+    if span <= 0:
+        return None
+    rate = estimate(c, cfg, (c.now - span, c.now))["xp"] * 60000.0 / span
+    return rate if rate > 0 else None
+
+
+def time_to_level(c, cfg, per_min=None):
+    """(ms até o próximo nível, XP que falta) ou (None, None). Usa a posição no nível (progress) e o ritmo dos
+    últimos minutos (ou `per_min`, se vier); 0 se a estimativa já passou do nível."""
+    pr = progress(c, cfg)
+    rate = per_min or recent_pace(c, cfg)
+    if pr is None or not pr["need"] or not rate or rate <= 0:
         return None, None
-    left = ses.next_exp - ses.base_exp - estimate(c, cfg, None)["xp"]
+    left = pr["need"] - pr["xp"]
     if left <= 0:
         return 0, 0
-    return left / per_min * 60000.0, left
+    return left / rate * 60000.0, left
 
 
 def span_text(ms):

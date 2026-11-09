@@ -53,16 +53,27 @@ def build(c, key, rng=None):
     # golpes no chefe (curvas por jogador e HP) e dano recebido pelos jogadores
     out = [(h.t, h.src, h.dmg) for h in x.hits]
     taken = [(h.t, h.dst, h.dmg) for h in c.hits if not h.out and t0 <= h.t <= t1 and h.dst in pset]
-    # HP estimado: começa cheio, perde o dano visto e regenera (fração do HP por segundo) até encher
+    # HP estimado: começa cheio, perde o dano visto e regenera (fração do HP por segundo) até encher. Alguns chefes
+    # só regeneram numa forma e perdem vida sem pacote de dano (an.BOSS_MODEL: Aquila em sobrecarga / quebra de defesa)
     e = c.entities.get(key)
-    regen = an.BOSS_REGEN.get(e.job if e is not None else 0, 0) if x.hp_table else 0
+    mob = e.job if e is not None else 0
+    model = an.BOSS_MODEL.get(mob) if x.hp_table else None
+    regen = (model["regen"] if model else an.BOSS_REGEN.get(mob, 0)) if x.hp_table else 0
+    wins = an.form_windows(c, x.boss_aids, model["form"], x.start, x.end) if model else None
+    hidden = an.hidden_hits(c, x.boss_aids, model["hidden_skills"], x.start, x.end) if model else []
+
+    def gained(a, b):                      # regeneração entre a e b (só dentro das janelas, se houver)
+        if wins is None:
+            return regen * (b - a) / 1000.0
+        return regen * sum(max(0, min(b, e2) - max(a, s2)) for s2, e2 in wins) / 1000.0
+    steps = sorted([(t, d, 0.0) for t, _a, d in out] + [(t, 0, model["hidden"]) for t in hidden] + [(x.end, 0, 0.0)])
     hp, frac, last = [(x.start, 1.0)], 1.0, x.start
-    for t, _a, d in out + [(x.end, None, 0)]:
+    for t, d, lost in steps:
         while regen and t - last > HP_STEP_MS and frac < 1.0:
+            frac = min(1.0, frac + gained(last, last + HP_STEP_MS))
             last += HP_STEP_MS
-            frac = min(1.0, frac + regen * HP_STEP_MS / 1000.0)
             hp.append((last, frac))
-        frac = max(0.0, min(1.0, frac + regen * (t - last) / 1000.0) - d / x.hp) if x.hp else 1.0
+        frac = max(0.0, min(1.0, frac + gained(last, t)) - (d / x.hp if x.hp else 0.0) - lost) if x.hp else 1.0
         last = t
         hp.append((t, frac))
     if x.killed:
@@ -170,13 +181,14 @@ def build(c, key, rng=None):
                 continue
             if u[2] in pset or c.is_friendly(u[2]):
                 ev(u[0], "pskill", "pskills", u[1] if u[1] in pset else u[2], _("usou %s") % meter.skill_name(u[4]),
-                   (c.name_of(u[2]) if u[2] != u[1] else "") + tgt)
+                   ((c.name_of(u[2]) if u[2] != u[1] else "") + tgt).strip())
                 events[-1]["target"] = u[3]
             else:
                 ev(u[0], "mobskill", "mobskills", None, _("usou %s") % meter.skill_name(u[4]), tgt.strip())
                 events[-1].update(who=c.name_of(u[2]), mob=True, target=u[3])
     for u in c.casts:
-        if t0 <= u[0] <= t1:
+        # conjuração instantânea (0 s, ex.: Cardeal com conjuração instantânea) só repete o "usou" que vem junto
+        if t0 <= u[0] <= t1 and u[5] > 0:
             what = _("conjurou %s (%s)") % (meter.skill_name(u[4]), dd._secs(u[5]))
             tgt = _("em %s") % c.name_of(u[3]) if u[3] and u[3] != u[2] else ""
             if u[2] in pset or c.is_friendly(u[2]):

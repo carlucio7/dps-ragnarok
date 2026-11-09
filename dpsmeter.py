@@ -22,8 +22,10 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
+import analysis
 import clientdata
 import itemkind
+import sprites
 import meter
 import testes
 import xp
@@ -52,7 +54,7 @@ PIN_H = 22             # faixa das informações fixadas (abaixo das abas)
 MAX_PINS = 2
 FOOT_H = 28
 MIN_SCALE, MAX_SCALE = 0.7, 2.5
-FONT_PX = {"big": 30, "big_s": 23, "unit": 11, "title": 12, "text": 11, "small": 10, "num": 12, "icon": 11, "tab": 11}
+FONT_PX = {"big": 30, "big_s": 23, "spaced": 13, "unit": 11, "title": 12, "text": 11, "small": 10, "num": 12, "icon": 11, "tab": 11}
 MIN_FONT_PX = 8
 ALERT_S = 7.0          # quanto tempo um aviso fica no rodapé
 DROP_SCROLL_ROWS = 3   # itens que a roda do mouse rola na aba Drops
@@ -60,6 +62,17 @@ MIRACLE_FLASH_S = 9.0  # o widget brilha por esse tempo quando o Milagre ativa
 MIRACLE_BANNER_S = 6.0
 MIRACLE_COLORS = ("#fbbf24", "#fde68a", "#c084fc", "#f9a8d4", "#ffffff", "#a5b4fc")
 POLL_MS = 150         # ler o pedaço novo do arquivo custa < 1 ms
+DEATH_CARD_S = 10.0   # o resumo da morte fica no widget por esse tempo
+DEATH_RED = "#ef4444"
+DEATH_CARD_BG = "#1f0606"   # cartão escuro no meio do widget
+# título do resumo a cada morte no mesmo encontro (1ª, 2ª, ...); a última vale dali em diante, com o número
+DEATH_TITLES = [_("VOCÊ MORREU"), _("MORREU DE NOVO"), _("DE NOVO?!"), _("MELHORE"), _("JÁ É HÁBITO"),
+                _("O CHÃO TE CONHECE"), _("SALVOU NA KAFRA?"), _("MODO TAPETE ATIVADO"), _("%d MORTES. RESPEITO.")]
+DEATH_DIM = 0.55            # o widget escurece (nas cores do tema) enquanto o resumo da morte aparece
+# cor de cada propriedade de ataque no resumo da morte
+ELEMENT_COLORS = {"Neutral": "#a1a1aa", "Water": "#38bdf8", "Earth": "#d9a05b", "Fire": "#f97316", "Wind": "#4ade80",
+                  "Poison": "#a3e635", "Holy": "#fde047", "Dark": "#a78bfa", "Ghost": "#f0abfc", "Undead": "#94a3b8",
+                  "Mixed": "#e5e7eb"}
 
 THEMES = {
     "Grafite":    dict(bg="#1e1f24", btn="#2d2f37", fg="#f2f3f5", muted="#8b8f99", accent="#5b9cff", live="#ff5c5c"),
@@ -90,6 +103,7 @@ HINTS = {
     "where": _("Onde quem grava está (mapa e coordenadas). Clique para copiar o /navi"),
     "pinbar": _("Informação fixada · botão direito para desafixar"),
     "row": _("Botão direito: fixar no widget, ocultar..."),
+    "death": _("Clique: fechar · botão direito: desligar o resumo da morte"),
 }
 # o que dá para fixar na faixa abaixo das abas (além dos itens da aba Drops)
 PIN_STATS = [("xp_min", _("XP por minuto")), ("xp_hour", _("XP por hora")), ("xp_total", _("XP estimada")),
@@ -118,7 +132,8 @@ DEFAULTS = {
     "miracle_volume": 40,  # volume do som do Milagre (%)
     "targets": "all",
     "lang": None,          # None = idioma do Windows
-    "xp_factor": {},       # {personagem: [fator, quando, arquivo]} medido com gravações seguidas
+    "xp_corr": {},         # {personagem: {"samples": [[XP real ÷ lista, XP real, quando, arquivo#trecho]]}}
+    "xp_levels": {},       # {classe: {nível: XP do nível}} visto no começo das gravações
     "xp_bonuses": {},      # {bônus: {"on", "pct"}} da lista de bônus de XP (xp.BONUSES)
     "xp_mode": "lista",    # "lista" (bônus marcados), "medido" ou "fixo"
     "xp_fixed": None,      # bônus fixo (%) do modo "fixo"
@@ -129,6 +144,7 @@ DEFAULTS = {
     "pins": [],            # informações fixadas na faixa abaixo das abas (até 2): "xp_min", "item:984"...
     "fusion_sound": False,  # som curto quando o HP fica baixo com a União
     "fusion_volume": 40,
+    "death_card": True,     # quando você morre, o widget mostra por 10 s o que te matou
 }
 
 
@@ -343,6 +359,9 @@ class DpsApp:
         self.tests_seen = set()       # encontros já avaliados para o salvamento automático
         self.last_autosave = 0.0
         self.alert = None             # (texto, tipo, quando apareceu)
+        self.death_card = None        # (resumo da morte, quando apareceu)
+        self.sprite_photos = {}       # (monstro, largura, altura) -> PhotoImage do sprite
+        self.press_target = None
         self.alert_seen = 0
 
         root.title(_("Replay Master"))
@@ -422,6 +441,7 @@ class DpsApp:
         self.fonts = {
             "big": tkfont.Font(self.root, family=nums),
             "big_s": tkfont.Font(self.root, family=nums),
+            "spaced": tkfont.Font(self.root, family=semi),
             "unit": tkfont.Font(self.root, family=semi),
             "title": tkfont.Font(self.root, family=semi),
             "text": tkfont.Font(self.root, family=ui),
@@ -438,6 +458,12 @@ class DpsApp:
 
     def theme(self):
         t = dict(THEMES.get(self.cfg["theme"], THEMES["Grafite"]))
+        dc = getattr(self, "death_card", None)
+        k = time.time() - dc[1] if dc else -1.0
+        if 0 <= k < DEATH_CARD_S:
+            # resumo da morte: o widget escurece nas cores do tema (entra rápido, sai nos últimos instantes)
+            a = min(1.0, k / 0.25) * min(1.0, (DEATH_CARD_S - k) / 0.6)
+            t = {key: val if key == "fg" else mix(val, "#000000", DEATH_DIM * a) for key, val in t.items()}
         t["edge"] = mix(t["bg"], t["fg"], 0.10)
         t["track"] = mix(t["bg"], t["fg"], 0.07)
         t["bar"] = mix(t["bg"], t["muted"], 0.38)
@@ -552,7 +578,7 @@ class DpsApp:
                 except Exception:  # noqa: BLE001
                     self.log_error(*sys.exc_info())
         self.phase = (self.phase + 1) % 8
-        if now - self.miracle_at < MIRACLE_FLASH_S + 0.3:
+        if now - self.miracle_at < MIRACLE_FLASH_S + 0.3 or self.death_card:
             self.dirty = True
         if self.dirty or now - self.last_draw >= 1.0:
             try:
@@ -582,6 +608,8 @@ class DpsApp:
             if seq <= floor:
                 continue
             self.alert_seen = seq
+            if kind == "death" and self.cfg["death_card"]:
+                self.show_death_card(c, seq, now)
             if ((kind == "buff" and self.cfg["alert_buffs"]) or (kind == "death" and self.cfg["alert_death"])
                     or (kind == "fusion" and self.cfg["alert_fusion"])
                     or (kind == "miracle" and self.cfg["alert_miracle"])):
@@ -596,6 +624,34 @@ class DpsApp:
         if self.alert and now - self.alert[2] > (MIRACLE_FLASH_S if self.alert[1] == "miracle" else ALERT_S):
             self.alert = None
             self.dirty = True
+        if self.death_card and now - self.death_card[1] > DEATH_CARD_S:
+            self.death_card = None
+            self.dirty = True
+
+    def show_death_card(self, c, seq, now):
+        """Monta o resumo da morte (fontes de dano nos 5 s antes) para mostrar por cima das linhas."""
+        info = getattr(c, "death_alerts", {}).get(seq)
+        if info is None:
+            return
+        try:
+            d = analysis.death_card(c, *info)
+            # o desenho do topo, lido do data.grf do jogo: a armadilha, o próprio personagem caído (União, vida
+            # que caiu sem golpe) ou o monstro do golpe final
+            if d["trap"]:
+                d["sprite"] = ("trap",)
+            elif d["fusion"] or d["no_hit"]:
+                d["sprite"] = ("char", tuple(sorted(c.session.look.items())), tuple(sorted(c.worn_at(info[1]).items())))
+            elif d.get("sprite_mob"):
+                d["sprite"] = ("mob", d["sprite_mob"])
+            grf = clientdata.NAMES.grf
+            sprites.MONSTERS.start(grf)
+            if d.get("sprite") and d["sprite"][0] == "char":
+                sprites.LOADER.start(grf)
+            sprites.MONSTERS.image(d.get("sprite"))
+            self.death_card = (d, now)
+        except Exception:  # noqa: BLE001 - o resumo é um extra; o aviso no rodapé continua
+            self.log_error(*sys.exc_info())
+        self.dirty = True
 
     def combat(self):
         f = self.watcher.file
@@ -714,8 +770,9 @@ class DpsApp:
         # faixa das informações fixadas (sempre visível, em qualquer aba)
         self.draw_pins(cb)
 
-        # linhas
+        # linhas (o resumo da morte fica por cima delas por alguns segundos)
         self.draw_rows(snap)
+        self.draw_death()
 
         # rodapé
         fy = H - FOOT_H * s / 2 - 2 * s
@@ -755,7 +812,7 @@ class DpsApp:
             doubt = cb.miracle_uncertain() is not None        # depois de morrer ou trocar de mapa
             text = (_("★ Milagre? · %d min (a confirmar)") if doubt else _("★ Milagre · %d min")) % max(
                 1, round(left / 60000.0))
-            color = "#fbbf24"
+            color = self.readable("#fbbf24")
             live = True
         if self.alert:
             # aviso (buff que acabou, morte) no lugar do status, piscando
@@ -805,6 +862,220 @@ class DpsApp:
                       font=self.fonts["big_s"])
         c.create_text(W / 2, cy + 18 * s, text=_("todos os monstros são alvos estelares por 1 hora"),
                       fill=mix(t["bg"], "#f5f3ff", fade), font=self.fonts["small"])
+
+    # ------------------------------------------------------------ resumo da morte
+
+    def death_texts(self, d):
+        """(causa, overkill, resumo) do resumo da morte, já no idioma da pessoa."""
+        kill = next((g for g in d["sources"] if g["killing"]), None)
+        if d["trap"]:
+            cause = _("Armadilha do mapa") + (_(" (~%d%% do HP máx.)") % round(d["trap_pct"] * 100)
+                                              if d["trap_pct"] else "")
+        elif d["fusion"]:
+            cause = _("União Solar: atacou com %s de HP") % (
+                "%d%%" % round(d["hp_pct"] * 100) if d["hp_pct"] is not None else _("pouco"))
+        elif kill is not None and not d["unclear"]:
+            cause = _("Golpe final: %s") % self.source_label(dict(kill, count=1))
+            el = analysis.element_name(kill["element"])
+            if el:
+                cause += " · " + el
+        elif d["no_hit"]:
+            cause = _("Sem golpe visível: a vida caiu sem um ataque no replay")
+        elif kill is not None:
+            # o golpe visível sozinho não bastava (ex.: reflexo da Dor Máxima): fica com quem bateu por último
+            cause = _("Último golpe visível: %s") % self.source_label(dict(kill, count=1))
+        elif d["unclear"]:
+            cause = _("Causa incerta: o último golpe visível não bastava")
+        else:
+            cause = ""
+        over = (_("overkill %s") % num(d["overkill"])) if d["overkill"] and not d["fusion"] else ""
+        secs = d["window"] / 1000.0          # 5 s, ou menos se a vida voltou a 95% no meio do caminho
+        span = ("%d s" % round(secs)) if secs >= 4.95 else dec("%.1f s" % secs)
+        summary = (_("%s em %d golpe nos últimos %s") if d["hits"] == 1 else _("%s em %d golpes nos últimos %s")) % (
+            num(d["total"]), d["hits"], span)
+        if d["max_hp"]:
+            summary += " · " + _("HP máx. %s") % num(d["max_hp"])
+        return cause, over, summary
+
+    def source_label(self, g):
+        """'Monstro ×N · skill' (armadilha e HP sem golpe só com o nome)."""
+        who = g["source"] + (" ×%d" % g["count"] if g["count"] > 1 else "")
+        return "%s · %s" % (who, g["skill"]) if g["element"] is not None or g["count"] else who
+
+    def shown_sources(self, d, n):
+        """As n maiores fontes, sempre com a do golpe final (no lugar da última, se ela não couber)."""
+        out = d["sources"][:max(0, n)]
+        kill = next((g for g in d["sources"] if g["killing"]), None)
+        if out and kill is not None and kill not in out:
+            out[-1] = kill
+        return out
+
+    def draw_death(self):
+        """Resumo da morte (10 s, clique fecha): o widget escurece com uma moldura vermelha e um cartão no meio
+        mostra o monstro que deu o golpe final, a causa e quem mais bateu nos 5 s antes, com a propriedade do ataque."""
+        if not self.death_card:
+            return
+        d, shown = self.death_card
+        k = time.time() - shown
+        if not 0 <= k < DEATH_CARD_S:
+            return
+        c, s, W, H = self.canvas, self.s, self.W, self.H
+        left = 1.0 - k / DEATH_CARD_S
+        x0, x1 = 8 * s, W - 8 * s
+        y0, y1 = (TOP_Y + 14) * s, H - (FOOT_H + 2) * s
+        pad = 10 * s
+        white, dim = "#ffffff", "#d79a9a"
+        fw = max(2, int(3 * s))                # moldura vermelha em volta do widget
+        c.create_rectangle(fw / 2, fw / 2, W - fw / 2, H - fw / 2, outline=DEATH_RED, width=fw)
+        c.create_polygon(round_rect_pts(x0, y0, x1, y1, 10 * s), smooth=True, fill=DEATH_CARD_BG,
+                         outline=DEATH_RED, width=max(1, int(1.5 * s)))
+        self.hits.append((("death", None), (x0, y0, x1, y1)))
+        cause, over, summary = self.death_texts(d)
+
+        refl = d.get("reflected")             # Dor Máxima: o golpe que foi refletido ganha uma linha
+
+        def text_h(n):                     # título + causa (+ reflexo) + fontes + resumo
+            return (26 + 16 + (14 if refl else 0) + 17 * n + 16 + 8) * s
+        # o sprite do monstro fica com o espaço que sobra; sem monstro (União, sem golpe visível...), uma caveira
+        spec = d.get("sprite")
+        want = sprites.MONSTERS.expected(spec)
+        n = min(4, len(d["sources"]))
+        # uma 4ª fonte só entra se o sprite continuar grande; senão, menos fontes antes de encolher o sprite
+        while n > 1 and (y1 - y0) - pad - text_h(n) < (80 if n > 3 else 44) * s:
+            n -= 1
+        sprite_h = min((80 if want else 56) * s, (y1 - y0) - pad - text_h(n))
+        if sprite_h < 30 * s:
+            sprite_h = 0
+        y = y0 + pad
+        cid = c.create_text(x1 - pad, y + 5 * s, anchor="e", text="%d s  ✕" % max(1, round(left * DEATH_CARD_S)),
+                            font=self.fonts["small"], fill=dim)
+        if sprite_h:
+            cx, foot = (x0 + x1) / 2, y + sprite_h
+            c.create_oval(cx - 34 * s, foot - 5 * s, cx + 34 * s, foot + 3 * s, fill="#3a0f0f", outline="")
+            room_w = (x1 - x0) - 2 * pad - 2 * (c.bbox(cid)[2] - c.bbox(cid)[0])
+            if want:
+                photo = self.sprite_photo(spec, int(sprite_h), int(room_w))
+                if photo is not None:
+                    c.create_image(cx, foot, anchor="s", image=photo)
+            else:
+                r = sprite_h * 0.40
+                self.draw_skull(cx, foot - r * 1.15, r)
+            y = foot + 4 * s
+        nth = d.get("nth", 1)
+        title = DEATH_TITLES[min(nth, len(DEATH_TITLES)) - 1]
+        if "%d" in title:
+            title = title % nth
+        self.draw_death_title((x0 + x1) / 2, y + 13 * s, x0 + pad, x1 - pad, icon=want or not sprite_h, title=title)
+        if nth > 1:                            # contador no canto: caveira ×N
+            self.draw_skull(x0 + pad + 5 * s, y0 + pad + 5 * s, 5 * s)
+            c.create_text(x0 + pad + 13 * s, y0 + pad + 5 * s, anchor="w", text="×%d" % nth,
+                          font=self.fonts["small"], fill="#fca5a5")
+        y += 26 * s
+        line = cause + ("  ·  " + over if over else "")
+        lid = c.create_text((x0 + x1) / 2, y + 7 * s, text=line, font=self.fonts["small"], fill=white)
+        if c.bbox(lid)[2] - c.bbox(lid)[0] > x1 - x0 - 2 * pad:
+            c.itemconfigure(lid, anchor="w")
+            c.coords(lid, x0 + pad, y + 7 * s)
+            self.clip_text(lid, line, x1 - pad)
+        y += 16 * s
+        if refl:
+            rtext = _("↩ refletiu %s · %s · %s") % (refl["skill"], _("você") if refl["mine"] else refl["who"],
+                                                     num(refl["dmg"]))
+            rid = c.create_text((x0 + x1) / 2, y + 5 * s, text=rtext, font=self.fonts["small"], fill="#fca5a5")
+            if c.bbox(rid)[2] - c.bbox(rid)[0] > x1 - x0 - 2 * pad:
+                c.itemconfigure(rid, anchor="w")
+                c.coords(rid, x0 + pad, y + 5 * s)
+                self.clip_text(rid, rtext, x1 - pad)
+            y += 14 * s
+        top = d["sources"][0]["dmg"] if d["sources"] else 1
+        row_h = 17 * s
+        heat = ("#dc2626", "#ea580c", "#d97706", "#a16207")     # do vermelho ao âmbar, pela posição
+        for i, g in enumerate(self.shown_sources(d, n)):
+            ry0, ry1 = y + 1 * s, y + row_h - 2 * s
+            col = ELEMENT_COLORS.get(g["element"] or "", "#9ca3af")
+            frac = g["dmg"] / float(top or 1)
+            bx0, bx1 = x0 + pad - 3 * s, x1 - pad + 3 * s
+            bw = (bx1 - bx0) * frac
+            # barra: a maior fonte em vermelho, as seguintes em laranja e âmbar
+            c.create_polygon(round_rect_pts(bx0, ry0, bx1, ry1, 4 * s), smooth=True, fill="#2a0b0b", outline="")
+            if bw > 2 * s:
+                c.create_polygon(round_rect_pts(bx0, ry0, bx0 + bw, ry1, 4 * s), smooth=True,
+                                 fill=mix(DEATH_CARD_BG, heat[min(i, len(heat) - 1)], 0.55), outline="")
+            cy = (ry0 + ry1) / 2
+            r = 3.2 * s
+            c.create_oval(x0 + pad + 2 * s - r, cy - r, x0 + pad + 2 * s + r, cy + r, fill=col, outline="")
+            rid = c.create_text(x1 - pad, cy, anchor="e", text="%d%%" % round(g["share"] * 100),
+                                font=self.fonts["small"], fill=dim)
+            vid = c.create_text(c.bbox(rid)[0] - 6 * s, cy, anchor="e", text=num(g["dmg"]), font=self.fonts["small"],
+                                fill=white)
+            el = analysis.element_name(g["element"])
+            label = ("✝ " if g["killing"] else "") + self.source_label(g) + ("  (%s)" % el if el else "")
+            lid = c.create_text(x0 + pad + 9 * s, cy, anchor="w", text=label, font=self.fonts["small"], fill=white)
+            self.clip_text(lid, label, c.bbox(vid)[0] - 6 * s)
+            y += row_h
+        sid = c.create_text((x0 + x1) / 2, y1 - 13 * s, text=summary, font=self.fonts["small"], fill=dim)
+        if c.bbox(sid)[2] - c.bbox(sid)[0] > x1 - x0 - 2 * pad:
+            c.itemconfigure(sid, anchor="w")
+            c.coords(sid, x0 + pad, y1 - 13 * s)
+            self.clip_text(sid, summary, x1 - pad)
+        # contagem regressiva: linha que encolhe na borda de baixo
+        c.create_line(x0 + 10 * s, y1 - 3 * s, x0 + 10 * s + (x1 - x0 - 20 * s) * left, y1 - 3 * s,
+                      fill=DEATH_RED, width=max(2, int(2 * s)))
+
+    def draw_death_title(self, cx, cy, xl, xr, icon=True, title=None):
+        """O título ('V O C Ê  M O R R E U') com as letras espaçadas entre duas linhas finas, e a caveira à
+        esquerda; um título comprido demais para espaçar sai com as letras juntas."""
+        c, s = self.canvas, self.s
+        title = title or _("VOCÊ MORREU")
+        f = self.fonts["spaced"]
+        room = xr - xl - (26 * s if icon else 0) - 2 * 18 * s
+        spaced = " ".join(title).replace("   ", "  ")
+        if f.measure(spaced) > room:
+            spaced = title
+        tw = f.measure(spaced)
+        c.create_text(cx, cy, text=spaced, font=f, fill="#fca5a5")
+        gap = 10 * s
+        line = mix(DEATH_CARD_BG, DEATH_RED, 0.8)
+        c.create_line(xl + (26 * s if icon else 0), cy, cx - tw / 2 - gap, cy, fill=line, width=1)
+        c.create_line(cx + tw / 2 + gap, cy, xr, cy, fill=line, width=1)
+        if icon:                               # sem a caveira grande no topo, uma pequena ao lado do título
+            self.draw_skull(xl + 10 * s, cy, 9 * s)
+
+    def draw_skull(self, cx, cy, r):
+        """Caveira desenhada (crânio, olhos, nariz e dentes), branca com contorno vermelho."""
+        c, s = self.canvas, self.s
+        bone, line, hole = "#f5f5f4", "#b91c1c", DEATH_CARD_BG
+        c.create_oval(cx - r, cy - r * 1.05, cx + r, cy + r * 0.7, fill=bone, outline=line, width=max(1, int(s)))
+        c.create_polygon(round_rect_pts(cx - r * 0.55, cy + r * 0.25, cx + r * 0.55, cy + r * 1.05, r * 0.25),
+                         smooth=True, fill=bone, outline=line, width=max(1, int(s)))
+        for side in (-1, 1):
+            ex = cx + side * r * 0.42
+            c.create_oval(ex - r * 0.27, cy - r * 0.2, ex + r * 0.27, cy + r * 0.3, fill=hole, outline="")
+        c.create_polygon(cx, cy + r * 0.32, cx - r * 0.13, cy + r * 0.55, cx + r * 0.13, cy + r * 0.55, fill=hole)
+        for tx in (-0.2, 0.0, 0.2):
+            c.create_line(cx + tx * r, cy + r * 0.72, cx + tx * r, cy + r * 1.0, fill=hole, width=1)
+
+    def sprite_photo(self, spec, max_h, max_w):
+        """O desenho do resumo (monstro, armadilha ou personagem caído, do data.grf do jogo) do tamanho pedido;
+        None enquanto carrega ou se não houver."""
+        img = sprites.MONSTERS.image(spec)
+        if img is None or max_h < 8 or max_w < 8:
+            return None
+        w, h, px = img
+        f = min(max_h / float(h), max_w / float(w), 2.0)
+        tw, th = max(1, int(round(w * f))), max(1, int(round(h * f)))
+        key = (repr(spec), tw, th)
+        if key in self.sprite_photos:
+            return self.sprite_photos[key]
+        if len(self.sprite_photos) > 40:
+            self.sprite_photos = {}
+        try:
+            px2 = px if (tw, th) == (w, h) else sprites.resize(w, h, px, tw, th)
+            photo = tk.PhotoImage(master=self.root, data=sprites.png_b64(tw, th, px2), format="png")
+        except (tk.TclError, ValueError, IndexError, ZeroDivisionError):
+            photo = None                       # desenho estranho: o cartão aparece sem o sprite
+        self.sprite_photos[key] = photo
+        return photo
 
     def clip_text(self, item, text, max_x):
         c = self.canvas
@@ -996,16 +1267,23 @@ class DpsApp:
             rows.append(dict(label=_("XP por hora"),
                              value=dec("%.2f%%" % est["per_hour_pct"]) if pct else num(est["per_hour"]),
                              right=(_("%s/h") % num(est["per_hour"])) if pct else "", frac=1.0, me=True, pin="xp_hour"))
-            eta, left = xp.time_to_level(cb, self.cfg, est["per_min"])
+            eta, left = xp.time_to_level(cb, self.cfg)      # pelo ritmo dos últimos minutos de farm
             if eta is not None:
                 rows.append(dict(label=_("Até o próximo nível"), value=xp.span_text(eta) if eta else _("já subiu"),
                                  right=(_("faltam %s") % num(left)) if left else "", frac=1.0, me=True, pin="xp_eta"))
+            elif xp.warming_up(cb, self.cfg):
+                rows.append(dict(label=_("Até o próximo nível"), value=_("calculando…"),
+                                 right=_("10 min de farm ou 1%"), frac=1.0, me=True, pin="xp_eta"))
         per = (_("%s/min") % dec("%.1f" % est["kills_per_min"])) if est["kills_per_min"] is not None else ""
         if est["unknown"]:
             per = (per + " · " if per else "") + _("%d sem XP") % est["unknown"]
         rows.append(dict(label=_("Abates"), value="%d" % est["kills"], right=per, frac=0.0, me=False, pin="kills"))
+        pr = xp.progress(cb, self.cfg)
         prog = meter.level_progress(cb.session)
-        if prog is not None:
+        if pr is not None and pr["pct"] is not None:   # onde está agora: o último ponto exato + a XP estimada
+            rows.append(dict(label=_("Nível %d") % pr["level"], value=dec("%.1f%%" % min(100.0, pr["pct"])),
+                             right=_("agora (estimado)"), frac=min(1.0, pr["pct"] / 100.0), me=False, pin="level"))
+        elif prog is not None:
             rows.append(dict(label=_("Nível %d") % cb.session.base_level, value=dec("%.1f%%" % (100 * prog)),
                              right=_("no início da gravação"), frac=prog, me=False, pin="level"))
         nxt = meter.xp_after(getattr(cb, "path", None), cb.session)
@@ -1443,8 +1721,31 @@ class DpsApp:
         self.save()
         self.dirty = True
 
+    def close_death_card(self):
+        self.death_card = None
+        self.dirty = True
+
+    def death_menu(self):
+        """Botão direito no resumo da morte: fechar ou desligar de vez (volta pelo menu de opções)."""
+        m = self.new_menu()
+        m.add_command(label=_("Fechar este resumo"), command=self.close_death_card)
+        m.add_command(label=_("Não mostrar mais o resumo da morte"), command=lambda: self.toggle_cfg("death_card"))
+        m.add_command(label=_("Ver todas as mortes na análise…"), command=self.open_deaths)
+        return m
+
+    def open_deaths(self):
+        self.close_death_card()
+        self.open_analysis()
+        if self.analysis is not None:
+            try:
+                self.analysis.select_tab("mortes")
+            except Exception:  # noqa: BLE001
+                self.log_error(*sys.exc_info())
+
     def toggle_cfg(self, key):
         self.cfg[key] = not self.cfg[key]
+        if key == "death_card" and not self.cfg[key]:
+            self.death_card = None
         if key.startswith("alert_") and not self.cfg[key]:
             self.alert = None
         self.save()
@@ -1581,6 +1882,7 @@ class DpsApp:
         m.add_command(label=_("Análise completa…"), command=self.open_analysis)
         for key, label in (("alert_buffs", _("Avisar quando um buff acabar na luta")),
                            ("alert_death", _("Avisar quando eu morrer (com overkill)")),
+                           ("death_card", _("Mostrar o que me matou por 10 s (resumo da morte)")),
                            ("alert_fusion", _("Avisar HP baixo com a União Solar (Mestre Taekwon)")),
                            ("alert_miracle", _("Festejar o Milagre Solar, Lunar e Estelar (Mestre Taekwon)")),
                            ("auto_tests", _("Salvar testes no boneco sozinho"))):
@@ -1689,7 +1991,7 @@ class DpsApp:
 
     def on_press(self, e):
         self.pressed = self.drag = self.resize = None
-        tgt = self.target_at(e.x, e.y)
+        tgt = self.press_target = self.target_at(e.x, e.y)
         if tgt and tgt[0] in ("btn", "tab", "fav"):
             self.pressed = tgt
         elif tgt and tgt[0] == "grip":
@@ -1726,7 +2028,9 @@ class DpsApp:
         elif self.drag:
             self.drag = None
             moved = self.press_xy and abs(e.x_root - self.press_xy[0]) + abs(e.y_root - self.press_xy[1]) > 4
-            if not moved and not self.watcher.folders:
+            if not moved and self.press_target and self.press_target[0] == "death":
+                self.close_death_card()
+            elif not moved and not self.watcher.folders:
                 self.pick_folder()
             else:
                 self.save_position()
@@ -1738,6 +2042,8 @@ class DpsApp:
         tgt = self.target_at(e.x, e.y)
         if tgt and tgt[0] in ("row", "fav", "pinbar"):
             self.popup(lambda: self.row_menu(tgt), e.x_root, e.y_root)
+        elif tgt and tgt[0] == "death":
+            self.popup(self.death_menu, e.x_root, e.y_root)
         else:
             self.popup(self.main_menu, e.x_root, e.y_root)
 

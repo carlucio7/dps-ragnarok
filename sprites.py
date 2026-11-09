@@ -28,6 +28,7 @@ SHIELD = "data\\sprite\\방패\\"
 PAL = "data\\palette\\"
 LUA = "data\\luafiles514\\lua files\\datainfo\\"
 PREFIXES = (HUMAN, DORAM, ACC, ROBE, SHIELD, PAL, LUA)
+MONSTER = "data\\sprite\\몬스터\\"
 SEX = {0: "여", 1: "남"}
 
 # grupos de ação do .act de jogador (cada grupo tem 8 direções)
@@ -698,3 +699,231 @@ class Loader:
 
 
 LOADER = Loader()
+
+
+# ------------------------------------------------------------------ resumo da morte no widget: monstro, armadilha
+# e o personagem caído
+
+ITEM_ART = "data\\texture\\유저인터페이스\\collection\\"   # ilustrações grandes dos itens (fundo branco)
+TRAP_ART = "트랩.bmp"                                       # o item Armadilha: uma armadilha de urso
+
+
+def crop(w, h, px):
+    """Tira as bordas transparentes: (w, h, pixels) ou None se não sobrar nada."""
+    rows = [y for y in range(h) if any(p[3] for p in px[y * w:(y + 1) * w])]
+    if not rows:
+        return None
+    cols = [x for x in range(w) if any(px[y * w + x][3] for y in rows)]
+    x0, x1, y0, y1 = cols[0], cols[-1] + 1, rows[0], rows[-1] + 1
+    return x1 - x0, y1 - y0, [px[y * w + x] for y in range(y0, y1) for x in range(x0, x1)]
+
+
+def resize(w, h, px, tw, th):
+    """Redimensiona para tw x th: média de alguns pontos por pixel ao reduzir, vizinho mais próximo ao ampliar."""
+    n = max(1, min(4, int(-(-max(w / float(tw), h / float(th)) // 1))))
+    out = []
+    for y in range(th):
+        for x in range(tw):
+            r = g = b = a = 0
+            for j in range(n):
+                sy = min(h - 1, int((y + (j + 0.5) / n) * h / th))
+                for i in range(n):
+                    pr, pg, pb, pa = px[sy * w + min(w - 1, int((x + (i + 0.5) / n) * w / tw))]
+                    r += pr * pa
+                    g += pg * pa
+                    b += pb * pa
+                    a += pa
+            out.append((r // a, g // a, b // a, a // (n * n)) if a else (0, 0, 0, 0))
+    return out
+
+
+def bmp_rgba(data):
+    """(w, h, pixels RGBA) de um .bmp de 8 ou 24 bits; magenta (o transparente do jogo) vira transparente."""
+    off = struct.unpack_from("<I", data, 10)[0]
+    w, h, _planes, bpp = struct.unpack_from("<iiHH", data, 18)
+    ncol = struct.unpack_from("<I", data, 46)[0] or (1 << bpp if bpp <= 8 else 0)
+    pal = [tuple(data[54 + 4 * i:54 + 4 * i + 3][::-1]) for i in range(ncol)]
+    flip, h = h > 0, abs(h)
+    stride = ((w * bpp + 31) // 32) * 4
+    px = []
+    for y in range(h):
+        start = off + (h - 1 - y if flip else y) * stride
+        row = data[start:start + stride]
+        for x in range(w):
+            if bpp == 8:
+                r, g, b = pal[row[x]]
+            elif bpp == 24:
+                b, g, r = row[3 * x:3 * x + 3]
+            else:
+                raise ValueError("bmp de %d bits" % bpp)
+            px.append((r, g, b, 0 if (r > 240 and g < 16 and b > 240) else 255))
+    return w, h, px
+
+
+def clear_background(w, h, px, tol=24):
+    """O fundo da cor do canto e ligado às bordas vira transparente (sem mexer nos claros do desenho)."""
+    bg = px[0]
+    out, seen = list(px), set()
+    stack = [(x, y) for x in range(w) for y in (0, h - 1)] + [(x, y) for y in range(h) for x in (0, w - 1)]
+    while stack:
+        x, y = stack.pop()
+        if (x, y) in seen or not (0 <= x < w and 0 <= y < h):
+            continue
+        seen.add((x, y))
+        p = px[y * w + x]
+        if abs(p[0] - bg[0]) + abs(p[1] - bg[1]) + abs(p[2] - bg[2]) > tol:
+            continue
+        out[y * w + x] = (0, 0, 0, 0)
+        stack += [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
+    return w, h, out
+
+
+def dead_pose(wardrobe, look, direction=0):
+    """O personagem caído (último quadro da ação de morte), sem bordas: (w, h, pixels) ou None."""
+    r = wardrobe.render(look, DEAD, direction, 0)
+    if r is None:
+        return None
+    if r[6] > 1:
+        r = wardrobe.render(look, DEAD, direction, r[6] - 1) or r
+    return crop(r[0], r[1], r[2])
+
+
+class Bestiary:
+    """Sprites dos monstros do data.grf: o id do monstro vira o nome do arquivo pelas tabelas do cliente
+    (npcidentity: JT_NOME -> id; jobname: JT_NOME -> arquivo). Também a ilustração do item Armadilha.
+    Só lê o que for pedido, e guarda."""
+
+    def __init__(self, grf_path):
+        self.grf = Grf(grf_path, prefixes=(MONSTER, LUA, ITEM_ART))
+
+        def table(name, glob):
+            data = self.grf.read(LUA + name)
+            if not data:
+                return {}
+            try:
+                return lub.run(data, "cp949").get(glob) or {}
+            except (ValueError, struct.error, IndexError, KeyError):
+                return {}
+        ids = table("npcidentity.lub", "jobtbl")
+        names = table("jobname.lub", "JobNameTable")
+        self.names = {ids[k[1]]: v for k, v in names.items()
+                      if isinstance(k, lub.Symbol) and len(k) > 1 and k[1] in ids and isinstance(v, str)}
+        self.cache = {}
+
+    def has(self, mob):
+        name = self.names.get(mob)
+        return bool(name) and self.grf.has(MONSTER + name + ".spr")
+
+    def has_trap(self):
+        return self.grf.has(ITEM_ART + TRAP_ART)
+
+    def idle(self, mob):
+        """Primeiro quadro do monstro parado e de frente, sem bordas: (w, h, pixels) ou None."""
+        if mob in self.cache:
+            return self.cache[mob]
+        img = None
+        name = self.names.get(mob)
+        if name:
+            spr, act = self.grf.read(MONSTER + name + ".spr"), self.grf.read(MONSTER + name + ".act")
+            if spr and act:
+                try:
+                    part = Part(name, Sprite(spr), Act(act))
+                    res = compose([part], part, 0, 0, 0)
+                    img = crop(*res[:3]) if res else None
+                except Exception:  # noqa: BLE001 - sprite estranho (GRF modificada): fica sem desenho, sem travar
+                    img = None
+        self.cache[mob] = img
+        return img
+
+    def trap(self):
+        """A ilustração do item Armadilha (armadilha de urso), sem o fundo branco: (w, h, pixels) ou None."""
+        if "trap" not in self.cache:
+            img = None
+            data = self.grf.read(ITEM_ART + TRAP_ART)
+            if data:
+                try:
+                    img = crop(*clear_background(*bmp_rgba(data)))
+                except Exception:  # noqa: BLE001 - imagem estranha: fica sem desenho
+                    img = None
+            self.cache["trap"] = img
+        return self.cache["trap"]
+
+
+class MonsterLoader:
+    """Abre o bestiário numa thread e faz cada desenho pedido numa thread também (o widget não trava).
+    Pedidos: ("mob", id do monstro), ("trap",) ou ("char", visual, itens vestidos) para o personagem caído
+    (este usa o guarda-roupa da aba Equipamento, LOADER)."""
+
+    def __init__(self):
+        self.path = None
+        self.book = None
+        self.error = None
+        self._thread = None
+        self._busy = set()
+        self.cache = {}
+
+    def start(self, grf_path):
+        if not grf_path or (self.path == grf_path and (self.book or self._thread)):
+            return
+        self.path, self.book, self.error = grf_path, None, None
+
+        def run():
+            try:
+                self.book = Bestiary(grf_path)
+            except Exception as e:  # noqa: BLE001 - GRF que não dá para ler: o resumo aparece sem o desenho
+                self.error = str(e) or e.__class__.__name__
+            finally:
+                self._thread = None
+        self._thread = threading.Thread(target=run, daemon=True)
+        self._thread.start()
+
+    def expected(self, spec):
+        """Vale reservar espaço: o desenho existe ou ainda está carregando (e não falhou antes)."""
+        if not spec or self.cache.get(repr(spec), True) is None:
+            return False
+        if spec[0] == "char":
+            return LOADER.error is None and (LOADER.wardrobe is not None or LOADER.loading)
+        if self.book is None:
+            return self._thread is not None
+        return self.book.has_trap() if spec[0] == "trap" else self.book.has(spec[1])
+
+    def image(self, spec):
+        """A imagem pronta, ou None; se ainda não foi feita, começa numa thread e o próximo desenho pega."""
+        if not spec:
+            return None
+        key = repr(spec)
+        if key in self.cache:
+            return self.cache[key]
+        if spec[0] == "char":
+            w = LOADER.wardrobe
+            if w is None:
+                return None
+            base, worn = spec[1], spec[2]
+
+            def make():
+                look = look_at(dict(base), dict(worn), w.classnum) if worn else dict(base)
+                return dead_pose(w, look)
+        else:
+            b = self.book
+            if b is None:
+                return None
+            if spec[0] == "trap":
+                make = b.trap
+            else:
+                def make():
+                    return b.idle(spec[1])
+        if key not in self._busy:
+            self._busy.add(key)
+
+            def run():
+                try:
+                    self.cache[key] = make()
+                except Exception:  # noqa: BLE001 - desenho que falhou: o cartão usa a caveira
+                    self.cache[key] = None
+                finally:
+                    self._busy.discard(key)
+            threading.Thread(target=run, daemon=True).start()
+        return None
+
+
+MONSTERS = MonsterLoader()

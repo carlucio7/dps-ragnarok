@@ -1401,7 +1401,7 @@ class AnalysisWindow:
         self.nb.add(tab, text=_("XP"))
         self.xp_tiles = Tiles(tab, self, [
             ("est", _("XP estimada no recorte")), ("min", _("XP por minuto")), ("hour", _("XP por hora")),
-            ("kills", _("Abates")), ("factor", _("Fator de bônus")), ("level", _("Nível no início")),
+            ("kills", _("Abates")), ("factor", _("Fator de bônus")), ("level", _("Nível")),
             ("eta", _("Até o próximo nível")), ("real", _("XP real até a próxima gravação"))], min_w=140, dense=True)
         self.xp_tiles.pack(fill="x", padx=10, pady=(10, 0))
         self.label(tab, _("O replay não grava a XP ganha: só a XP total no início de cada gravação. A estimativa soma "
@@ -1409,8 +1409,9 @@ class AnalysisWindow:
                           "nível e a sua parte do dano, vezes os bônus. Os bônus de XP somam entre si, e o Milagre "
                           "multiplica o total (com +100%, dobra); os manuais e outros consumíveis competem entre si "
                           "(vale o maior). O replay mostra quando VIP, Cetro, Kafra Buff, manual, Banquete de Njord e "
-                          "Milagre estão ativos, mas não o evento do servidor: marque-o. \"Medido\" usa a XP exata "
-                          "entre duas gravações seguidas do mesmo personagem."),
+                          "Milagre estão ativos, mas não o evento do servidor: marque-o. \"Medido\" corrige a lista "
+                          "com a XP exata: cada subida de nível (a XP de cada nível é conhecida) e duas gravações "
+                          "seguidas do mesmo personagem; trechos com menos de 10 min não contam."),
                    "small", "muted", "panel", anchor="w", justify="left", wraplength=1150).pack(fill="x", padx=12,
                                                                                                pady=(6, 2))
         pw = ttk.PanedWindow(tab, orient="horizontal", style="An.TPanedwindow")
@@ -1589,7 +1590,7 @@ class AnalysisWindow:
     def xp_forget(self):
         c = self.combat()
         if c is not None:
-            (self.app.cfg.get("xp_factor") or {}).pop(str(c.session.gid), None)
+            (self.app.cfg.get("xp_corr") or {}).pop(str(c.session.gid), None)
             self.app.save()
             self.refresh(force=True)
 
@@ -1616,8 +1617,10 @@ class AnalysisWindow:
         else:
             put("min", "—", _("recorte curto demais"))
             put("hour", "—", _("recorte curto demais"))
-        eta, left = xp.time_to_level(c, cfg, est["per_min"])
-        if eta is None:
+        eta, left = xp.time_to_level(c, cfg)          # pelo ritmo dos últimos minutos
+        if eta is None and xp.warming_up(c, cfg):
+            put("eta", _("calculando…"), _("depois de 10 min de farm ou 1% do nível"))
+        elif eta is None:
             put("eta", "—", _("sem ritmo de XP no recorte"))
         else:
             put("eta", xp.span_text(eta) if eta else _("já subiu"),
@@ -1628,7 +1631,8 @@ class AnalysisWindow:
         put("kills", "%d" % est["kills"], per)
         kind, info = est["source"]
         if kind == "medido":
-            how = _("medido em %s") % info
+            how = _("lista × %s, da subida de nível desta gravação") % dec("%.3f" % est["correction"]) \
+                if info == "nivel" else _("lista × %s, de %d medidas") % (dec("%.3f" % est["correction"]), info)
         elif kind == "fixo":
             how = _("valor fixo: +%g%%") % info
         else:
@@ -1636,8 +1640,12 @@ class AnalysisWindow:
         put("factor", "×" + dec("%.2f" % est["factor"]), how)
         ses = c.session
         prog = meter.level_progress(ses)
-        put("level", "%d" % ses.base_level if ses.base_level else "—",
-            dec("%.2f%%" % (100 * prog)) if prog is not None else "")
+        pr = xp.progress(c, cfg)
+        if pr is not None and pr["pct"] is not None:   # agora: o último ponto exato + a XP estimada desde ele
+            put("level", "%d" % pr["level"], _("%s agora (estimado)") % dec("%.2f%%" % min(100.0, pr["pct"])))
+        else:
+            put("level", "%d" % ses.base_level if ses.base_level else "—",
+                dec("%.2f%%" % (100 * prog)) if prog is not None else "")
         nxt = meter.xp_after(c.path, ses)
         if nxt is None:
             put("real", "—", _("sem gravação depois desta"))
@@ -1692,15 +1700,20 @@ class AnalysisWindow:
             # bônus que o replay mostra e que não apareceu: nome em cinza (a caixa marcada só quer dizer "contar")
             absent = b["status"] is not None and b["key"] != "gear" and not seen.get(b["key"])
             self.xp_checks[b["key"]].configure(fg=self.c["muted"] if absent else self.c["fg"])
-        cal = (cfg.get("xp_factor") or {}).get(str(ses.gid))
-        self.xp_measured.configure(text=(_("×%s (%s)") % (dec("%.2f" % cal[0]), cal[2])) if cal
-                                   else _("ainda sem duas gravações seguidas"))
-        self.xp_mode_btns["medido"].configure(state="normal" if cal else "disabled")
+        corr, how = xp.correction(c, cfg)
+        if corr and how == "nivel":
+            text = _("lista × %s (subida de nível nesta gravação)") % dec("%.3f" % corr)
+        elif corr:
+            text = _("lista × %s (%d medidas de 10 min ou mais)") % (dec("%.3f" % corr), how)
+        else:
+            text = _("ainda sem subida de nível ou duas gravações seguidas de 10 min ou mais")
+        self.xp_measured.configure(text=text)
+        self.xp_mode_btns["medido"].configure(state="normal" if corr else "disabled")
         lst = xp.estimate(c, dict(cfg, xp_mode="lista"), self.rng)
         parts = [_("Pela lista: ×%s") % dec("%.2f" % lst["factor"])]
-        if cal:
-            diff = (cal[0] / lst["factor"] - 1) * 100 if lst["factor"] else 0
-            parts.append(_("medido: ×%s (%s%% da lista)") % (dec("%.2f" % cal[0]), dec("%+.1f" % diff)))
+        if corr:
+            parts.append(_("medido: ×%s (%s%% da lista)") % (dec("%.2f" % (lst["factor"] * corr)),
+                                                             dec("%+.1f" % ((corr - 1) * 100))))
         self.xp_compare.configure(text=" · ".join(parts))
         self.xp_series = (series, ses.next_exp)
         self.draw_xp_chart()
@@ -2491,12 +2504,14 @@ class AnalysisWindow:
             text = _("Creditado = a parte do dano que é do próprio jogador (os golpes dele sem os efeitos dos outros) "
                      "mais o que os efeitos que ele pôs renderam nos golpes de todos: Cometa, Pólen, Garra Sombria, "
                      "Avanço Sísmico, Lex Aeterna... Quando vários efeitos valem no mesmo golpe, o ganho é dividido "
-                     "entre eles, então tudo soma 100%. Buffs que não mudam o dano direto (Bênção, Agilidade...) não "
-                     "entram. É estimativa, e só conta o que aparece no replay.")
+                     "entre eles, então tudo soma 100%. Ficam de fora os buffs cujo ganho depende de atributos que o "
+                     "replay não mostra (Competentia, Benedictum, Bênção, Agilidade...). É estimativa, e só conta o que "
+                     "aparece no replay.")
         else:
             text = _("Rendeu = quanto o dano cairia sem o efeito, pela fórmula de cada um (rAthena e textos do "
-                     "jogo), golpe a golpe e só onde ele vale (fogo, físico, corpo a corpo...). É estimativa: "
-                     "os que não mudam o dano direto (Bênção, Agilidade...) aparecem só com o tempo ativo.")
+                     "jogo), golpe a golpe e só onde ele vale (fogo, físico, corpo a corpo...). É estimativa: os "
+                     "buffs cujo ganho depende de atributos que o replay não mostra (Competentia, Benedictum, Bênção, "
+                     "Agilidade...) aparecem só com o tempo ativo.")
         self.bf_note.configure(text=text)
         if redraw:
             self.refresh(force=True)
