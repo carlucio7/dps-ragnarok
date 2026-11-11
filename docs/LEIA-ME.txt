@@ -41,6 +41,9 @@ SEGURANÇA
   Biosfera de Varmundt) e, no registro do Windows, onde o jogo foi instalado.
   Não altera nada disso, não lê a memória do jogo, não injeta nada, não
   captura pacotes de rede e não acessa a internet.
+- Para o lembrete de gravação desligada, ele olha apenas se o jogo está
+  aberto (o nome do programa na lista do Windows). Dá para desligar no menu.
+- "Copiar imagem" copia só as janelas do próprio Replay Master.
 - Ele grava só as próprias configurações, os testes salvos e um cache dos nomes
   em %APPDATA%\RODpsMeter.
 - O programa não tem assinatura digital, então o Windows pode mostrar "O Windows

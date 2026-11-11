@@ -63,14 +63,19 @@ def auto_attack(src, dst, dmg, action=0, left=0):
     return struct.pack("<HIIIiiiBhBi", rrf.P_ACT3_NEW, src, dst, 0, 0, 0, dmg, 0, 1, action, left)
 
 
-def spawn(aid, kind, job, name, gid=0, boss=False):
-    """0x09fe com os campos que o medidor le nas posicoes certas."""
+def spawn(aid, kind, job, name, gid=0, boss=False, pos=None, stand=False):
+    """0x09fe com os campos que o medidor le nas posicoes certas; com stand=True, o 0x09ff (aparecer parado), que
+    tem 1 byte a mais antes do nivel. pos = (x, y) da unidade."""
     kinds = {v: k for k, v in rrf.OBJ_KIND.items()}
-    p = bytearray(83)
-    struct.pack_into("<HHBII", p, 0, rrf.P_SPAWN_IDLE, 0, kinds[kind], aid, gid)
+    extra = 1 if stand else 0
+    p = bytearray(83 + extra)
+    struct.pack_into("<HHBII", p, 0, rrf.P_SPAWN_STAND if stand else rrf.P_SPAWN_IDLE, 0, kinds[kind], aid, gid)
     struct.pack_into("<h", p, 23, job)
+    if pos is not None:
+        x, y = pos
+        p[63:66] = bytes([x >> 2, ((x & 3) << 6) | (y >> 4), (y & 0x0F) << 4])
     level = (2 if boss else 0) if isinstance(boss, bool) else boss   # 0 normal, 1 chefe menor, 2 MVP
-    struct.pack_into("<iiB", p, 72, -1, -1, level)                   # a LATAM manda -1 no HP
+    struct.pack_into("<iiB", p, 72 + extra, -1, -1, level)           # a LATAM manda -1 no HP
     p += name.encode("utf-8")
     struct.pack_into("<H", p, 2, len(p))
     return bytes(p)
@@ -94,6 +99,31 @@ def ground_unit(unit, caster):
     return struct.pack("<HHIIhhBBB", rrf.P_GROUND_UNIT, 19, unit, caster, 10, 10, 0x7e, 1, 1)
 
 
+def ground_area(unit, caster, x, y, kind, level, radius=0):
+    """0x09ca no formato atual (23 bytes): uma célula de área no chão (kind 0x9a = Vulcão, 0xf4 = Insígnia da Terra)."""
+    return struct.pack("<HHIIhhIbBB", rrf.P_GROUND_UNIT, 23, unit, caster, x, y, kind, radius, 1, level)
+
+
+def ground_gone(unit):
+    """0x0120: a célula saiu do chão."""
+    return struct.pack("<HI", rrf.P_GROUND_GONE, unit)
+
+
+def ground_skill(src, skill, level, x, y):
+    """0x0117: skill usada numa célula (monstros mandam nível 65535)."""
+    return struct.pack("<HHIHhhI", rrf.P_GROUND_SKILL, skill, src, level, x, y, 0)
+
+
+def stop(aid, x, y):
+    """0x0088: a unidade parou em (x, y)."""
+    return struct.pack("<HIhh", rrf.P_STOP, aid, x, y)
+
+
+def map_move(name, x, y):
+    """0x0091: quem grava trocou de mapa ou teleportou."""
+    return struct.pack("<H16shh", rrf.P_MAPMOVE, name.encode() + b".gat", x, y)
+
+
 def build(aid, events, **kw):
     """events: lista de (t_ms, pacote). Devolve (bytes do arquivo, offset do fluxo)."""
     head, keys = header(aid, **kw)
@@ -107,8 +137,19 @@ def without_table(data):
     return bytes(z)
 
 
-def skill_use(src, dst, skill):
-    return struct.pack("<HHiIIB", rrf.P_SKILL_NODMG, skill, 1, dst, src, 1)
+def skill_use(src, dst, skill, level=1):
+    return struct.pack("<HHiIIB", rrf.P_SKILL_NODMG, skill, level, dst, src, 1)
+
+
+def quest_hunt(entries):
+    """0x0afe: progresso de caça; entries = [(missão, id da caça, meta, contagem)]."""
+    body = b"".join(struct.pack("<IIIHH", quest, ident, 1, goal, count) for quest, ident, goal, count in entries)
+    return struct.pack("<HHH", rrf.P_QUEST_HUNT, 6 + len(body), len(entries)) + body
+
+
+def quest_done(quest):
+    """0x02b4: a missão saiu da lista (concluída ou entregue)."""
+    return struct.pack("<HI", rrf.P_QUEST_DONE, quest)
 
 
 def cast(src, dst, skill, ms):
@@ -169,6 +210,12 @@ def build_grf(path, files):
     head = b"Event Horizon\x00c\x00" + bytes(14) + struct.pack("<QII", len(body), len(files), 0x300)
     with open(path, "wb") as f:
         f.write(head + body + struct.pack("<III", 0, len(ztable), len(table)) + ztable)
+
+
+def broadcast(key):
+    """0x01c3: anúncio do mapa com o texto como chave entre bytes 0x1c, como nas instâncias."""
+    body = bytes([0x1C]) + key.encode("ascii") + bytes([0x1C, 0])
+    return struct.pack("<HH", rrf.P_BROADCAST, 16 + len(body)) + bytes.fromhex("ffff000090010c0000000000") + body
 
 
 def effect(aid, effect_id):

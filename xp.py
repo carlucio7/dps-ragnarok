@@ -8,8 +8,8 @@ O replay não grava a XP ganha: só a XP total no início de cada gravação (se
 - XP do monstro: data/mob_exp.json (rAthena, mais os monstros novos com a XP do Divine Pride).
 - Penalidade de nível: a mesma tabela do rAthena e do Divine Pride (nível do monstro − nível do jogador).
 - Parte do dano: quanto do dano no monstro foi de quem grava (grupo dividindo XP não entra).
-- Fator: os bônus somados (servidor, VIP, manuais, equipamentos...), vezes o Milagre à parte (a Bênção
-  Estelar entra antes dos outros bônus, então +100% dobra o total). Os bônus que aparecem como status (manual,
+- Fator: [(1 + evento, VIP e Cetro) × (1 + itens e Njord) + manual e Kafra] × Milagre (dobra), medido com a
+  XP exata que o servidor manda pela rede (ver BONUSES). Os bônus que aparecem como status (manual,
   Njord, Milagre, VIP...) são seguidos golpe a golpe; o que o replay não mostra (evento do servidor, algum item)
   vira uma correção sobre a lista, medida com XP exata: duas gravações seguidas do mesmo personagem (a XP no
   começo da seguinte) ou uma subida de nível no meio da gravação (o jogo manda o nível novo, e a XP de cada nível
@@ -177,20 +177,30 @@ def level_segments(c, cfg):
     return out
 
 
+def quest_in(c, t0, t1):
+    """True se quem grava concluiu ou entregou alguma missão no trecho: a XP da recompensa não vem de abate, então
+    o trecho não serve para medir a XP dos abates (uma entrega de diária no Porão rendeu 3% do nível de uma vez)."""
+    return any(t0 <= t <= t1 for t, _q in getattr(c, "quests_done", ()))
+
+
 def _list_xp(c, cfg, rng):
+    """XP dos abates do trecho pela lista de bônus (sem correção e sem missões), ou None se não dá para medir."""
     est = estimate(c, dict(cfg or {}, xp_mode="lista"), rng)
-    return None if est["unknown"] or not est["xp"] else est["xp"]
+    return None if est["unknown"] or not est["kill_xp"] else est["kill_xp"]
 
 
 def session_correction(c, cfg):
     """(real ÷ lista, XP real coberta) das subidas de nível desta gravação, ou None."""
     # os trechos já fecharam (terminam numa subida de nível): não mudam com o que chega depois
-    sig = (id(c), len(getattr(c, "level_ups", ())), repr(sorted((cfg or {}).get("xp_bonuses", {}).items())))
+    sig = (id(c), len(getattr(c, "level_ups", ())), len(getattr(c, "quests_done", ())),
+           repr(sorted((cfg or {}).get("xp_bonuses", {}).items())))
     hit = _CACHE.get("sc")
     if hit and hit[0] == sig:
         return hit[1]
     real = est = 0.0
     for t0, t1, gain in level_segments(c, cfg):
+        if quest_in(c, t0, t1):
+            continue
         e = _list_xp(c, cfg, (t0, t1))
         if e:
             real += gain
@@ -232,9 +242,34 @@ def calibrate(c, cfg, xp_after):
         return None
     if s.base_level and s.next_exp and s.next_exp != 999999999:
         cfg.setdefault("xp_levels", {}).setdefault(str(s.job), {})[str(s.base_level)] = s.next_exp
+    remember_manual(c, cfg)
+    segs = exact_segments(c, cfg, xp_after)
+    detect_server(c, cfg, segs)                  # antes de medir: a correção é sobre a lista já acertada
+    when = "%04d-%02d-%02d %02d:%02d" % tuple(s.recorded_at[:5])
+    name = os.path.basename(c.path)
+    new = []
+    for t0, t1, gain, tag in segs:
+        if quest_in(c, t0, t1) or not _big(c, cfg, t0, t1, gain):
+            continue
+        est = _list_xp(c, cfg, (t0, t1))
+        if est:
+            new.append([round(gain / est, 4), gain, when, "%s#%s" % (name, tag)])
+    learn_quests(c, cfg, segs)
+    if not new:
+        return None
+    entry = cfg.setdefault("xp_corr", {}).setdefault(str(s.gid), {})
+    keep = [x for x in entry.get("samples", []) if not x[3].startswith(name + "#")] + new
+    entry["samples"] = keep[-CALIBRATE_KEEP:]
+    return stored_correction(c, cfg)[0]
+
+
+def exact_segments(c, cfg, xp_after=None):
+    """Trechos da gravação com a XP real exata: [(início, fim, XP real, rótulo)]. Cada subida de nível fecha um; com
+    `xp_after`, o último vai até o começo da gravação seguinte do personagem, se ela começou logo depois."""
+    s = c.session
     segs = [(t0, t1, gain, "%d" % i) for i, (t0, t1, gain) in enumerate(level_segments(c, cfg))]
     an = anchors(c)
-    nxt = xp_after(c.path, s)
+    nxt = xp_after(c.path, s) if xp_after is not None and getattr(c, "path", None) else None
     if an and nxt and nxt.get("exp") is not None:
         start, other = _seconds(s.recorded_at), _seconds(nxt["when"])
         if start is not None and other is not None and other - (start + c.now / 1000.0) <= CALIBRATE_GAP_S:
@@ -246,44 +281,111 @@ def calibrate(c, cfg, xp_after):
                 gain = need(c, cfg, lv) - x0 + nxt["exp"]
             if gain and gain > 0:
                 segs.append((t0, c.now, gain, "fim"))
-    when = "%04d-%02d-%02d %02d:%02d" % tuple(s.recorded_at[:5])
-    name = os.path.basename(c.path)
-    new = []
-    for t0, t1, gain, tag in segs:
-        rows, _u = kills(c, (t0, t1))
-        est = _list_xp(c, cfg, (t0, t1))
-        lv = level_at(c, t0)
-        nd = need(c, cfg, lv)
-        big = t1 - t0 >= CALIBRATE_MIN_MS or (nd and gain >= CALIBRATE_MIN_FRAC * nd)
-        if not big or len(rows) < CALIBRATE_MIN_KILLS or not est:
-            continue
-        new.append([round(gain / est, 4), gain, when, "%s#%s" % (name, tag)])
-    if not new:
+    return segs
+
+
+def _big(c, cfg, t0, t1, gain):
+    """O trecho serve para medir: 10 min ou 1% do nível, e pelo menos 3 abates."""
+    nd = need(c, cfg, level_at(c, t0))
+    big = t1 - t0 >= CALIBRATE_MIN_MS or (nd and gain >= CALIBRATE_MIN_FRAC * nd)
+    return bool(big) and len(kills(c, (t0, t1))[0]) >= CALIBRATE_MIN_KILLS
+
+
+def _manual_blind(c, t0, t1):
+    """True se no trecho valeu um manual sem o valor (já ativo no começo da gravação) e sem um último % lembrado:
+    a lista pode estar errada por causa dele, não do evento do servidor."""
+    return any(v <= 0 and s < t1 and e > t0 for s, e, v in _lasting_vals(c, 250))
+
+
+def detect_server(c, cfg, segs=None, xp_after=None):
+    """Deduz o evento do servidor da XP exata (só no modo automático). Em cada trecho exato que serve (sem entrega
+    de missão, sem manual de valor desconhecido), a lista é refeita com o evento em 0, 50, 100 e 200%; se um deles
+    fecha a 6% do real e o que está marcado erra mais de 12%, o programa marca esse (e esquece as medidas antigas,
+    que eram sobre a lista errada). Devolve o % novo (0 = sem evento) ou None se nada mudou."""
+    if (cfg.get("xp_mode") if cfg.get("xp_mode") in MODES else "auto") != "auto" or not _fresh(c):
         return None
-    entry = cfg.setdefault("xp_corr", {}).setdefault(str(s.gid), {})
-    keep = [x for x in entry.get("samples", []) if not x[3].startswith(name + "#")] + new
-    entry["samples"] = keep[-CALIBRATE_KEEP:]
-    return stored_correction(c, cfg)[0]
+    segs = exact_segments(c, cfg, xp_after) if segs is None else segs
+    known = (cfg.get("xp_manual_last") or {}).get(str(c.session.gid))
+    use = [(t0, t1, gain) for t0, t1, gain, _tag in segs
+           if not quest_in(c, t0, t1) and _big(c, cfg, t0, t1, gain) and (known or not _manual_blind(c, t0, t1))]
+    real = sum(g for _a, _b, g in use)
+    if not real:
+        return None
+
+    def ratio(pct):
+        bon = dict(cfg.get("xp_bonuses") or {})
+        bon["server"] = dict(on=pct > 0, pct=pct or 100)
+        est = [_list_xp(c, dict(cfg, xp_bonuses=bon), (t0, t1)) for t0, t1, _g in use]
+        return real / sum(est) if all(est) else None
+    cur = settings(cfg)["server"]
+    now = cur["pct"] if cur["on"] else 0
+    fits = {pct: ratio(pct) for pct in set(SERVER_CHOICES) | {now}}
+    if any(v is None for v in fits.values()):
+        return None
+    best = min(SERVER_CHOICES, key=lambda p: abs(fits[p] - 1.0))
+    if best == now or abs(fits[best] - 1.0) > SERVER_FIT or abs(fits[now] - 1.0) < SERVER_MISS:
+        return None
+    cfg.setdefault("xp_bonuses", {})["server"] = dict(on=best > 0, pct=best or 100, auto=True)
+    cfg.get("xp_corr", {}).pop(str(c.session.gid), None)
+    _CACHE.pop("sc", None)
+    return best
+
+
+def learn_quests(c, cfg, segs):
+    """Aprende a XP de uma missão num trecho com XP exata: real − abates − missões já conhecidas. Só quando há uma
+    única missão desconhecida no trecho e ela pesa pelo menos um quarto dele (abaixo disso o erro dos abates
+    engole a conta). Guarda a recompensa sem bônus em cfg["xp_quests"]. True se aprendeu alguma."""
+    if not QUEST_XP_ON:
+        return False
+    corr = correction(c, cfg)[0] or 1.0
+    learned = False
+    for t0, t1, gain, _tag in segs:
+        qs = quest_rows(c, cfg, (t0, t1))
+        unknown = [q for q in qs if q["xp"] is None]
+        if len(unknown) != 1 or len({q["quest"] for q in unknown}) != 1:
+            continue
+        est = _list_xp(c, cfg, (t0, t1))
+        if not est:
+            continue
+        rest = gain - est * corr - sum(q["xp"] for q in qs if q["xp"])
+        if rest < QUEST_LEARN_MIN * gain:
+            continue
+        q = unknown[0]
+        cfg.setdefault("xp_quests", {})[str(q["quest"])] = dict(base=int(round(rest / q["mult"])),
+                                                              level=level_at(c, q["t"]))
+        learned = True
+    return learned
 
 
 # Bônus de XP. Os detectáveis valem só enquanto o status está ativo em quem grava; os consumíveis (manuais)
-# competem entre si: vale só o maior. Todos somam entre si, menos o Milagre (mult=True): ele aparece como o
-# status 160 de 1 hora (sem ícone no jogo) e multiplica o total dos outros — o jogo aplica a Bênção Estelar
-# num passo antes dos outros bônus (rAthena mob_dead; conferido no replay de 89 min: 14,48% estimado x 14,49%
-# real). Evento do servidor e outros não aparecem no replay: a pessoa marca. val=True: o % vem do status
-# quando o jogo manda (Njord 60, manual 50...).
+# competem entre si: vale só o maior. A conta foi medida abate a abate com a XP exata que o servidor manda pela
+# rede (capturas de 2026-11-11, mais de 1.300 abates; o replay não grava esses pacotes):
+#
+#     XP = XP do monstro × penalidade × [ (1 + g) × (1 + k) + p ] × (1 + primeiro passo)
+#
+#   g ("role" g): evento do servidor e os bônus de conta (VIP, Cetro);
+#   k: o que aumenta a XP de cada abate e multiplica só o grupo g: texto dos itens e Banquete de Njord;
+#   p: o que soma por fora, sobre a XP crua do monstro: manuais e o Kafra Buff (status "Manual de Mascar");
+#   primeiro passo: Milagre (+100%, dobra tudo) ou, sem ele, o alvo da Oposição no dia certo (mark_pct).
+# Fatores medidos com evento 100, VIP 20, Cetro 30 e Kafra 50: 3,000; com 15% de itens 3,375; com Njord 4,875;
+# com Milagre o dobro; com manual de 100% mais 1,0 antes de dobrar. VIP + Cetro e Kafra valem os mesmos 50
+# pontos em quem foi medido, então qual dos dois fica em g é o mais provável (o Kafra é da família dos manuais,
+# e a XP das missões fecha com manual + Kafra), não medido.
+# Evento do servidor e outros não aparecem no replay: a pessoa marca. val=True: o % vem do status quando o
+# jogo manda (Njord 60, manual 50...).
 BONUSES = [
-    dict(key="server", name="Evento do servidor", pct=100, status=None, on=False),
-    dict(key="vip", name="VIP (Bônus de EXP II, 30 dias)", pct=20, status=984, on=True, lasting=True),
-    dict(key="scepter", name="Cetro do Coração Lunar (Bônus de EXP, 24 h)", pct=30, status=939, on=True, lasting=True),
-    dict(key="kafra", name="Kafra Buff / Manual Kafra (7 dias)", pct=50, status=1085, on=True, lasting=True),
+    dict(key="server", name="Evento do servidor", pct=100, status=None, on=False, role="g"),
+    dict(key="vip", name="VIP (Bônus de EXP II, 30 dias)", pct=20, status=984, on=True, lasting=True, role="g"),
+    dict(key="scepter", name="Cetro do Coração Lunar (Bônus de EXP, 24 h)", pct=30, status=939, on=True, lasting=True,
+         role="g"),
+    dict(key="kafra", name="Kafra Buff / Manual Kafra (7 dias)", pct=50, status=1085, on=True, lasting=True, role="p"),
     dict(key="manual", name="Manual de combate (consumível)", pct=50, status=250, on=True, group="consumível",
-         lasting=True, val=True),
-    dict(key="njord", name="Banquete de Njord", pct=60, status=78, on=True, val=True),
+         lasting=True, val=True, role="p"),
+    dict(key="njord", name="Banquete de Njord", pct=60, status=78, on=True, val=True, role="k"),
     dict(key="miracle", name="Milagre Solar, Lunar e Estelar (multiplica os outros bônus)", pct=100,
-         status="milagre", on=True, mult=True),
+         status="milagre", on=True, role="first"),
     dict(key="gear", name="Equipamentos, visuais e cartas (texto dos itens)", pct=0, status="equipamento", on=True,
-         val=True),
+         val=True, role="k"),
     # bônus "[Durante o Evento]" do texto dos itens (ex.: Carta Baby Shark): o evento do item costuma acabar antes
     # do item sair do jogo, então fica desligado até a pessoa marcar
     dict(key="gear_event", name="Bônus de evento dos itens ([Durante o Evento])", pct=0, status=None, on=False),
@@ -292,18 +394,54 @@ BONUSES = [
 # manuais de XP (consumíveis; não acumulam entre si), com o bônus do texto do item na LATAM (Divine Pride)
 MANUALS = [("Manual de Combate", 50), ("Manual de Combate com Chiclete", 50), ("Manual de Campo Avançado", 100),
            ("Enciclopédia de Combate", 200), ("Manual de Combate HE", 200), ("Manual de Combate x3", 300)]
-MODES = ("lista", "medido", "fixo")
+# "auto" (padrão): a lista, com a correção medida assim que existir uma, e o evento do servidor deduzido da XP exata
+MODES = ("auto", "lista", "medido", "fixo")
+SERVER_CHOICES = (0, 50, 100, 200)   # o evento do servidor costuma ser +50%, +100% ou +200%
+SERVER_FIT, SERVER_MISS = 0.06, 0.12  # o evento deduzido tem de fechar a 6% do real, e o marcado errar mais de 12%
 
 
-def settings(cfg):
-    """{chave: {"on", "pct"}} dos bônus, com os padrões para o que a pessoa ainda não mexeu."""
+def settings(cfg, c=None):
+    """{chave: {"on", "pct"}} dos bônus, com os padrões para o que a pessoa ainda não mexeu. Com `c`, o manual leva
+    também "last": o % do último manual visto nesse personagem (para quando o manual já estava ativo no começo da
+    gravação e o jogo não manda o valor)."""
     saved = cfg.get("xp_bonuses") or {}
     out = {}
     for b in BONUSES:
         st = saved.get(b["key"]) or {}
         pct = st.get("pct")
         out[b["key"]] = dict(on=bool(st.get("on", b["on"])), pct=float(pct) if isinstance(pct, (int, float)) else b["pct"])
+    if c is not None:
+        last = (cfg.get("xp_manual_last") or {}).get(str(c.session.gid))
+        if isinstance(last, (int, float)) and last > 0:
+            out["manual"]["last"] = float(last)
     return out
+
+
+MAX_AGE_S = 24 * 3600         # o automático só mexe na configuração com gravação de até um dia (None = qualquer)
+
+
+def _fresh(c):
+    """A gravação é de agora (até um dia)? Abrir um replay antigo não pode mudar o evento do servidor de hoje."""
+    if MAX_AGE_S is None:
+        return True
+    start = _seconds(c.session.recorded_at)
+    if start is None:
+        return False
+    import time
+    return time.time() - (start + c.now / 1000.0) <= MAX_AGE_S
+
+
+def remember_manual(c, cfg):
+    """Guarda o % do último manual que o jogo mandou para quem grava (cfg["xp_manual_last"]). True se mudou."""
+    vals = [(s, v) for s, _e, v in _lasting_vals(c, 250) if v > 0]
+    if not vals or not c.session.gid or not _fresh(c):
+        return False
+    pct = max(vals)[1]
+    store = cfg.setdefault("xp_manual_last", {})
+    if store.get(str(c.session.gid)) == pct:
+        return False
+    store[str(c.session.gid)] = pct
+    return True
 
 
 def windows(c, cfg=None):
@@ -356,34 +494,73 @@ def _pct_at(b, t, wins, sets):
             hit = v
     if hit is None:
         return None
-    return hit if b.get("val") and hit > 0 else st["pct"]     # Njord e manuais trazem o % no próprio status
+    if b.get("val") and hit > 0:               # Njord e manuais trazem o % no próprio status
+        return hit
+    return st.get("last") or st["pct"]         # sem o valor: o último manual visto no personagem, senão o digitado
 
 
-def bonus_at(t, wins, sets):
-    """Bônus que somam (%) num instante, com a regra dos consumíveis (vale o maior). Sem o Milagre."""
-    total, group = 0.0, {}
+def parts_at(t, wins, sets):
+    """Bônus (%) de cada papel num instante: {"g", "k", "p", "first"}, com a regra dos consumíveis (vale o maior)."""
+    out, group = {"g": 0.0, "k": 0.0, "p": 0.0, "first": 0.0}, {}
     for b in BONUSES:
-        if b.get("mult"):
-            continue
         pct = _pct_at(b, t, wins, sets)
         if pct is None:
             continue
+        role = b.get("role", "p")
         if b.get("group"):
-            group[b["group"]] = max(group.get(b["group"], 0.0), pct)
+            group[(role, b["group"])] = max(group.get((role, b["group"]), 0.0), pct)
         else:
-            total += pct
-    return total + sum(group.values())
+            out[role] += pct
+    for (role, _name), pct in group.items():
+        out[role] += pct
+    return out
 
 
-def factor_at(t, wins, sets):
-    """Fator de XP num instante: (100% + bônus que somam) × (100% + Milagre)."""
-    k = 1.0 + bonus_at(t, wins, sets) / 100.0
-    for b in BONUSES:
-        if b.get("mult"):
-            pct = _pct_at(b, t, wins, sets)
-            if pct is not None:
-                k *= 1.0 + pct / 100.0
-    return k
+def bonus_at(t, wins, sets):
+    """Soma simples dos bônus num instante (%), sem o Milagre. Só para mostrar: a conta de verdade é factor_at."""
+    a = parts_at(t, wins, sets)
+    return a["g"] + a["k"] + a["p"]
+
+
+# Alvos da Oposição (Bênção Solar, Lunar e Estelar no nível 5): o Solar rende +50% nos dias pares do mês, o Lunar
+# +50% nos ímpares e o Estelar +100% nos dias múltiplos de 5 (regra do rAthena; medido: Jeniffer marcada como Lunar
+# rendeu ×1,5 no dia 11, e os alvos Solar e Estelar não renderam nada a mais). Com Milagre todo monstro dobra e a
+# marca não soma. O replay só mostra a marca quando a pessoa usa a Oposição durante a gravação.
+MARK_PCT = (50.0, 50.0, 100.0)
+
+
+def marks_of(c):
+    """(data e hora do começo da gravação, [(t, casa, id do monstro)]) dos alvos da Oposição vistos, ou None."""
+    rows = sorted((0 if already else t, slot, mob) for t, slot, mob, already in getattr(c, "hate_marks", ()))
+    if not rows:
+        return None
+    try:
+        start = datetime.datetime(*c.session.recorded_at[:6])
+    except (TypeError, ValueError):
+        return None
+    return start, rows
+
+
+def mark_pct(marks, t, mob):
+    """% do primeiro passo para um abate de `mob` em t pelo alvo da Oposição (0 se não é alvo ou não é o dia)."""
+    if not marks or mob is None:
+        return 0.0
+    start, rows = marks
+    cur = {}
+    for when, slot, m in rows:
+        if when <= t:
+            cur[slot] = m
+    day = (start + datetime.timedelta(milliseconds=t)).day
+    ok = (day % 2 == 0, day % 2 == 1, day % 5 == 0)
+    return max([MARK_PCT[s] for s in range(3) if cur.get(s) == mob and ok[s]] or [0.0])
+
+
+def factor_at(t, wins, sets, mob=None, marks=None):
+    """Fator de XP de um abate: [(1 + g) × (1 + k) + p] × (1 + primeiro passo). `mob` e `marks` (marks_of) entram
+    só para o alvo da Oposição, quando não há Milagre."""
+    a = parts_at(t, wins, sets)
+    first = a["first"] or mark_pct(marks, t, mob)
+    return ((1.0 + a["g"] / 100.0) * (1.0 + a["k"] / 100.0) + a["p"] / 100.0) * (1.0 + first / 100.0)
 
 
 def detected(c, cfg=None):
@@ -405,41 +582,113 @@ def detected(c, cfg=None):
 def factor(c, cfg):
     """(fator fixo ou None, origem, correção sobre a lista). None = pela lista de bônus, golpe a golpe.
     origem: ("lista", None) | ("medido", "nivel" ou nº de medidas) | ("fixo", bônus %)."""
-    mode = cfg.get("xp_mode") if cfg.get("xp_mode") in MODES else "lista"
-    if mode == "medido":
+    mode = cfg.get("xp_mode") if cfg.get("xp_mode") in MODES else "auto"
+    if mode in ("auto", "medido"):
         corr, how = correction(c, cfg)
         if corr:
             return None, ("medido", how), corr
     if mode == "fixo" and isinstance(cfg.get("xp_fixed"), (int, float)):
         return (100.0 + cfg["xp_fixed"]) / 100.0, ("fixo", cfg["xp_fixed"]), 1.0
-    return None, ("lista", None), 1.0
+    # "auto" sem nenhuma medida ainda: vale a lista, mas a previsão é só aproximada (a tela diz isso)
+    return None, ("auto" if mode == "auto" else "lista", None), 1.0
+
+
+# XP das missões: o replay mostra a entrega (a missão sai da lista), não quanto ela rende, e o jogo instalado só
+# traz a recompensa de 50 das 10 mil missões. DESLIGADO por enquanto (QUEST_XP_ON): só duas entregas foram medidas
+# com a XP exata (capturas de 2026-11-11, nível 247, com evento, VIP, Cetro, Kafra, manual 100%, Njord e Milagre
+# ativos), e a regra dos bônus ainda não fecha. Sobre os valores oficiais (iRO Wiki, "Clock Tower: Unknown
+# Basement": Jantar 698.346.800, Mímico 1.745.867), o Jantar rendeu ×8 e o Mímico ×4 na mesma entrega; o Mímico
+# fecha ao ponto com ×2,5 (manual + Kafra) e ×1,6 (Njord), o Jantar tem um ×2 a mais ainda sem explicação.
+# Enquanto estiver desligado, as entregas aparecem listadas mas a XP delas não entra na estimativa; os trechos
+# com entrega continuam fora da calibração (quest_in).
+QUEST_XP_ON = False
+QUEST_XP = {5964: 2234709760,        # [Diário] Jantar do Diabo: o medido ÷ 2,5 (hipótese manual + Kafra)
+            5970: 2793387}           # [Diário] Mímico de Estimação: idem
+QUEST_KEYS = ("manual", "kafra")     # os bônus que valeriam na XP de missão (hipótese)
+QUEST_LEARN_MIN = 0.25               # só aprende a XP de uma missão que pese pelo menos isso do trecho exato
+
+
+def quest_base(qid, cfg):
+    """Recompensa da missão sem bônus (a aprendida, senão a da tabela) ou None. Sempre None com QUEST_XP_ON
+    desligado."""
+    if not QUEST_XP_ON:
+        return None
+    learned = ((cfg or {}).get("xp_quests") or {}).get(str(qid))
+    if isinstance(learned, dict) and isinstance(learned.get("base"), (int, float)) and learned["base"] > 0:
+        return float(learned["base"])
+    return QUEST_XP.get(qid)
+
+
+def quest_mult(t, wins, sets):
+    """Multiplicador da XP de missão num instante: 1 + manual + Kafra Buff."""
+    extra, best = 0.0, 0.0
+    for b in BONUSES:
+        if b["key"] in QUEST_KEYS:
+            pct = _pct_at(b, t, wins, sets)
+            if pct is not None:
+                if b.get("group"):
+                    best = max(best, pct)
+                else:
+                    extra += pct
+    return 1.0 + (extra + best) / 100.0
+
+
+def quest_rows(c, cfg, rng=None, wins=None, sets=None):
+    """Missões entregues por quem grava no recorte: [dict(t, quest, base, mult, xp)] (xp None = recompensa que o
+    programa ainda não conhece)."""
+    done = [(t, q) for t, q in getattr(c, "quests_done", ()) if rng is None or rng[0] <= t <= rng[1]]
+    if not done:
+        return []
+    wins = windows(c, cfg) if wins is None else wins
+    sets = settings(cfg, c) if sets is None else sets
+    out = []
+    for t, q in done:
+        base = quest_base(q, cfg)
+        mult = quest_mult(t, wins, sets)
+        out.append(dict(t=t, quest=q, base=base, mult=mult, xp=base * mult if base else None))
+    return out
+
+
+def quests_uncounted(c, cfg=None):
+    """Quantas missões foram entregues desde o último ponto exato (começo da gravação ou subida de nível) sem a
+    XP entrar na conta. Enquanto houver alguma, o nível mostrado está abaixo do real e o tempo até o próximo nível,
+    acima: a tela avisa."""
+    an = anchors(c)
+    since = an[-1][0] if an else 0
+    return sum(1 for q in quest_rows(c, cfg or {}, (since, c.now)) if q["xp"] is None)
 
 
 def estimate(c, cfg, rng=None):
-    """XP de base estimada no recorte: dict(xp, base, kills, unknown, factor (médio), source, per_hour,
-    per_min, per_min_pct (% do nível por minuto), rows (com "total" de cada abate))."""
+    """XP de base estimada no recorte: dict(xp (abates + missões), kill_xp, quest_xp, quests (quest_rows),
+    quests_unknown, base, kills, unknown, factor (médio dos abates), source, per_hour, per_min, per_min_pct (% do
+    nível por minuto; ritmo só dos abates), rows (com "total" de cada abate))."""
     rows, unknown = kills(c, rng)
     f, source, corr = factor(c, cfg)
+    wins = sets = None
     if f is None:
-        wins, sets = windows(c, cfg), settings(cfg)
+        wins, sets, marks = windows(c, cfg), settings(cfg, c), marks_of(c)
     total = base = 0.0
     for r in rows:
         if r["xp"] is None:
             r["total"] = None
             continue
-        k = f if f is not None else factor_at(r["t"], wins, sets) * corr
+        k = f if f is not None else factor_at(r["t"], wins, sets, r["mob"], marks) * corr
         r["total"] = r["xp"] * k
         base += r["xp"]
         total += r["total"]
+    quests = quest_rows(c, cfg, rng, wins, sets)
+    quest_xp = sum(q["xp"] for q in quests if q["xp"])
     span = (rng[1] - rng[0]) if rng else c.now
     long_enough = span and span > 60000
     per_min = total * 60000.0 / span if long_enough else None
     nxt = c.session.next_exp
     pct_min = (100.0 * per_min / nxt) if per_min is not None and nxt else None
-    return dict(xp=total, base=base, kills=len(rows), unknown=unknown, factor=(total / base) if base else (f or 1.0),
+    return dict(xp=total + quest_xp, kill_xp=total, quest_xp=quest_xp, quests=quests,
+                quests_unknown=sum(1 for q in quests if q["xp"] is None), base=base, kills=len(rows), unknown=unknown,
+                factor=(total / base) if base else (f or 1.0),
                 source=source, correction=corr, per_hour=per_min * 60 if per_min is not None else None, per_min=per_min,
                 per_min_pct=pct_min, per_hour_pct=pct_min * 60 if pct_min is not None else None,
-                pct=(100.0 * total / nxt) if nxt else None,
+                pct=(100.0 * (total + quest_xp) / nxt) if nxt else None,
                 kills_per_min=len(rows) * 60000.0 / span if long_enough else None, span=span, rows=rows)
 
 
@@ -454,6 +703,9 @@ def timeline(c, cfg, rng=None, bucket_ms=60000):
     for r in est["rows"]:
         if r.get("total"):
             buckets[min(n - 1, max(0, int((r["t"] - start) // bucket_ms)))] += r["total"]
+    for q in est["quests"]:                      # a entrega de missão entra no minuto em que aconteceu
+        if q["xp"]:
+            buckets[min(n - 1, max(0, int((q["t"] - start) // bucket_ms)))] += q["xp"]
     out, acc = [], 0.0
     for i, v in enumerate(buckets):
         acc += v
@@ -662,6 +914,19 @@ def progress(c, cfg, t=None):
     return dict(level=lv, xp=xpv, need=nd, pct=(100.0 * xpv / nd) if nd else None, since=ta)
 
 
+def hunts(c):
+    """Missões de caça em andamento de quem grava: [dict(quest, parts=[(contagem, meta)], count, goal)], da mais
+    mexida para a menos (o jogo manda o progresso a cada abate que conta)."""
+    out = []
+    for quest, idents in getattr(c, "quest_hunts", {}).items():
+        parts = [(cnt, goal) for _i, (cnt, goal, _t) in sorted(idents.items())]
+        if parts:
+            out.append(dict(quest=quest, parts=parts, count=sum(p[0] for p in parts), goal=sum(p[1] for p in parts),
+                            t=max(t for _c, _g, t in idents.values())))
+    out.sort(key=lambda r: -r["t"])
+    return out
+
+
 def farm_start(c):
     """Quando o farm começou de verdade: o começo do 1º minuto que rendeu pelo menos 40% do melhor minuto até agora
     (os primeiros minutos costumam ser preparação: buffs, ir até o mapa, alguns abates no caminho). None sem abates."""
@@ -684,7 +949,7 @@ def warming_up(c, cfg):
     if c.now - start >= WARMUP_MS:
         return False
     nd = need(c, cfg, c.session.base_level) if c.session.base_level else None
-    return not (nd and estimate(c, cfg, (0, c.now))["xp"] >= WARMUP_FRAC * nd)
+    return not (nd and estimate(c, cfg, (0, c.now))["kill_xp"] >= WARMUP_FRAC * nd)
 
 
 def recent_pace(c, cfg):
@@ -696,7 +961,7 @@ def recent_pace(c, cfg):
     span = min(PACE_MS, c.now - start)
     if span <= 0:
         return None
-    rate = estimate(c, cfg, (c.now - span, c.now))["xp"] * 60000.0 / span
+    rate = estimate(c, cfg, (c.now - span, c.now))["kill_xp"] * 60000.0 / span     # ritmo só dos abates
     return rate if rate > 0 else None
 
 

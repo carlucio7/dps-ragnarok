@@ -289,6 +289,26 @@ CATALOG = {
         "todavía sin subida de nivel ni dos grabaciones seguidas de 10 min o más"),
     "↩ refletiu %s · %s · %s": ("↩ reflected %s · %s · %s", "↩ reflejó %s · %s · %s"),
     "você": ("you", "tú"),
+    "%s virou %s": ("%s turned %s", "%s se volvió %s"),
+    "%s: imune a %s": ("%s: immune to %s", "%s: inmune a %s"),
+    "%s ficou pequeno": ("%s turned small", "%s quedó pequeño"),
+    "%s ficou grande": ("%s turned large", "%s quedó grande"),
+    "%s ficou médio": ("%s turned medium", "%s quedó mediano"),
+    "pequeno": ("small", "pequeño"),
+    "médio": ("medium", "mediano"),
+    "grande": ("large", "grande"),
+    "Tamanho: %s (era %s)": ("Size: %s (was %s)", "Tamaño: %s (era %s)"),
+    "Golpes de %s não tiram dano": ("%s hits deal no damage", "Los golpes de %s no hacen daño"),
+    "Propriedade: %s %d": ("Element: %s %d", "Propiedad: %s %d"),
+    "Bata com: %s": ("Hit with: %s", "Golpea con: %s"),
+    "Evite: %s": ("Avoid: %s", "Evita: %s"),
+    "Seu ataque: %s → %d%%": ("Your attack: %s → %d%%", "Tu ataque: %s → %d%%"),
+    "Fechar este aviso": ("Close this warning", "Cerrar este aviso"),
+    "Não mostrar mais o aviso do chefe": ("Stop showing the boss warning", "No mostrar más el aviso del jefe"),
+    "Clique: fechar · botão direito: desligar o aviso do chefe": (
+        "Click: close · right-click: turn off the boss warning", "Clic: cerrar · clic derecho: desactivar el aviso del jefe"),
+    "Avisar quando o chefe trocar de propriedade ou tamanho (5 s)": (
+        "Warn when the boss changes element or size (5 s)", "Avisar cuando el jefe cambie de propiedad o tamaño (5 s)"),
     "Econômica": ("Economy", "Económica"),
     "Executiva": ("Business", "Ejecutiva"),
     "Primeira Classe": ("First Class", "Primera Clase"),
@@ -507,6 +527,34 @@ CATALOG = {
     "sem golpe visível (efeito, debuff ou algo fora da tela)": (
         "no visible hit (effect, debuff or something off screen)",
         "sin golpe visible (efecto, debuff o algo fuera de pantalla)"),
+    "%s · %s (dano fixo, sem número na tela)": ("%s · %s (fixed damage, no number on screen)",
+                                                "%s · %s (daño fijo, sin número en pantalla)"),
+    " — %s de %s (dano fixo, sem número na tela)": (" — %s from %s (fixed damage, no number on screen)",
+                                                    " — %s de %s (daño fijo, sin número en pantalla)"),
+    " (sem número na tela)": (" (no number on screen)", " (sin número en pantalla)"),
+    "golpe fora da tela": ("off-screen hit", "golpe fuera de pantalla"),
+    "provável golpe de %s fora da tela (sobrecarga há %d s)": (
+        "probably a hit from %s off screen (overload for %d s)",
+        "probable golpe de %s fuera de pantalla (sobrecarga hace %d s)"),
+    " — provável golpe de %s fora da tela": (" — probably a hit from %s off screen",
+                                             " — probable golpe de %s fuera de pantalla"),
+    ": provável golpe de %s fora da tela": (": probably a hit from %s off screen",
+                                            ": probable golpe de %s fuera de pantalla"),
+    "Provável golpe de %s fora da tela · sobrecarga há %d s": (
+        "Probably a hit from %s off screen · overload for %d s",
+        "Probable golpe de %s fuera de pantalla · sobrecarga hace %d s"),
+    "a explosão não manda pacote de dano: tira um valor fixo de HP de quem está perto "
+    "(no Aquila, 120.000 na %s e 300.000 na %s)": (
+        "the explosion sends no damage packet: it takes a fixed amount of HP from anyone nearby "
+        "(on Aquila, 120,000 at %s and 300,000 at %s)",
+        "la explosión no envía paquete de daño: quita un valor fijo de HP a quien está cerca "
+        "(en Aquila, 120.000 en %s y 300.000 en %s)"),
+    "o chefe estava fora da tela e em sobrecarga há %d s: o golpe dele cresce a cada segundo "
+    "de sobrecarga e, de fora da tela, não chega ao replay nem aparece no jogo": (
+        "the boss was off screen and in overload for %d s: its hits grow every second of overload and, "
+        "from off screen, they reach neither the replay nor the game screen",
+        "el jefe estaba fuera de pantalla y en sobrecarga hace %d s: su golpe crece a cada segundo "
+        "de sobrecarga y, desde fuera de pantalla, no llega al replay ni aparece en el juego"),
     "último golpe: %s · %s (não bastava sozinho)": ("last hit: %s · %s (not enough on its own)",
                                                     "último golpe: %s · %s (no bastaba solo)"),
     "Nenhuma morte de jogador neste recorte.": ("No player deaths in this range.",
@@ -1367,22 +1415,27 @@ CATALOG = {
     "Manual de Combate x3": ("Battle Manual X3", "Manual de Combate x3"),
     "O replay não grava a XP ganha: só a XP total no início de cada gravação. A estimativa soma a XP de cada monstro "
     "que você ajudou a matar (rAthena e Divine Pride), com a penalidade de nível e a sua parte do dano, vezes os "
-    "bônus. Os bônus de XP somam entre si, e o Milagre multiplica o total (com +100%, dobra); os manuais e outros "
-    "consumíveis competem entre si (vale o maior). O replay mostra quando VIP, Cetro, Kafra Buff, manual, Banquete de "
+    "bônus. Evento do servidor, VIP e Cetro somam entre si; os bônus dos itens e o Banquete de Njord multiplicam "
+    "esse grupo; manual e Kafra Buff somam por fora; e o Milagre dobra tudo (conta medida com a XP exata do jogo). "
+    "Os manuais competem entre si (vale o maior). O replay mostra quando VIP, Cetro, Kafra Buff, manual, Banquete de "
     "Njord e Milagre estão ativos, mas não o evento do servidor: marque-o. \"Medido\" corrige a lista com a XP "
     "exata: cada subida de nível (a XP de cada nível é conhecida) e duas gravações seguidas do mesmo personagem; "
     "trechos com menos de 10 min não contam.": (
         "The replay doesn't store XP gained: only the total XP at the start of each recording. The estimate adds up "
         "the XP of each monster you helped kill (rAthena and Divine Pride), with the level penalty and your share of "
-        "the damage, times the bonuses. XP bonuses add up, and the Miracle multiplies the total (+100% doubles it); "
-        "manuals and other consumables compete (the highest one counts). The replay shows when VIP, Scepter, Kafra "
+        "the damage, times the bonuses. The server event, VIP and Scepter add up; item bonuses and Njord's Feast "
+        "multiply that group; manuals and the Kafra Buff are added on top; and the Miracle doubles everything "
+        "(measured against the game's exact XP). Manuals compete (the highest one counts). The replay shows when "
+        "VIP, Scepter, Kafra "
         "Buff, a manual, Njord's Feast and the Miracle are active, but not the server event: tick it. \"Measured\" "
         "corrects the list with exact XP: every level-up (each level's XP is known) and two back-to-back recordings "
         "of the same character; stretches shorter than 10 min don't count.",
         "El replay no graba la XP ganada: solo la XP total al inicio de cada grabación. La estimación suma la XP de "
         "cada monstruo que ayudaste a matar (rAthena y Divine Pride), con la penalización de nivel y tu parte del "
-        "daño, por los bonos. Los bonos de XP se suman, y el Milagro multiplica el total (con +100%, lo duplica); "
-        "los manuales y otros consumibles compiten entre sí (vale el mayor). El replay muestra cuándo están activos "
+        "daño, por los bonos. El evento del servidor, VIP y Cetro se suman; los bonos de los ítems y el Banquete "
+        "de Njord multiplican ese grupo; el manual y el Kafra Buff se suman aparte; y el Milagro lo duplica todo "
+        "(medido con la XP exacta del juego). Los manuales compiten entre sí (vale el mayor). El replay muestra "
+        "cuándo están activos "
         "VIP, Cetro, Kafra Buff, un manual, el Banquete de Njord y el Milagro, pero no el evento del servidor: "
         "márcalo. \"Medido\" corrige la lista con la XP exacta: cada subida de nivel (la XP de cada nivel se "
         "conoce) y dos grabaciones seguidas del mismo personaje; los tramos de menos de 10 min no cuentan."),
@@ -1530,6 +1583,185 @@ CATALOG = {
     "No chefe: %s começou": ("On the boss: %s started", "En el jefe: %s empezó"),
     "No chefe: %s acabou": ("On the boss: %s ended", "En el jefe: %s terminó"),
     "No chefe: %s %s": ("On the boss: %s %s", "En el jefe: %s %s"),
+    # áreas no chão do Mestre Elemental (Vulcão, Insígnias, Proteger Terreno, Prisão de Teia)
+    "Áreas no chão": ("Ground areas", "Áreas en el suelo"),
+    "Área no chão": ("Ground area", "Área en el suelo"),
+    "%s (área no chão)": ("%s (ground area)", "%s (área en el suelo)"),
+    "No chão: %s começou": ("On the ground: %s started", "En el suelo: %s empezó"),
+    "No chão: %s acabou": ("On the ground: %s ended", "En el suelo: %s terminó"),
+    "nível %d": ("level %d", "nivel %d"),
+    "apagada por %s (%s)": ("erased by %s (%s)", "borrada por %s (%s)"),
+    "+%d%% no dano de %s de quem bate de dentro da área (rAthena)": (
+        "+%d%% %s damage for whoever attacks from inside the area (rAthena)",
+        "+%d%% de daño de %s para quien ataca desde dentro del área (rAthena)"),
+    "+%d%% no dano de %s no alvo que está em cima dela (rAthena)": (
+        "+%d%% %s damage on the target standing on it (rAthena)",
+        "+%d%% de daño de %s en el objetivo que está encima (rAthena)"),
+    "o próximo golpe de fogo sai dobrado e a teia some (rAthena)": (
+        "the next fire hit is doubled and the web is gone (rAthena)",
+        "el próximo golpe de fuego sale doblado y la telaraña desaparece (rAthena)"),
+    "usada %d vez(es), mas o status não apareceu no chefe": (
+        "used %d time(s), but the status didn't show on the boss",
+        "usada %d vez (veces), pero el estado no apareció en el jefe"),
+    "%% do dano de %s que acertou o chefe em cima dela": (
+        "%% of the %s damage that hit the boss while it stood on it",
+        "%% del daño de %s que alcanzó al jefe encima de ella"),
+    "%% do dano de %s que saiu de dentro da área": (
+        "%% of the %s damage dealt from inside the area", "%% del daño de %s hecho desde dentro del área"),
+    "o grupo bateu com %s em %s do dano do clímax": (
+        "the party dealt %s in %s of the climax damage", "el grupo pegó con %s en %s del daño del clímax"),
+    "ninguém pôs %s no chão nesta luta · %s": (
+        "nobody put %s on the ground in this fight · %s", "nadie puso %s en el suelo en esta pelea · %s"),
+    "só %s do dano de %s acertou o chefe em cima dela · %s": (
+        "only %s of the %s damage hit the boss while it stood on it · %s",
+        "solo %s del daño de %s alcanzó al jefe encima de ella · %s"),
+    "só %s do dano de %s saiu de dentro da área · %s": (
+        "only %s of the %s damage came from inside the area · %s",
+        "solo %s del daño de %s salió desde dentro del área · %s"),
+    "recarga de %d s, usada em %s": ("%d s cooldown, used at %s", "recarga de %d s, usada en %s"),
+    "o chefe não estava em cima dela quando o grupo bateu · %s": (
+        "the boss wasn't standing on it when the party hit · %s",
+        "el jefe no estaba encima de ella cuando el grupo pegó · %s"),
+    "ninguém bateu de dentro da área · %s": (
+        "nobody attacked from inside the area · %s", "nadie atacó desde dentro del área · %s"),
+    # 1.5.0: XP automática e missões
+    "Automático (recomendado)": ("Automatic (recommended)", "Automático (recomendado)"),
+    "a lista, corrigida pela XP exata; confere o evento do servidor sozinho": (
+        "the list, corrected by the exact XP; checks the server event by itself",
+        "la lista, corregida por la XP exacta; comprueba solo el evento del servidor"),
+    "pela lista, aproximado: ainda sem XP exata para conferir": (
+        "from the list, approximate: no exact XP to check against yet",
+        "por la lista, aproximado: aún sin XP exacta para comprobar"),
+    "×%s aproximado": ("×%s approximate", "×%s aproximado"),
+    "XP: evento do servidor de +%d%% detectado e marcado": (
+        "XP: +%d%% server event detected and ticked", "XP: evento del servidor de +%d%% detectado y marcado"),
+    "XP: sem evento do servidor agora (desmarcado pela XP exata)": (
+        "XP: no server event now (unticked from the exact XP)",
+        "XP: sin evento del servidor ahora (desmarcado por la XP exacta)"),
+    "Missões": ("Quests", "Misiones"),
+    "Missão": ("Quest", "Misión"),
+    "Missão %d": ("Quest %d", "Misión %d"),
+    "Missão: %s": ("Quest: %s", "Misión: %s"),
+    "Quando": ("When", "Cuándo"),
+    "XP de missões": ("Quest XP", "XP de misiones"),
+    "%d entregue(s)": ("%d turned in", "%d entregada(s)"),
+    "entregue ou sem progresso": ("turned in or no progress", "entregada o sin progreso"),
+    "em andamento": ("in progress", "en curso"),
+    "caça: %s feito": ("hunt: %s done", "caza: %s hecho"),
+    "com %d missão(ões)": ("with %d quest(s)", "con %d misión(es)"),
+    "%d missão(ões) sem XP conhecida": ("%d quest(s) with unknown XP", "%d misión(es) sin XP conocida"),
+    "recompensa %s, sem bônus": ("reward %s, no bonus", "recompensa %s, sin bonos"),
+    "recompensa %s +%d%% (manual e Kafra)": ("reward %s +%d%% (manual and Kafra)",
+                                             "recompensa %s +%d%% (manual y Kafra)"),
+    "entregue: a XP desta missão ainda não entra na estimativa": (
+        "turned in: this quest's XP isn't part of the estimate yet",
+        "entregada: la XP de esta misión aún no entra en la estimación"),
+    "fora da conta": ("not counted", "fuera de la cuenta"),
+    "Missões entregues": ("Quests turned in", "Misiones entregadas"),
+    "XP fora da conta: estimativa abaixo do real": ("XP not counted: the estimate is below the real one",
+                                                    "XP fuera de la cuenta: la estimación queda por debajo"),
+    "pode ser menos: missões fora da conta": ("may be less: quests are not counted",
+                                              "puede ser menos: las misiones no cuentan"),
+    "pode ser menos: a XP das missões entregues não entra na conta": (
+        "may be less: the XP of the quests turned in is not counted",
+        "puede ser menos: la XP de las misiones entregadas no entra en la cuenta"),
+    "agora (sem as missões)": ("now (without the quests)", "ahora (sin las misiones)"),
+    "%s agora (sem a XP das missões)": ("%s now (without the quest XP)", "%s ahora (sin la XP de las misiones)"),
+    "sem a XP de %d missão(ões)": ("without the XP of %d quest(s)", "sin la XP de %d misión(es)"),
+    "O replay mostra a entrega e o progresso das caças, mas não quanto cada missão rende. Por enquanto a XP das "
+    "missões fica fora da estimativa: depois de uma entrega, o nível mostrado fica abaixo do real até a próxima "
+    "subida de nível ou a próxima gravação.": (
+        "The replay shows the turn-in and the hunt progress, but not how much each quest gives. For now quest XP "
+        "stays out of the estimate: after a turn-in, the level shown is below the real one until the next "
+        "level-up or the next recording.",
+        "El replay muestra la entrega y el progreso de las cazas, pero no cuánto rinde cada misión. Por ahora la "
+        "XP de las misiones queda fuera de la estimación: tras una entrega, el nivel mostrado queda por debajo "
+        "del real hasta la próxima subida de nivel o la próxima grabación."),
+    # 1.5.0: copiar imagem
+    "Copiar imagem": ("Copy image", "Copiar imagen"),
+    "Imagem copiada!": ("Image copied!", "¡Imagen copiada!"),
+    "Não deu para copiar": ("Couldn't copy", "No se pudo copiar"),
+    "sem nomes": ("no names", "sin nombres"),
+    "Ctrl+Shift+C: só o gráfico sob o mouse": ("Ctrl+Shift+C: only the chart under the mouse",
+                                               "Ctrl+Shift+C: solo el gráfico bajo el ratón"),
+    "Copiar a imagem do widget": ("Copy the widget image", "Copiar la imagen del widget"),
+    "Copiar a imagem do widget (cole com Ctrl+V)": ("Copy the widget image (paste with Ctrl+V)",
+                                                    "Copiar la imagen del widget (pega con Ctrl+V)"),
+    "Copiar imagem sem os nomes dos jogadores": ("Copy image without player names",
+                                                 "Copiar imagen sin los nombres de los jugadores"),
+    "Imagem copiada: cole com Ctrl+V": ("Image copied: paste with Ctrl+V", "Imagen copiada: pega con Ctrl+V"),
+    "Não deu para copiar a imagem": ("Couldn't copy the image", "No se pudo copiar la imagen"),
+    # 1.5.0: resumo no fim da luta, lembrete de gravação e avisos de mecânica
+    "Resumo no fim da luta contra chefe (Dedo Duro)": ("Summary at the end of a boss fight (Snitch)",
+                                                       "Resumen al final de la pelea contra jefe (Soplón)"),
+    "Clique: abrir o Dedo Duro · botão direito: desligar o resumo da luta": (
+        "Click: open the Snitch · right-click: turn the fight summary off",
+        "Clic: abrir el Soplón · clic derecho: desactivar el resumen de la pelea"),
+    "Abrir o Dedo Duro desta luta…": ("Open the Snitch for this fight…", "Abrir el Soplón de esta pelea…"),
+    "Não mostrar mais o resumo da luta": ("Don't show the fight summary anymore",
+                                          "No mostrar más el resumen de la pelea"),
+    "%s: derrotado em %s": ("%s: defeated in %s", "%s: derrotado en %s"),
+    "%s: não morreu": ("%s: not killed", "%s: no murió"),
+    "Você: %s do dano · %dº de %d": ("You: %s of the damage · #%d of %d", "Tú: %s del daño · %dº de %d"),
+    "Nada grave nem de atenção no Dedo Duro": ("Nothing serious or to watch in the Snitch",
+                                               "Nada grave ni de atención en el Soplón"),
+    "mais %d no Dedo Duro (clique para abrir)": ("%d more in the Snitch (click to open)",
+                                                 "%d más en el Soplón (clic para abrir)"),
+    "Lembrar quando o jogo está aberto sem gravar": ("Remind me when the game is open and not recording",
+                                                     "Recordar cuando el juego está abierto sin grabar"),
+    "Gravação desligada: ligue o replay no jogo": ("Recording is off: turn the replay on in the game",
+                                                   "Grabación apagada: activa el replay en el juego"),
+    "Tocar um som quando a gravação estiver desligada": ("Play a sound when the recording is off",
+                                                         "Reproducir un sonido cuando la grabación esté apagada"),
+    "Avisos do chefe: propriedade, tamanho e mecânicas (5 s)": (
+        "Boss alerts: property, size and mechanics (5 s)", "Avisos del jefe: propiedad, tamaño y mecánicas (5 s)"),
+    "%s: Dor Máxima ativa, segure os golpes grandes": ("%s: Dor Máxima is on, hold the big hits",
+                                                       "%s: Dor Máxima activa, guarda los golpes grandes"),
+    "%s: Dor Máxima acabou": ("%s: Dor Máxima ended", "%s: Dor Máxima terminó"),
+    "%s: modo defesa, o dano quase não entra": ("%s: defense mode, damage barely goes in",
+                                               "%s: modo defensa, el daño casi no entra"),
+    "%s: a defesa caiu, 5 s de dano total": ("%s: defense is down, 5 s of full damage",
+                                            "%s: la defensa cayó, 5 s de daño total"),
+    "%s: Aliviar muito alto, %d almas ativas": ("%s: Relieve is very high, %d souls alive",
+                                               "%s: Aliviar muy alto, %d almas activas"),
+    "Aliviar muito alto": ("Relieve is very high", "Aliviar muy alto"),
+    "%d almas ativas": ("%d souls alive", "%d almas activas"),
+    "%d almas ativas ou mais": ("%d souls alive or more", "%d almas activas o más"),
+    "O chefe está levando %d%% a menos de dano": ("The boss is taking %d%% less damage",
+                                                  "El jefe está recibiendo %d%% menos de daño"),
+    "Dor Máxima ativa": ("Dor Máxima is on", "Dor Máxima activa"),
+    "Dor Máxima acabou": ("Dor Máxima ended", "Dor Máxima terminó"),
+    "modo defesa": ("defense mode", "modo defensa"),
+    "a defesa caiu": ("defense is down", "la defensa cayó"),
+    "Segure os golpes grandes": ("Hold the big hits", "Guarda los golpes grandes"),
+    "Ela devolve parte de cada golpe": ("It sends part of every hit back", "Devuelve parte de cada golpe"),
+    "Pode soltar os golpes grandes": ("Big hits are safe again", "Ya puedes soltar los golpes grandes"),
+    "O dano quase não entra (99%)": ("Damage barely goes in (99%)", "El daño casi no entra (99%)"),
+    "5 s de dano total: solte tudo": ("5 s of full damage: unload everything", "5 s de daño total: suelta todo"),
+    "Golpe acima de %s te mata agora": ("A hit above %s kills you right now",
+                                        "Un golpe por encima de %s te mata ahora"),
+    "Falta éter verde para a defesa cair": ("Green ether is needed for the defense to drop",
+                                            "Falta éter verde para que caiga la defensa"),
+    # 1.5.0: Oposição no Dedo Duro
+    "Oposição Solar": ("Solar Opposition", "Oposición Solar"),
+    "Oposição Lunar": ("Lunar Opposition", "Oposición Lunar"),
+    "Oposição Estelar": ("Stellar Opposition", "Oposición Estelar"),
+    "Oposição errada": ("Wrong Opposition", "Oposición equivocada"),
+    "Oposição esquecida": ("Opposition forgotten", "Oposición olvidada"),
+    "usou %s no chefe, que é %s: a certa é a %s": ("used %s on the boss, which is %s: the right one is %s",
+                                                  "usó %s en el jefe, que es %s: la correcta es %s"),
+    "bateu no chefe (%s) sem marcar com a %s": ("hit the boss (%s) without marking it with %s",
+                                               "pegó al jefe (%s) sin marcarlo con %s"),
+    "a última dele foi em %s": ("their last one went on %s", "la última fue en %s"),
+    "a gravação começou em cima da luta: a marca pode ter sido feita antes": (
+        "the recording started right at the fight: the mark may have been set before",
+        "la grabación empezó encima de la pelea: la marca pudo hacerse antes"),
+    ", que caiu em %s": (", which landed on %s", ", que cayó sobre %s"),
+    "em cima de %s": ("on top of %s", "encima de %s"),
+    "%s apagou áreas do grupo": ("%s erased the party's ground areas", "%s borró áreas del grupo"),
+    "%d vez(es) · levou %s · em \"Quem\", em cima de quem caiu": (
+        "%d time(s) · took %s · \"Who\" shows on whom it landed",
+        "%d vez (veces) · se llevó %s · en \"Quién\", encima de quién cayó"),
     "de %s": ("from %s", "de %s"),
     "provavelmente de %s": ("probably from %s", "probablemente de %s"),
     "Dano: cada golpe, que acertou ou errou. Outras skills: o que foi usado sem causar dano (buffs, curas, debuffs) "

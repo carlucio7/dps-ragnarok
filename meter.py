@@ -234,6 +234,7 @@ SIM_DEBUFFS = {1142: "Cometa", 395: "Ataque Surpresa", 330: "Oratio", 1318: "Inf
 SIM_ONLY = {1214}                     # o cliente chama a Intoxicação de "Leitura Intensiva"
 PARTY_BUFFS |= set(SIM_BUFFS)
 MOB_DEBUFFS |= set(SIM_DEBUFFS) - {1166}
+MOB_DEBUFFS.add(129)                  # Prisão de Teia: a base não nomeia o status (o nome vem da skill)
 # Status de sistema que não são buff de verdade (tempo de pós-conjuração, recarga de item...)
 SYSTEM_EFST = ("POSTDELAY", "REUSE_", "PLAYTIME", "HEAD_EQUIPMENT", "SPECIALZONE", "WEIGHTOVER", "_PLACE",
                "ACTIONDELAY", "ENSEMBLEFATIGUE", "ASSISTANT_VENDING", "MONSTER_TRANSFORM", "USE_SKILL_SP_SPA",
@@ -421,6 +422,36 @@ class Stat:
         return max(1000, self.active + open_run)
 
 
+# chefe que muda: Mudar Propriedade (skill -> elemento novo) e Imunidade a uma propriedade (status -> elemento)
+PROP_SKILLS = {162: "Water", 163: "Earth", 164: "Fire", 165: "Wind", 166: "Poison", 167: "Holy", 168: "Dark",
+               169: "Ghost"}
+IMMUNE_EFST = {1016: "Neutral", 1017: "Water", 1018: "Earth", 1019: "Fire", 1020: "Wind", 1021: "Poison",
+               1022: "Holy", 1023: "Dark", 1024: "Ghost", 1025: "Undead"}
+MOB_SIZE = {int(k): v for k, v in _load("mob_size.json").items()}   # "S" pequeno, "M" médio, "L" grande
+# Áreas de suporte no chão (tipo da unidade -> skill). O efeito vale para quem está em cima e o replay não traz
+# status nenhum: só as células da área (quando aparecem e quando somem) e a posição de cada um.
+AREA_SKILLS = {0x9A: 285, 0x9B: 286, 0x9C: 287, 0x9D: 288, 0xB7: 405, 0xF1: 2465, 0xF2: 2466, 0xF3: 2467, 0xF4: 2468}
+AREA_JOIN_MS = 500            # as células de um mesmo lançamento chegam juntas
+AREA_BACK_MS = 5000           # célula que some num teleporte e volta até isso depois nunca saiu do chão
+# mecânicas do chefe que viram aviso no widget (cartão de 5 s, o mesmo da troca de propriedade)
+MAX_PAIN_EFST = 713           # Dor Máxima no chefe: devolve parte de cada golpe em quem bate
+RELIEVE_EFST = 1166           # Alívio (redução de dano do chefe): val = %
+DEFENSE_PCT = 99              # Alívio de 99% = modo defesa (Aquila sem éter verde)
+RELIEF_HIGH = 90              # nos outros chefes (Betelgeuse) o Alívio sobe 10% por Alma viva: avisa a partir disto
+RELIEF_REPEAT_MS = 15000      # o Alívio oscila (uma Alma morre, outra nasce): o aviso não repete antes disso
+DEF_BREAK_SKILLS = {2218, 2219, 2220, 2221}   # Tetra Vortex que o Aquila usa em si mesmo quando a defesa cai
+DEF_BREAK_BOSSES = {21531, 21588}
+MECH_REPEAT_MS = 3000         # o mesmo aviso do mesmo chefe não repete antes disso
+MAXPAIN_ATK = 717             # o reflexo da Dor Máxima; sem o status no chefe, ele a usou fora da tela
+MAXPAIN_GUESS_MS = 12000      # a Dor Máxima dura 10 s: reflexo depois disso já é outro uso
+SELF_DESTRUCT = 173           # Autodestruição (os Robovacs do Aquila tiram HP fixo, sem pacote de dano)
+# anúncios da sala do Aquila (chave do texto, igual em todo idioma): o éter amarelo acabou / foi fornecido
+ROOM_KEYS = {"ni0XDg": ("overload", True), "nS0XDg": ("overload", False)}
+HATE_SKILL = 434              # Oposição Solar, Lunar e Estelar: o nível do uso diz a casa (1, 2, 3)
+HIDE_NAMES = False            # ligado só enquanto se copia uma imagem sem nomes: cada jogador aparece como a classe
+BOSS_ALERT_HP = 50000000      # sem marca de MVP, só avisa de chefe com pelo menos isto de HP na tabela
+
+
 class Hit:
     """Um evento de dano guardado para a analise."""
     __slots__ = ("t", "src", "raw", "dst", "dst_raw", "skill", "dmg", "hits", "crit", "miss", "out")
@@ -523,7 +554,29 @@ class Combat:
         self.status_len = {}          # (aid, efst, início) -> duração prevista (ms)
         self.alert_seq = 0
         self.death_alerts = {}        # nº do aviso de morte -> (aid, t), para o resumo da morte no widget
+        self.boss_alerts = {}         # nº do aviso -> o que mudou no chefe (propriedade, imunidade, tamanho)
         self.level_ups = []           # (t, nível novo) de quem grava
+        self.hate_marks = []          # (t, casa 0 Solar / 1 Lunar / 2 Estelar, id do monstro, já estava marcado?)
+        self.quests_done = []         # (t, id da missão) concluída ou entregue por quem grava
+        # áreas de suporte no chão (Vulcão, Insígnias, Proteger Terreno, Prisão de Teia): dict(t, seen, src, skill,
+        # level, units=[[início, fim ou None, x, y, raio]]), uma por lançamento
+        self.areas = []
+        self._area_units = {}         # id da unidade no chão -> (área, célula)
+        self._area_cut = None         # instante do último teleporte/troca de mapa (fechou as células abertas)
+        self.ground_cells = {}        # (t, quem usou, skill) -> (x, y) das skills usadas numa célula (estão em uses)
+        self.hate_uses = []           # (t, quem usou, alvo, nível 1 Solar / 2 Lunar / 3 Estelar) da Oposição
+        self.quest_hunts = {}         # missão em andamento -> {id da caça: (contagem, meta, t)}
+        self._mech_seen = {}          # (chefe, mecânica) -> t do último aviso
+        self._maxpain_guess = {}      # chefe -> quando um reflexo denunciou a Dor Máxima sem o status ter chegado
+        self._last_xy = {}            # monstro à vista -> último pacote de posição: (pid, bytes) ou (None, (x, y))
+        self.booms = []               # (t, monstro, (x, y) ou None) de cada Autodestruição
+        self.overloads = []           # [começo, fim ou None] da sobrecarga do Aquila, pelos anúncios da sala
+        self.sight = collections.defaultdict(list)   # chefe -> [(t, à vista?)]: o golpe de fora da tela não chega
+        self._relieve_base = {}       # chefe -> Alívio (%) com que apareceu (o nível sem nenhuma Alma)
+        self._relieve_last = {}       # chefe -> último Alívio (%) visto
+        self._relieve_off = {}        # chefe -> quando o Alívio desligou pela última vez
+        self._mask = {}               # aid -> (nº de entidades, nome sem identificar) para HIDE_NAMES
+        self.fight_ends = {}          # nº do aviso -> (chave do chefe, t da morte), para o resumo da luta no widget
         self._alerted = {}
         self.bag = {}                 # slot da bolsa -> Item
         self.worn = {}                # bit do slot -> Item
@@ -565,7 +618,32 @@ class Combat:
             aid = o
         return aid
 
+    def masked_name(self, aid):
+        """Nome para imagem compartilhada sem nomes: a classe do jogador, numerada quando há mais de um dela.
+        None para o que não é jogador."""
+        hit = self._mask.get(aid)
+        if hit is not None and hit[0] == len(self.entities):
+            return hit[1]
+        e = self.entities.get(aid)
+        if aid == self.me:
+            job = self.session.job
+        elif e is not None and e.kind == "pc":
+            job = e.job
+        else:
+            return None
+        name = job_name(job) or _("Jogador")
+        same = sorted({a for a, x in self.entities.items() if x.kind == "pc" and x.job == job}
+                      | ({self.me} if self.session.job == job else set()))
+        if len(same) > 1:
+            name = "%s %d" % (name, same.index(aid) + 1)
+        self._mask[aid] = (len(self.entities), name)
+        return name
+
     def name_of(self, aid):
+        if HIDE_NAMES:
+            masked = self.masked_name(aid)
+            if masked:
+                return masked
         if aid == self.me:
             return self.session.player or _("Você")
         e = self.entities.get(aid)
@@ -633,11 +711,15 @@ class Combat:
                     self._marker_job[e.aid] = e.job          # cada passo dela repete o pacote: conta só a troca
                     if e.job in PHASE_MARKERS:
                         self.phase_marks.append((t, PHASE_MARKERS[e.job]))
-                if e.kind == "pc" or e.boss == 2:
+                if e.kind == "pc" or e.boss:          # chefes menores e bonecos também: as áreas no chão valem pela posição
                     mv = rrf.spawn_move(pid, d)
                     if mv is not None:
                         self.speed[e.aid] = mv[2]
                         self.add_pos(e.aid, t, mv[0], mv[1])
+                if e.kind == "mob":
+                    self._last_xy[e.aid] = (pid, d)
+                    if e.boss:
+                        self.see(e.aid, t, True)
                 self.add_entity(e)
                 if e.kind == "pc":
                     self.set_option(e.aid, t, e.option)
@@ -650,6 +732,8 @@ class Combat:
                 aid, x, y = struct.unpack_from("<Ihh", d, 2)
                 if aid == self.me or aid in self.pos_ev:
                     self.add_pos(aid, t, (x, y), (x, y))
+                if aid in self._last_xy:
+                    self._last_xy[aid] = (None, (x, y))
         elif pid == rrf.P_EFFECT:
             r = rrf.parse_effect(d)
             if r is not None and self.is_friendly(r[0]):
@@ -660,11 +744,33 @@ class Combat:
                 if r[1] in rrf.MAP_DAMAGE_EFFECTS:
                     self.trap_log.append((t, r[0]))
                     self.version += 1
+        elif pid == rrf.P_STARSKILL:
+            if len(d) >= 32:
+                mob, slot, res = struct.unpack_from("<IBB", d, 26)
+                if slot < 3 and res in (10, 11) and mob:       # 10 = marcou agora, 11 = já estava marcado
+                    self.hate_marks.append((t, slot, mob, res == 11))
+                    self.version += 1
+        elif pid == rrf.P_QUEST_DONE:
+            if len(d) >= 6:
+                quest = struct.unpack_from("<I", d, 2)[0]
+                self.quests_done.append((t, quest))
+                self.quest_hunts.pop(quest, None)
+                self.version += 1
+        elif pid == rrf.P_QUEST_HUNT:
+            for quest, ident, goal, count in rrf.parse_quest_hunt(d):
+                self.quest_hunts.setdefault(quest, {})[ident] = (count, goal, t)
+                self.version += 1
         elif pid == rrf.P_SPRITE:
             if len(d) >= 11:
                 aid, _kind, cls = struct.unpack_from("<IBI", d, 2)
-                self.sprite_log[aid].append((t, cls))
+                log = self.sprite_log[aid]
+                e = self.entities.get(aid)
+                before = log[-1][1] if log else (e.job if e is not None else 0)
+                log.append((t, cls))
                 self.version += 1
+                old, new = MOB_SIZE.get(before), MOB_SIZE.get(cls)
+                if old and new and old != new and self.boss_like(aid):
+                    self.boss_change(t, aid, size=new, prev_size=old, form=cls)
         elif pid == rrf.P_OPTION:
             r = rrf.parse_option(d)
             if r is not None:
@@ -673,10 +779,34 @@ class Combat:
             r = rrf.parse_ground_unit(d)
             if r and r[0] != r[1]:
                 self.owner[r[0]] = r[1]
+            if r and r[4] in AREA_SKILLS:
+                self.area_unit(t, *r)
+        elif pid == rrf.P_GROUND_GONE:
+            if len(d) >= 6:
+                hit = self._area_units.get(struct.unpack_from("<I", d, 2)[0])
+                if hit is not None and hit[1][1] is None:
+                    hit[1][1] = t
+                    self.version += 1
+        elif pid == rrf.P_GROUND_SKILL:
+            # skill usada numa célula: não vem como "uso" comum. Vale para jogadores (Vulcão, Insígnia, Florescer)
+            # e para monstros (Chuva de Meteoros, Ganbantein, que apaga as áreas do chão)
+            r = rrf.parse_ground_skill(d)
+            if r is not None:
+                # repetição = mesma célula em até 200 ms (uma rajada do chefe muda de célula a cada ~200 ms)
+                key, cell = ("g", r[0], r[1]), (r[3], r[4])
+                prev = self._last_seen.get(key)
+                self._last_seen[key] = (t, cell)
+                if prev is None or prev[1] != cell or t - prev[0] > DEDUP_MS:
+                    self.uses.append((t, self.actor(r[0], t), r[0], 0, r[1]))
+                    self.ground_cells[(t, r[0], r[1])] = cell
+                    self.version += 1
         elif pid == rrf.P_MAPMOVE:
             name = rrf.decode_name(d[2:18])
             name = name[:-4] if name.lower().endswith(".gat") else name
             self.on_map(t, name)
+            self.close_areas(t)
+            if name.lower() != (self.map or "").lower():
+                self.on_room(t, "overload", False)
             self.map = name
             if len(d) >= 22:
                 x, y = struct.unpack_from("<HH", d, 18)
@@ -686,6 +816,9 @@ class Combat:
             if len(d) >= 7:
                 aid = struct.unpack_from("<I", d, 2)[0]
                 e = self.entities.get(aid)
+                self._last_xy.pop(aid, None)
+                if aid in self.sight:
+                    self.see(aid, t, False)
                 if d[6] == 1 or (e is not None and e.kind == "mob"):
                     self.end_statuses(aid, t)          # monstro morto/sumido perde os debuffs
                 if d[6] == 1:
@@ -695,10 +828,18 @@ class Combat:
                     self.version += 1
                     if aid == self.me:
                         self.on_my_death(t)
+                    elif self.boss_like(aid) and self.is_mvp(aid):
+                        # chefe morto: o widget mostra o resumo da luta (as conclusões do Dedo Duro)
+                        self.alert(t, "bossdead", self.name_of(aid))
+                        self.fight_ends[self.alert_seq] = (self.alias.get(aid, aid), t)
         elif pid in rrf.STATUS_PACKETS:
             r = rrf.parse_status(pid, d)
             if r is not None:
                 self.on_status(t, *r)
+        elif pid == rrf.P_BROADCAST:
+            for key in rrf.broadcast_keys(d):
+                if key in ROOM_KEYS:
+                    self.on_room(t, *ROOM_KEYS[key])
         elif pid in (rrf.P_ITEM_FALL, rrf.P_ITEM_ENTRY):
             r = rrf.parse_ground_item(pid, d)
             if r is not None and r[0] not in self.ground:
@@ -763,6 +904,16 @@ class Combat:
                 src = self.actor(r[0], t)
                 self.uses.append((t, src, r[0], self.alias.get(r[1], r[1]), r[2]))
                 self.version += 1
+                if r[2] == SELF_DESTRUCT and not self.is_friendly(r[0]):
+                    self.booms.append((t, r[0], self.mob_xy(r[0])))
+                if r[2] in PROP_SKILLS and self.boss_like(r[0]):
+                    self.boss_change(t, r[0], element=PROP_SKILLS[r[2]])
+                elif r[2] == HATE_SKILL:
+                    self.hate_uses.append((t, r[0], self.alias.get(r[1], r[1]), rrf.skill_use_level(pid, d)))
+                elif r[2] in DEF_BREAK_SKILLS and r[0] == r[1] and self.boss_like(r[0]):
+                    e = self.entities.get(r[0])
+                    if e is not None and e.job in DEF_BREAK_BOSSES:
+                        self.mech(t, r[0], "def_break")
         elif pid in rrf.CAST_PACKETS:
             r = rrf.parse_cast(d)
             if r is not None and self.fresh(("c",) + r[:3], t):
@@ -779,7 +930,220 @@ class Combat:
         for efst, total, left in items:
             self.on_status(0, self.me, efst, True, total, left)
 
+    def boss_like(self, aid):
+        """Chefe de verdade: marca de MVP, chefe em fases ou vida de chefe na tabela (os avisos de troca de
+        propriedade e de tamanho são só para eles). As patrulhas da Destruição da Aeronave têm 1-2M de HP e trocam
+        de propriedade o tempo todo; não contam."""
+        aid = self.alias.get(aid, aid)
+        e = self.entities.get(aid)
+        if e is None or e.kind != "mob" or self.is_friendly(aid) or DUMMY_MIN <= e.job <= DUMMY_MAX:
+            return False
+        m = MONSTERS.get(str(e.job)) or {}
+        return e.boss == 2 or e.job in PHASED_BOSSES or (m.get("hp") or 0) >= BOSS_ALERT_HP
+
+    def boss_change(self, t, aid, element=None, immune=None, size=None, prev_size=None, form=None):
+        """Avisa que o chefe mudou: virou outra propriedade, ficou imune a uma ou trocou de tamanho."""
+        import analysis     # evita import circular
+        name = self.name_of(aid)
+        if immune:
+            text = _("%s: imune a %s") % (name, analysis.element_name(immune))
+        elif element:
+            text = _("%s virou %s") % (name, analysis.element_name(element))
+        else:
+            text = (_("%s ficou pequeno") if size == "S" else _("%s ficou grande") if size == "L"
+                    else _("%s ficou médio")) % name
+        self.alert(t, "boss", text)
+        self.boss_alerts[self.alert_seq] = dict(t=t, aid=aid, element=element, immune=immune, size=size,
+                                                prev_size=prev_size, form=form)
+
+    # --- áreas no chão ------------------------------------------------------
+
+    def area_unit(self, t, uid, src, x, y, kind, radius, level):
+        """Uma célula de área de suporte apareceu. As de um lançamento chegam juntas; a mesma célula volta a
+        aparecer (mesmo id) quando quem grava se afasta e retorna."""
+        skill = AREA_SKILLS[kind]
+        old = self._area_units.get(uid)
+        area = None
+        if old is not None and old[0]["src"] == src and old[0]["skill"] == skill and old[1][2:4] == [x, y]:
+            if old[1][1] is None:
+                return                            # ainda no chão: o servidor só repetiu o pacote
+            if old[1][1] == self._area_cut and t - old[1][1] <= AREA_BACK_MS:
+                old[1][1] = None                  # só sumiu da tela num teleporte e voltou logo: seguiu no chão
+                self.version += 1
+                return
+            area = old[0]
+        if area is None:
+            for a in reversed(self.areas[-8:]):
+                if a["src"] == src and a["skill"] == skill and a["level"] == level and t - a["seen"] <= AREA_JOIN_MS:
+                    area = a
+                    break
+        if area is None:
+            area = dict(t=t, seen=t, src=src, skill=skill, level=level, units=[])
+            self.areas.append(area)
+        unit = [t, None, x, y, radius]
+        area["units"].append(unit)
+        area["seen"] = t
+        self._area_units[uid] = (area, unit)
+        self.version += 1
+
+    def close_areas(self, t):
+        """Trocou de mapa ou teleportou: o que estava no chão saiu da tela (o jogo não avisa o fim de cada célula).
+        Se a mesma célula reaparecer logo depois, area_unit a reabre."""
+        for _area, unit in self._area_units.values():
+            if unit[1] is None:
+                unit[1] = t
+        self._area_cut = t
+
+    def area_spans(self, area):
+        """[(início, fim)] em que a área tinha alguma célula no chão."""
+        out = []
+        for s, e, _x, _y, _r in sorted((u[0], u[1] if u[1] is not None else self.now, 0, 0, 0) for u in area["units"]):
+            if out and s <= out[-1][1]:
+                out[-1][1] = max(out[-1][1], e)
+            else:
+                out.append([s, e])
+        return [(s, e) for s, e in out if e > s]
+
+    def in_area(self, area, pos, t):
+        """`pos` (x, y) estava em cima da área no instante t?"""
+        if pos is None:
+            return False
+        for s, e, x, y, r in area["units"]:
+            if s <= t and (e is None or t < e) and abs(pos[0] - x) <= r and abs(pos[1] - y) <= r:
+                return True
+        return False
+
+    def areas_of(self, skill, t0, t1):
+        """Áreas de `skill` que estiveram no chão em algum momento entre t0 e t1."""
+        out = []
+        for a in self.areas:
+            if a["skill"] == skill and a["t"] <= t1:
+                if any(u[1] is None or u[1] >= t0 for u in a["units"]):
+                    out.append(a)
+        return out
+
+    def inside_spans(self, areas, aid, t0, t1, step=200):
+        """[(início, fim)] entre t0 e t1 em que `aid` estava em cima de alguma das áreas (pela posição)."""
+        out = []
+        for a in areas:
+            for s, e in self.area_spans(a):
+                s, e = max(s, t0), min(e, t1)
+                t, since = s, None
+                while t < e:
+                    if self.in_area(a, self.pos_at(aid, t), t):
+                        since = t if since is None else since
+                    elif since is not None:
+                        out.append((since, t))
+                        since = None
+                    t += step
+                if since is not None:
+                    out.append((since, e))
+        return out
+
+    def see(self, aid, t, on):
+        log = self.sight[aid]
+        if not log or log[-1][1] != on:
+            log.append((t, on))
+
+    def in_sight(self, aid, t):
+        """O chefe `aid` estava na tela em t? None se ele nunca apareceu."""
+        on = None
+        for when, value in self.sight.get(aid, ()):
+            if when > t:
+                break
+            on = value
+        return on
+
+    def mob_xy(self, aid):
+        """Última posição conhecida de um monstro à vista (destino do último passo), ou None."""
+        hit = self._last_xy.get(aid)
+        if hit is None:
+            return None
+        if hit[0] is None:
+            return hit[1]
+        mv = rrf.spawn_move(*hit)
+        return mv[1] if mv is not None else None
+
+    def on_room(self, t, kind, on):
+        """Anúncio da sala do Aquila: a sobrecarga começou (éter amarelo acabou) ou terminou. Chega a qualquer
+        distância, ao contrário da troca de forma do chefe."""
+        if kind != "overload":
+            return
+        last = self.overloads[-1] if self.overloads else None
+        if on and (last is None or last[1] is not None):
+            self.overloads.append([t, None])
+            self.version += 1
+        elif not on and last is not None and last[1] is None:
+            last[1] = t
+            self.version += 1
+
+    def overload_at(self, t):
+        """Há quantos ms a sobrecarga durava em t; None fora dela."""
+        for start, end in reversed(self.overloads):
+            if start <= t:
+                return (t - start) if end is None or t <= end else None
+        return None
+
+    def maxpain_reflect(self, t, aid):
+        """Chegou um reflexo da Dor Máxima sem o status no chefe (ele usou fora da tela ou teleportado, e o jogo
+        não reenvia o status quando ele volta): avisa agora, uma vez por uso."""
+        if not self.boss_like(aid) or self.status_on.get((aid, MAX_PAIN_EFST)):
+            return
+        if t - self._maxpain_guess.get(aid, -10 ** 9) <= MAXPAIN_GUESS_MS:
+            return
+        self._maxpain_guess[aid] = t
+        self.mech(t, aid, "maxpain_on")
+
+    def mech(self, t, aid, kind, **extra):
+        """Mecânica do chefe que vira aviso no widget: Dor Máxima ligou/acabou, modo defesa (Aquila), defesa caiu,
+        Aliviar muito alto (as Almas do Betelgeuse)."""
+        key = (self.alias.get(aid, aid), kind)
+        if t - self._mech_seen.get(key, -10 ** 9) < (RELIEF_REPEAT_MS if kind == "relief" else MECH_REPEAT_MS):
+            return
+        self._mech_seen[key] = t
+        if kind == "relief":
+            text = _("%s: Aliviar muito alto, %d almas ativas") % (self.name_of(aid), extra.get("souls", 0))
+        else:
+            text = {"maxpain_on": _("%s: Dor Máxima ativa, segure os golpes grandes"),
+                    "maxpain_off": _("%s: Dor Máxima acabou"),
+                    "defense": _("%s: modo defesa, o dano quase não entra"),
+                    "def_break": _("%s: a defesa caiu, 5 s de dano total")}[kind] % self.name_of(aid)
+        self.alert(t, "boss", text)
+        self.boss_alerts[self.alert_seq] = dict(extra, t=t, aid=aid, mech=kind, element=None, immune=None,
+                                                size=None, prev_size=None, form=None)
+
+    def on_relieve(self, t, aid, val):
+        """Alívio (redução de dano do chefe) ligou com `val`%. No Aquila, 99% é o modo defesa. Nos outros chefes ele
+        sobe 10% por Alma viva a partir do valor com que o chefe aparece: avisa quando passa de 90%, com o número
+        de Almas (nível de agora − nível do começo; em 99% podem ser mais)."""
+        e = self.entities.get(aid)
+        base = self._relieve_base.setdefault(aid, val)
+        last, self._relieve_last[aid] = self._relieve_last.get(aid, 0), val
+        if t - self._relieve_off.get(aid, t) > 1000:
+            last = 0                              # ficou um tempo sem Alívio (defesa caída): começa de novo
+        if e is not None and e.job in DEF_BREAK_BOSSES:
+            if val >= DEFENSE_PCT > last:
+                self.mech(t, aid, "defense")
+        elif val >= RELIEF_HIGH > last:
+            level = 10 if val >= DEFENSE_PCT else val // 10
+            self.mech(t, aid, "relief", pct=val, souls=max(0, level - base // 10), more=val >= DEFENSE_PCT)
+
     def on_status(self, t, aid, efst, on, total=0, left=0, val1=0):
+        if on and efst in IMMUNE_EFST and self.boss_like(aid) and not self.status_on.get((aid, efst)):
+            self.boss_change(t, aid, immune=IMMUNE_EFST[efst])
+        if efst in (MAX_PAIN_EFST, RELIEVE_EFST) and self.boss_like(aid):
+            cur = self.status_on.get((aid, efst))
+            if efst == MAX_PAIN_EFST:
+                # um reflexo pode ter avisado antes (o chefe usou fora da tela): não repete o "ativa" e fecha no fim
+                guessed = t - self._maxpain_guess.get(aid, -10 ** 9) <= MAXPAIN_GUESS_MS
+                if bool(on) != (bool(cur) or guessed):
+                    self.mech(t, aid, "maxpain_on" if on else "maxpain_off")
+                if not on:
+                    self._maxpain_guess.pop(aid, None)
+            elif efst == RELIEVE_EFST and on and val1:
+                self.on_relieve(t, aid, val1)
+            elif efst == RELIEVE_EFST and not on:
+                self._relieve_off[aid] = t
         if efst == MIRACLE_EFST and aid == self.me:
             if on and max(total or 0, left or 0) >= MIRACLE_MIN_MS:
                 self.on_miracle(t, left or total)
@@ -959,6 +1323,8 @@ class Combat:
         elif rec["fusion"]:
             text += _(": União Solar (atacou com %s de HP)") % (
                 "%d%%" % round(rec["hp_pct"] * 100) if rec["hp_pct"] is not None else _("pouco"))
+        elif rec["special"] == "offscreen":
+            text += _(": provável golpe de %s fora da tela") % rec["killer"]
         elif rec["killer"] and not rec["unclear"]:
             text += ": %s (%s)" % (rec["skill"], rec["killer"])
         if rec["overkill"] and not rec["fusion"] and not rec["trap"]:
@@ -1056,6 +1422,8 @@ class Combat:
                 root = self.phase_root(src, x.time)
                 self.hits.append(Hit(x, root, self.resolve(x.dst), x.dst, False))
                 self.version += 1
+                if x.skill == MAXPAIN_ATK and x.damage > 0:
+                    self.maxpain_reflect(x.time, x.src)
             return
         if self.is_friendly(x.dst) or not self.counts_target(x.dst):
             return
@@ -1103,6 +1471,7 @@ class Combat:
         self.closed_ms = 0
         self.recent.clear()
         self.hits, self.uses, self.casts = [], [], []
+        self.ground_cells = {}
         self.deaths = {}
         self.death_log = []
         self.drops, self.pickups, self.mvp_items, self.drop_ids = [], [], [], {}
@@ -1383,6 +1752,47 @@ def replay_dir_for(path):
     if os.path.basename(path).lower() != "replay" and is_game_dir(path):
         return os.path.join(path, "Replay")
     return path
+
+
+GAME_EXES = ("ragexe.exe",)   # o executável do jogo (o Ragnarok.exe é só o atualizador)
+
+
+def game_running():
+    """O jogo está aberto? Olha só o nome dos processos do Windows (para o lembrete de gravação desligada);
+    False se não der para saber."""
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class Entry(ctypes.Structure):
+            _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+                        ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD),
+                        ("cntThreads", wintypes.DWORD), ("th32ParentProcessID", wintypes.DWORD),
+                        ("pcPriClassBase", ctypes.c_long), ("dwFlags", wintypes.DWORD),
+                        ("szExeFile", ctypes.c_wchar * 260)]
+        k32 = ctypes.windll.kernel32
+        k32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+        k32.Process32FirstW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        k32.Process32NextW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        k32.CloseHandle.argtypes = [ctypes.c_void_p]
+        snap = k32.CreateToolhelp32Snapshot(2, 0)             # TH32CS_SNAPPROCESS
+        if not snap or snap == ctypes.c_void_p(-1).value:
+            return False
+        try:
+            e = Entry()
+            e.dwSize = ctypes.sizeof(Entry)
+            ok = k32.Process32FirstW(snap, ctypes.byref(e))
+            while ok:
+                if e.szExeFile.lower() in GAME_EXES:
+                    return True
+                ok = k32.Process32NextW(snap, ctypes.byref(e))
+        finally:
+            k32.CloseHandle(snap)
+    except Exception:  # noqa: BLE001 - o lembrete é um extra
+        return False
+    return False
 
 
 def find_replay_dirs():

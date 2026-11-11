@@ -918,7 +918,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check(left == 10 ** 9 - 1000 - 306 and abs(eta - left / 1000.0 * 60000) < 1,
           "XP: tempo até o próximo nível = XP que falta ÷ XP por minuto -> %s" % xpmod.span_text(eta))
     est = xpmod.estimate(rf.combat, {"xp_bonuses": {"server": {"on": True, "pct": 100}}})
-    check(round(est["xp"]) == 204 and est["source"][0] == "lista", "XP: pela lista, evento +100%% = ×2 -> %s" % est["xp"])
+    check(round(est["xp"]) == 204 and est["source"][0] == "auto", "XP: pela lista, evento +100%% = ×2 -> %s" % est["xp"])
     check(abs(est["pct"] - 100.0 * est["xp"] / 10 ** 9) < 1e-9
           and xpmod.estimate(rf.combat, {}, (0, 30000))["kills_per_min"] is None,
           "XP: % do nível ao lado da XP; abates por minuto só com mais de 1 min")
@@ -956,10 +956,40 @@ wins = an.form_windows(ca, xa.boss_aids, 21588, xa.start, xa.end)
 hid = an.hidden_hits(ca, xa.boss_aids, (2218, 2219, 2220, 2221), xa.start, xa.end)
 curve = tl.build(ca, AQ)["hp"]
 end = curve[-1][1]
-# 500M - 100M = 80%; +10 s × 1,1% = 91%; quebra -12% = 79%; -1M = 78,8%
+# 500M - 100M = 80%; +10 s × 0,55% = 85,5%; quebra -4,5% = 81%; -1M = 80,8%
 check(xa.hp == 500000000 and xa.hp_label == "Executiva" and wins == [(2000, 12000)] and hid == [13000]
-      and abs(end - (0.8 + 0.11 - 0.12 - 0.002)) < 1e-6,
-      "Aquila: Executiva pela redução de 50%%; regenera só em sobrecarga e a quebra de defesa tira 12%% -> %.4f" % end)
+      and abs(end - (0.8 + 0.055 - 0.045 - 0.002)) < 1e-6,
+      "Aquila: Executiva pela redução de 50%%; regenera 0,55%%/s só em sobrecarga e a quebra de defesa tira 4,5%% -> %.4f" % end)
+m = an.BOSS_MODEL[21531]
+check([an.boss_regen(m, 21531, hp) for hp in (300000000, 500000000, 600000000, 123)] == [0.0055, 0.0055, 0.011, 0.0055],
+      "Aquila: regeneração por dificuldade (Econômica e Executiva 0,55%/s, Primeira Classe 1,1%/s)")
+ba = sorted(ca.boss_alerts.values(), key=lambda b: b["t"])
+BAPHO = 52403
+ev4 = [(0, fr.spawn(BAPHO, "mob", 1039, "Baphomet", boss=True)), (500, fr.skill_damage(ME, BAPHO, 1000)),
+       (2000, struct.pack("<HIBI", rrf.P_SPRITE, BAPHO, 0, 1038))]
+bb = sorted(combat_of(fr.build(ME, ev4)[0]).boss_alerts.values(), key=lambda b: b["t"])
+check(not [b for b in ba if b["size"]] and [(b["t"], b["size"], b["prev_size"]) for b in bb] == [(2000, "M", "L")],
+      "aviso de chefe: Aquila continua grande na sobrecarga (sem aviso); chefe que vira forma média avisa -> %s %s" % (
+          ba, bb))
+ev2 = [(0, fr.spawn(AQ, "mob", 21531, "Aquila", boss=True)), (500, fr.skill_damage(ME, AQ, 1000)),
+       (1000, fr.skill_use(AQ, AQ, 167)), (3000, fr.status(AQ, 1022, True, 30000, 30000)),
+       (3500, fr.status(AQ, 1022, True, 30000, 29500))]                     # o mesmo status de novo: um aviso só
+cb = combat_of(fr.build(ME, ev2)[0])
+ba = sorted(cb.boss_alerts.values(), key=lambda b: b["t"])
+best, avoid = an.element_advice("Holy")
+check([(b["element"], b["immune"]) for b in ba] == [("Holy", None), (None, "Holy")]
+      and [a for a, p in best] == ["Dark", "Undead"] and avoid == [("Holy", 0)]
+      and any(a[3] == "Aquila virou Sagrado" for a in cb.alerts),
+      "aviso de chefe: virou Sagrado (bata com Sombrio/Maldito 125%%, evite Sagrado 0%%) e ficou imune -> %s %s" % (
+          [(b["element"], b["immune"]) for b in ba], best))
+PAT, MINI = 52401, 52402
+ev3 = [(0, fr.spawn(PAT, "mob", 20639, "2 Zone Patrol#1")), (0, fr.spawn(MINI, "mob", 1002, "Poring", boss=1)),
+       (500, fr.skill_damage(ME, PAT, 1000)), (1000, fr.skill_use(PAT, PAT, 168)), (1500, fr.skill_use(MINI, MINI, 167)),
+       (2000, fr.status(PAT, 1023, True, 30000, 30000))]
+cp = combat_of(fr.build(ME, ev3)[0])
+check(not cp.boss_alerts and not any(a[2] == "boss" for a in cp.alerts),
+      "aviso de chefe: patrulha da Aeronave (1,9M de HP) e chefe menor trocando de propriedade não avisam -> %s" % (
+          cp.boss_alerts,))
 
 # --- subida de nível no meio da gravação: ponto exato, correção na hora e a XP do nível novo pela tabela ---
 check(xpmod.table_need(4302, 244) == 99691521069 and xpmod.table_need(4302, 248) == 220850071960
@@ -1000,8 +1030,55 @@ check([xpmod.span_text(m * 60000) for m in (45, 200, 6000)] == ["45 min", "3 h 2
       "XP: tempo em palavras (min, h, dias)")
 wins = {"vip": [(0, 100, 0)], "manual": [(0, 100, 0)], "njord": [(50, 100, 60)]}
 sets = xpmod.settings({"xp_bonuses": {"server": {"on": True}, "manual": {"pct": 200}}})
-check(xpmod.bonus_at(10, wins, sets) == 100 + 20 + 200 and xpmod.bonus_at(60, wins, sets) == 100 + 20 + 200 + 60,
-      "XP: bônus somam; o manual vale só enquanto ativo; Njord com o % do status")
+check(xpmod.bonus_at(10, wins, sets) == 100 + 20 + 200 and xpmod.bonus_at(60, wins, sets) == 100 + 20 + 200 + 60
+      and abs(xpmod.factor_at(10, wins, sets) - (2.2 + 2.0)) < 1e-9
+      and abs(xpmod.factor_at(60, wins, sets) - (2.2 * 1.6 + 2.0)) < 1e-9,
+      "XP: o manual vale só enquanto ativo e soma por fora; o Njord (% do status) multiplica o grupo do evento")
+# fatores medidos abate a abate com a XP exata do jogo (evento 100, VIP 20, Cetro 30, Kafra 50; itens 15, Njord 60,
+# Milagre, manual de 100%)
+xp_all = {"vip": [(0, 999, 0)], "scepter": [(0, 999, 0)], "kafra": [(0, 999, 0)], "gear": [(100, 999, 15)],
+        "njord": [(200, 999, 60)], "miracle": [(300, 999, 0)], "manual": [(400, 999, 100)]}
+setm = xpmod.settings({"xp_bonuses": {"server": {"on": True, "pct": 100}}})
+xp_got = [round(xpmod.factor_at(t, xp_all, setm), 4) for t in (50, 150, 250, 350, 450)]
+xp_got2 = [round(xpmod.factor_at(t, dict(xp_all, njord=[]), setm), 4) for t in (350, 450)]
+check(xp_got == [3.0, 3.375, 4.875, 9.75, 11.75] and xp_got2 == [6.75, 8.75],
+      "XP: fatores medidos com a XP exata (3,000 · itens 3,375 · Njord 4,875 · Milagre 9,75 · manual 11,75; sem "
+      "Njord 6,75 e 8,75) -> %s %s" % (xp_got, xp_got2))
+
+
+# alvo da Oposição: Solar nos dias pares, Lunar nos ímpares, Estelar nos múltiplos de 5; com Milagre não soma
+class _Ses:
+    recorded_at = (2026, 11, 11, 0, 31, 56)
+
+
+class _Marked:
+    session = _Ses()
+    hate_marks = [(1000, 0, 20179, False), (2000, 1, 20177, False), (3000, 2, 20175, True)]
+
+
+def _mark_gain(mob, t=5000, w=None):
+    w = w or {"vip": [(0, 10 ** 9, 0)]}
+    return round(xpmod.factor_at(t, w, setm, mob, xpmod.marks_of(_Marked())) / xpmod.factor_at(t, w, setm), 3)
+
+
+xp_day11 = [_mark_gain(20179), _mark_gain(20177), _mark_gain(20175), _mark_gain(20177, 1500)]
+xp_mir = _mark_gain(20177, 5000, {"vip": [(0, 10 ** 9, 0)], "miracle": [(0, 10 ** 9, 0)]})
+_Ses.recorded_at = (2026, 11, 10, 12, 0, 0)
+xp_day10 = [_mark_gain(20179), _mark_gain(20177), _mark_gain(20175), _mark_gain(20175, 500)]
+_Ses.recorded_at = (2026, 11, 10, 23, 59, 30)
+xp_midnight = _mark_gain(20177, 60000)
+check(xp_day11 == [1.0, 1.5, 1.0, 1.0] and xp_mir == 1.0 and xp_day10 == [1.5, 1.0, 2.0, 2.0] and xp_midnight == 1.5,
+      "XP: alvo da Oposição rende pelo dia do mês (dia 11: só o Lunar ×1,5; dia 10: Solar ×1,5 e Estelar ×2, que já "
+      "estava marcado; virou meia-noite: Lunar) e não soma com o Milagre -> %s %s %s %s" % (xp_day11, xp_mir, xp_day10, xp_midnight))
+xp_evq = [(0, fr.spawn(52500, "mob", 20177, "Jeniffer")), (1000, fr.skill_damage(ME, 52500, 1000)),
+       (2000, struct.pack("<H24sIBB", rrf.P_STARSKILL, b"x", 20177, 1, 10)),
+       (2500, struct.pack("<H24sIBB", rrf.P_STARSKILL, b"", 0, 0, 0)),             # Sensação: não é marca
+       (3000, struct.pack("<HI", rrf.P_QUEST_DONE, 5964))]
+xp_cq = combat_of(fr.build(ME, xp_evq)[0])
+check(xp_cq.hate_marks == [(2000, 1, 20177, False)] and xp_cq.quests_done == [(3000, 5964)]
+      and xpmod.quest_in(xp_cq, 0, 5000) and not xpmod.quest_in(xp_cq, 3500, 9000),
+      "XP: a gravação guarda o alvo da Oposição e a missão entregue; trecho com entrega não calibra -> %s %s" % (
+          xp_cq.hate_marks, xp_cq.quests_done))
 sets2 = xpmod.settings({"xp_bonuses": {"manual": {"pct": 50}}})
 xpmod.BONUSES.append(dict(key="_teste", name="x", pct=100, status=1, on=True, group="consumível"))
 sets2 = xpmod.settings({"xp_bonuses": {"manual": {"pct": 50}}})
@@ -1019,6 +1096,310 @@ wins = {"manual": [(0, 100, 0), (40, 100, 100)]}
 sets = xpmod.settings({"xp_bonuses": {"manual": {"pct": 50}}})
 check(xpmod.bonus_at(10, wins, sets) == 50 and xpmod.bonus_at(60, wins, sets) == 100,
       "XP: manual com o %% do status do jogo; sem valor, o digitado")
+
+# --- áreas no chão do Mestre Elemental: Vulcão, Insígnia da Terra, Ganbantein, Prisão de Teia ---------
+EM, ABOSS, AHIT = 2401, 61000, 1020000
+
+
+def area_fight(areas=True, em_job=4261):
+    """Quem grava bate com fogo (20 golpes, 1 por segundo) num chefe parado em (100, 100), de (100, 95). Com
+    `areas`: Vulcão nv 5 (3×3 células) sob quem grava de 0,5 a 9 s, apagado pelo Ganbantein do chefe; Insígnia da
+    Terra nv 3 (1 célula, raio 1) sob o chefe de 5,5 a 14,5 s; e uma Prisão de Teia que não pega."""
+    ev = [(0, at(fr.spawn(ABOSS, "mob", 1038, "Chefe", boss=2), 100, 100)),      # sem tabela de HP: HP = dano total
+          (0, fr.spawn(EM, "pc", em_job, "Elementa")), (100, fr.party_hp(EM, 50000, 50000)), (0, fr.stop(ME, 100, 95))]
+    ev += [(1000 + i * 1000, fr.skill_damage(ME, ABOSS, AHIT, skill=2218, hits=1)) for i in range(20)]
+    if areas:
+        ev += [(500, fr.ground_skill(EM, 285, 5, 100, 95)), (550, fr.ground_skill(EM, 285, 5, 100, 95))]   # repetido
+        ev += [(500, fr.ground_area(8000 + i, EM, 99 + i % 3, 94 + i // 3, 0x9A, 5)) for i in range(9)]
+        ev += [(600, fr.ground_area(8000, EM, 99, 94, 0x9A, 5))]                                           # repetido
+        ev += [(3000, fr.ground_skill(EM, 405, 5, 100, 100))]
+        ev += [(5500, fr.ground_skill(EM, 2468, 3, 100, 101)), (5500, fr.ground_area(8100, EM, 100, 101, 0xF4, 3, 1)),
+               (14500, fr.ground_gone(8100))]
+        ev += [(9000, fr.ground_skill(ABOSS, 483, 65535, 100, 95))] + [(9000, fr.ground_gone(8000 + i)) for i in range(9)]
+    ev += [(20500, fr.vanish(ABOSS, 1))]
+    return combat_of(fr.build(ME, sorted(ev, key=lambda e: e[0]))[0])
+
+
+ca = area_fight()
+vul, ins = [a for a in ca.areas if a["skill"] == 285], [a for a in ca.areas if a["skill"] == 2468]
+check(len(ca.areas) == 2 and len(vul[0]["units"]) == 9 and vul[0]["level"] == 5 and vul[0]["src"] == EM
+      and ca.area_spans(vul[0]) == [(500, 9000)] and ca.area_spans(ins[0]) == [(5500, 14500)],
+      "áreas no chão: um Vulcão de 9 células e uma Insígnia, com começo e fim -> %s" % [
+          (a["skill"], len(a["units"]), ca.area_spans(a)) for a in ca.areas])
+check(ca.in_area(vul[0], (101, 96), 8999) and not ca.in_area(vul[0], (101, 96), 9000)
+      and not ca.in_area(vul[0], (102, 96), 5000) and ca.in_area(ins[0], (100, 100), 6000)
+      and not ca.in_area(ins[0], (100, 99), 6000) and not ca.in_area(ins[0], None, 6000),
+      "áreas no chão: dentro só nas células (e no raio) enquanto estão no chão")
+check(len([u for u in ca.uses if u[4] == 285]) == 1 and [u[3] for u in ca.uses if u[4] in (285, 2468, 483)] == [0, 0, 0],
+      "skill usada numa célula vira uso (sem alvo), sem contar a repetição -> %s" % [u for u in ca.uses if u[3] == 0])
+rows, total = contrib.fight(ca, ABOSS)
+by = {r["key"]: r for r in rows}
+# Vulcão só (golpes 1-5): 20/120; os dois (6-8): 20/170 e 50/170; Insígnia só (9-14): 50/150
+check(total == 20 * AHIT and round(by[-285]["contrib"]) == 1210000 and round(by[-2468]["contrib"]) == 2940000
+      and by[-285]["where"] == "me" and by[-2468]["where"] == "boss" and by[-285]["hits"] == 8 and by[-2468]["hits"] == 9
+      and by[-285]["name"] == "Vulcão" and "+20%" in by[-285]["rule"] and "+50%" in by[-2468]["rule"],
+      "áreas no chão: Vulcão +20%% para quem bate de dentro e Insígnia +50%% no chefe em cima dela -> %s" % {
+          k: (round(r["contrib"]), r["hits"]) for k, r in by.items() if r["contrib"]})
+check(by[contrib.WEB]["contrib"] == 0 and "não apareceu no chefe" in by[contrib.WEB]["rule"] and 129 in meter.MOB_DEBUFFS,
+      "Prisão de Teia: usada e sem status no chefe aparece na lista -> %s" % by.get(contrib.WEB))
+crows, ctotal = contrib.credit(ca, ABOSS)
+cby = {r["aid"]: r for r in crows}
+check(ctotal == total and abs(sum(r["total"] for r in crows) - total) < 1 and round(cby[EM]["total"]) == 4150000
+      and round(cby[EM]["via"][-285]) == 1210000 and round(cby[EM]["via"][-2468]) == 2940000
+      and round(cby[ME]["own"]) == total - 4150000,
+      "dano creditado: Vulcão e Insígnia vão para quem pôs a área -> %s" % {a: round(r["total"]) for a, r in cby.items()})
+ra = dd.analyze(ca, ABOSS)
+arows = {d["key"]: d for d in ra["debuffs"] if d["key"].startswith("area|")}
+aal = {a["what"]: a for a in ra["alerts"]}
+check(arows["area|285"]["p1"] == "37%" and arows["area|2468"]["p1"] == "47%" and arows["area|285"]["bad"]
+      and arows["area|285"]["who"] == "Elementa" and "recarga 60 s" in arows["area|2468"]["note"],
+      "Dedo Duro: Vulcão e Insígnia com o %% do dano de fogo coberto -> %s" % {k: v["p1"] for k, v in arows.items()})
+check(aal.get("Vulcão durou pouco", {}).get("sev") == 1 and aal["Vulcão durou pouco"]["who"] == "Elementa"
+      and "apagada por Ganbantein (Chefe)" in aal["Vulcão durou pouco"]["detail"]
+      and aal.get("Insígnia da Terra durou pouco", {}).get("sev") == 1,
+      "Dedo Duro: alerta amarelo de Vulcão e Insígnia, com o Ganbantein que apagou -> %s" % aal.get("Vulcão durou pouco"))
+da = tl.build(ca, ABOSS)
+alanes = {l["key"]: l for l in da["lanes"] if l.get("area")}
+aev = [e for e in da["lane_events"] if e["kind"] == "area"]
+check(alanes["ar285"]["items"] == [(500, 9000)] and alanes["ar2468"]["items"] == [(5500, 14500)] and alanes["ar285"]["on"]
+      and any(e["what"] == "No chão: Vulcão acabou" and "apagada por Ganbantein" in e["detail"] and e["aid"] == EM
+              for e in aev) and any(e["kind"] == "boss" and e["what"] == "Ganbantein" for e in da["events"]),
+      "linha do tempo: faixas das áreas, quem pôs, o que apagou e o Ganbantein nas skills do chefe -> %s" % [
+          (e["t"], e["what"], e["detail"]) for e in aev])
+rb = dd.analyze(area_fight(areas=False), ABOSS)
+bal = {a["what"]: a for a in rb["alerts"]}
+check(bal.get("Vulcão faltou", {}).get("sev") == 1 and bal.get("Insígnia da Terra faltou", {}).get("sev") == 1
+      and bal["Vulcão faltou"]["phase"] == "Luta inteira" and bal["Vulcão faltou"]["who"] == "Elementa",
+      "Dedo Duro: com Mestre Elemental no grupo e dano de fogo, faltar Vulcão ou Insígnia é alerta amarelo -> %s" % (
+          sorted(k for k in bal if "faltou" in k)))
+rc = dd.analyze(area_fight(areas=False, em_job=4252), ABOSS)
+check(not any(d["key"].startswith("area|") for d in rc["debuffs"])
+      and not any("Vulcão" in a["what"] or "Insígnia" in a["what"] for a in rc["alerts"]),
+      "Dedo Duro: sem quem ponha a área no grupo, nada é cobrado")
+# em cima de quem o Ganbantein caiu (quem grava estava na célula) e o resumo no Dedo Duro
+gan = next(e for e in da["events"] if e["kind"] == "boss" and e["what"] == "Ganbantein")
+check(gan["detail"] == "em cima de Tester" and gan["target"] == ME
+      and any("que caiu em Tester" in e["detail"] for e in aev if e["what"] == "No chão: Vulcão acabou")
+      and "que caiu em Tester" in aal["Vulcão durou pouco"]["detail"],
+      "Ganbantein: a linha do tempo e o alerta dizem em cima de quem caiu -> %s" % gan["detail"])
+gal = aal.get("Ganbantein apagou áreas do grupo", {})
+check(gal.get("sev") == 0 and gal.get("who") == "Tester 1×" and "1 vez(es)" in gal.get("detail", "")
+      and "Vulcão 1×" in gal["detail"] and "Ganbantein apagou áreas do grupo" not in bal,
+      "Dedo Duro: resumo do Ganbantein que apagou áreas, com em cima de quem caiu -> %s" % gal)
+# rajada do chefe: células diferentes em menos de 200 ms são usos diferentes; a mesma célula repetida, não
+ev = [(0, fr.spawn(ABOSS, "mob", 1038, "Chefe", boss=2)), (100, fr.ground_skill(ABOSS, 483, 65535, 10, 10)),
+      (150, fr.ground_skill(ABOSS, 483, 65535, 10, 15)), (160, fr.ground_skill(ABOSS, 483, 65535, 10, 15))]
+cg = combat_of(fr.build(ME, ev)[0])
+check(len(cg.uses) == 2 and sorted(cg.ground_cells.values()) == [(10, 10), (10, 15)],
+      "skill numa célula: rajada em células diferentes não é repetição -> %s" % cg.ground_cells)
+# teleporte: a célula que volta logo depois nunca saiu do chão; a que não volta acabou ali
+ev = [(1000, fr.ground_area(1, EM, 10, 10, 0x9A, 5)), (1000, fr.ground_area(2, EM, 11, 10, 0x9A, 5)),
+      (2000, fr.map_move("prt_fild08", 10, 10)), (3000, fr.ground_area(1, EM, 10, 10, 0x9A, 5)), (9000, fr.stop(ME, 10, 10))]
+cm = combat_of(fr.build(ME, ev)[0])
+check(len(cm.areas) == 1 and cm.area_spans(cm.areas[0]) == [(1000, 9000)] and cm.in_area(cm.areas[0], (10, 10), 5000)
+      and not cm.in_area(cm.areas[0], (11, 10), 5000),
+      "áreas no chão: teleporte fecha as células, e a que reaparece segue no chão -> %s" % [a["units"] for a in cm.areas])
+
+# --- Oposição no Dedo Duro: casa certa pelo tamanho do chefe (quem grava é Mestre Celestial) ----------
+def hate_fight(level=None, start=70000):
+    """Chefe médio (a casa certa é a Lunar, nível 2) apanhando de quem grava a partir de `start`."""
+    ev = [(0, fr.spawn(ABOSS, "mob", 1038, "Chefe", boss=2))]
+    if level:
+        ev.append((start - 2000, fr.skill_use(ME, ABOSS, meter.HATE_SKILL, level)))
+    ev += [(start + i * 1000, fr.skill_damage(ME, ABOSS, 1000000, hits=1)) for i in range(10)]
+    ev += [(start + 10500, fr.vanish(ABOSS, 1))]
+    cc = combat_of(fr.build(ME, sorted(ev, key=lambda e: e[0]))[0])
+    return cc, {a["what"]: a for a in dd.analyze(cc, ABOSS)["alerts"]}
+
+
+ch, hal = hate_fight()
+check(hal.get("Oposição esquecida", {}).get("sev") == 2 and "Oposição Lunar" in hal["Oposição esquecida"]["detail"]
+      and "médio" in hal["Oposição esquecida"]["detail"],
+      "Oposição: bater no chefe sem marcar é grave -> %s" % hal.get("Oposição esquecida"))
+ch, hal = hate_fight(level=3)
+check(hal.get("Oposição errada", {}).get("sev") == 2 and "Oposição Estelar" in hal["Oposição errada"]["detail"]
+      and "Oposição esquecida" not in hal and ch.hate_uses == [(68000, ME, ABOSS, 3)],
+      "Oposição: casa errada para o tamanho é grave, e o uso guarda o nível -> %s" % hal.get("Oposição errada"))
+ch, hal = hate_fight(level=2)
+check("Oposição errada" not in hal and "Oposição esquecida" not in hal
+      and any(e["what"] == "usou Oposição Lunar" for e in tl.build(ch, ABOSS)["events"]),
+      "Oposição: a casa certa não dá alerta e a linha do tempo diz qual foi usada")
+ch, hal = hate_fight(start=5000)
+check(hal.get("Oposição esquecida", {}).get("sev") == 1 and "antes" in hal["Oposição esquecida"]["detail"],
+      "Oposição: luta que começa junto com a gravação é só atenção (a marca pode ser de antes)")
+
+# --- avisos de mecânica do chefe e fim da luta ---------------------------------------------------
+AQ = 62000
+ev = [(0, fr.spawn(ABOSS, "mob", 1038, "Chefe", boss=2)), (0, fr.spawn(AQ, "mob", 21531, "Aquila", boss=2)),
+      (1000, fr.status(ABOSS, meter.MAX_PAIN_EFST, True, 10000, 10000, 1)),
+      (1500, fr.status(ABOSS, meter.MAX_PAIN_EFST, True, 10000, 10000, 1)),     # renovou: não repete
+      (6000, fr.status(ABOSS, meter.MAX_PAIN_EFST, False)),
+      (7000, fr.status(AQ, meter.RELIEVE_EFST, True, 0, 0, 50)), (8000, fr.status(AQ, meter.RELIEVE_EFST, False)),
+      (8000, fr.status(AQ, meter.RELIEVE_EFST, True, 0, 0, 99)),
+      (12000, fr.skill_use(AQ, AQ, 2218)), (12100, fr.skill_use(AQ, AQ, 2220)),     # as duas juntas: um aviso só
+      (13000, fr.skill_use(ABOSS, ABOSS, 2218)),                                    # outro chefe: não é quebra
+      (14000, fr.skill_damage(ME, AQ, 5000000, hits=1)), (15000, fr.vanish(AQ, 1))]
+cmx = combat_of(fr.build(ME, ev)[0])
+mech = [(b["t"], b["aid"], b["mech"]) for b in sorted(cmx.boss_alerts.values(), key=lambda b: b["t"]) if b.get("mech")]
+check(mech == [(1000, ABOSS, "maxpain_on"), (6000, ABOSS, "maxpain_off"), (8000, AQ, "defense"), (12000, AQ, "def_break")],
+      "mecânicas: Dor Máxima liga e acaba, modo defesa (99%%) e defesa caída viram aviso -> %s" % mech)
+check(list(cmx.fight_ends.values()) == [(AQ, 15000)] and any(a[2] == "bossdead" for a in cmx.alerts),
+      "fim da luta: a morte do chefe fica anotada para o resumo -> %s" % cmx.fight_ends)
+
+# Aliviar do chefe subindo com as Almas (30% sem nenhuma, +10% por Alma): avisa a partir de 90%, uma vez
+ev = [(0, fr.spawn(ABOSS, "mob", 1038, "Chefe", boss=2))]
+for i, val in enumerate((30, 40, 80, 90, 99, 90, 99, 80, 90)):
+    ev += [(1000 + i * 1000, fr.status(ABOSS, meter.RELIEVE_EFST, False)),
+           (1000 + i * 1000, fr.status(ABOSS, meter.RELIEVE_EFST, True, 0, 0, val))]
+crl = combat_of(fr.build(ME, ev)[0])
+rel = [(b["t"], b["mech"], b.get("pct"), b.get("souls"), b.get("more")) for b in sorted(crl.boss_alerts.values(),
+                                                                                        key=lambda b: b["t"])]
+check(rel == [(4000, "relief", 90, 6, False)] and any("Aliviar muito alto, 6 almas ativas" in a[3] for a in crl.alerts),
+      "Aliviar muito alto: avisa ao passar de 90%% com o número de Almas, sem repetir a cada oscilação -> %s" % rel)
+
+# --- mortes do Aquila: o golpe que matou, a explosão do Robovac e o golpe de fora da tela -----------
+check(rrf.spawn_move(rrf.P_SPAWN_STAND, fr.spawn(MOB, "mob", 1002, "Poring", pos=(153, 155), stand=True))[1] == (153, 155)
+      and rrf.spawn_move(rrf.P_SPAWN_IDLE, fr.spawn(MOB, "mob", 1002, "Poring", pos=(146, 161)))[1] == (146, 161)
+      and rrf.parse_spawn(rrf.P_SPAWN_STAND, fr.spawn(MOB, "mob", 1002, "Poring", stand=True, boss=2)).boss == 2,
+      "posição de quem aparece parado (0x09ff) e de quem nasce (0x09fe)")
+REFLECT, CART, ROBO = meter.MAXPAIN_ATK, 153, 63000
+base = [(0, fr.spawn(AQ, "mob", 21531, "Aquila", boss=2)), (100, fr.hp(100000, rrf.SP_MAXHP)), (110, fr.hp(100000))]
+ev = base + [(5000, fr.skill_damage(ME, AQ, 1350000, hits=1)),
+             (5000, fr.skill_damage(AQ, ME, 150000, skill=REFLECT, hits=1)),      # este mata (a vida cai ~1 s depois)
+             (5400, fr.skill_damage(AQ, ME, 30000, skill=REFLECT, hits=1)),
+             (5700, fr.skill_damage(AQ, ME, 2000, skill=CART, hits=1)),           # o último golpe, pequeno
+             (6000, fr.vanish(ME, 1)), (9000, fr.status(AQ, meter.MAX_PAIN_EFST, False))]
+ck = combat_of(fr.build(ME, ev)[0])
+d = an.deaths(ck)[0]
+card = an.death_card(ck, ME, 6000)
+killg = next((g for g in card["sources"] if g["killing"]), {})
+check(d["hit"] == 150000 and d["skill"] == meter.skill_name(REFLECT) and not d["unclear"] and d["overkill"] == 50000
+      and killg.get("skill") == meter.skill_name(REFLECT) and (card["reflected"] or {}).get("dmg") == 1350000,
+      "morte: vale o golpe que matou (reflexo de 150.000), não o último pequeno -> %s %s" % (d["skill"], d["hit"]))
+mech = [(b["t"], b["mech"]) for b in sorted(ck.boss_alerts.values(), key=lambda b: b["t"]) if b.get("mech")]
+check(mech == [(5000, "maxpain_on"), (9000, "maxpain_off")],
+      "Dor Máxima usada fora da tela: o aviso sai no primeiro reflexo, uma vez, e fecha no fim -> %s" % mech)
+ev = base + [(4990, fr.status(AQ, meter.MAX_PAIN_EFST, True, 10000, 10000, 1)),
+             (5000, fr.skill_damage(AQ, ME, 500, skill=REFLECT, hits=1)),
+             (5500, fr.skill_damage(AQ, ME, 500, skill=REFLECT, hits=1))]
+ck = combat_of(fr.build(ME, ev)[0])
+mech = [(b["t"], b["mech"]) for b in ck.boss_alerts.values() if b.get("mech")]
+check(mech == [(4990, "maxpain_on")], "Dor Máxima vista pelo status: os reflexos não repetem o aviso -> %s" % mech)
+ev = base + [(4500, fr.skill_damage(AQ, ME, 150000, skill=CART, hits=1)), (5800, fr.hp(90000)),   # viva 1,3 s depois
+             (5900, fr.skill_damage(AQ, ME, 120000, skill=0, action=0)), (6000, fr.vanish(ME, 1))]
+d = an.deaths(combat_of(fr.build(ME, ev)[0]))[0]
+check(d["hit"] == 120000 and d["hp_before"] == 90000,
+      "morte: golpe grande que não matou (a vítima aparece viva depois) não leva a culpa -> %s" % d["hit"])
+
+robo = [(0, fr.spawn(ROBO, "mob", 20641, "Broken Robovac", pos=(150, 150))),
+        (100, fr.hp(118000, rrf.SP_MAXHP)), (110, fr.hp(84646))]
+ev = robo + [(0, fr.stop(ME, 153, 152)), (4000, fr.auto_attack(ROBO, ME, 3054)),
+             (5000, fr.skill_use(ROBO, ROBO, meter.SELF_DESTRUCT)), (5000, fr.vanish(ROBO, 1)), (5000, fr.vanish(ME, 1))]
+cb = combat_of(fr.build(ME, ev)[0])
+d = an.deaths(cb)[0]
+card = an.death_card(cb, ME, 5000)
+killg = next((g for g in card["sources"] if g["killing"]), {})
+boom = meter.skill_name(meter.SELF_DESTRUCT)
+check(d["special"] == "boom" and d["skill"] == boom and "Broken Robovac" in d["killer"] and not d["no_hit"]
+      and not d["unclear"] and d["hp_before"] == 84646 and cb.booms == [(5000, ROBO, (150, 150))]
+      and killg.get("skill") == boom and card["sprite_mob"] == 20641
+      and any(a[3].startswith("Você morreu: %s" % boom) for a in cb.alerts)
+      and "sem número na tela" in tl.death_cause(d),
+      "morte: a Autodestruição do Robovac colado vira a causa (não tem pacote de dano) -> %s" % tl.death_cause(d))
+ev = robo + [(0, fr.stop(ME, 170, 170)), (5000, fr.skill_use(ROBO, ROBO, meter.SELF_DESTRUCT)), (5000, fr.vanish(ME, 1))]
+d = an.deaths(combat_of(fr.build(ME, ev)[0]))[0]
+check(d["special"] is None and d["no_hit"], "morte: explosão longe (20 células) não leva a culpa")
+
+aq = [(0, fr.spawn(AQ, "mob", 21531, "Aquila", boss=2)), (100, fr.hp(118000, rrf.SP_MAXHP)), (110, fr.hp(111679)),
+      (2000, fr.broadcast("ni0XDg"))]                                   # o éter amarelo acabou: sobrecarga
+co = combat_of(fr.build(ME, aq + [(1000, fr.vanish(AQ, 0)), (32600, fr.vanish(ME, 1))])[0])
+d = an.deaths(co)[0]
+check(d["special"] == "offscreen" and d["overload_ms"] == 29600 and d["killer"].startswith("Aquila") and not d["no_hit"]
+      and d["hp_before"] == 111679 and co.overloads == [[2000, None]] and co.in_sight(AQ, 31600) is False
+      and "sobrecarga há 30 s" in tl.death_cause(d)
+      and any("provável golpe de Aquila fora da tela" in a[3] for a in co.alerts),
+      "morte: Aquila em sobrecarga e fora da tela vira a causa provável -> %s" % tl.death_cause(d))
+d = an.deaths(combat_of(fr.build(ME, aq + [(32600, fr.vanish(ME, 1))])[0]))[0]
+check(d["special"] is None and d["no_hit"], "morte: com o Aquila na tela, a morte sem golpe continua sem causa")
+co = combat_of(fr.build(ME, aq + [(1000, fr.vanish(AQ, 0)), (20000, fr.broadcast("nS0XDg")), (32600, fr.vanish(ME, 1))])[0])
+check(an.deaths(co)[0]["special"] is None and co.overloads == [[2000, 20000]] and co.overload_at(10000) == 8000
+      and co.overload_at(25000) is None,
+      "sobrecarga: os anúncios da sala abrem e fecham o período; fora dele o golpe de fora da tela não é palpite")
+
+# --- nomes escondidos na imagem copiada e a imagem no formato da área de transferência ---------------
+ev = [(0, fr.spawn(2501, "pc", 4252, "Fulano")), (0, fr.spawn(2502, "pc", 4252, "Beltrano")),
+      (0, fr.spawn(2503, "pc", 4256, "Sicrano")), (0, fr.spawn(MOB, "mob", 1002, "Poring"))]
+cn = combat_of(fr.build(ME, ev, player="Aria")[0])
+meter.HIDE_NAMES = True
+masked = [cn.name_of(a) for a in (2501, 2502, 2503, ME, MOB)]
+meter.HIDE_NAMES = False
+check(masked[0] != masked[1] and masked[0].endswith(" 1") and masked[1].endswith(" 2") and "Fulano" not in masked[0]
+      and masked[2] == meter.job_name(4256) and masked[3] == meter.job_name(4302) and masked[4] == "Poring"
+      and cn.name_of(2501) == "Fulano" and cn.name_of(ME) == "Aria",
+      "copiar imagem sem nomes: cada jogador vira a classe (numerada se repete) -> %s" % masked)
+import clipimg  # noqa: E402
+px = bytes([1, 2, 3, 0, 4, 5, 6, 0, 7, 8, 9, 0, 10, 11, 12, 0])          # 2×2, de cima para baixo
+blob = clipimg.dib(2, 2, px)
+check(len(blob) == 40 + 16 and struct.unpack_from("<Iii", blob) == (40, 2, 2)
+      and blob[40:] == bytes([7, 8, 9, 255, 10, 11, 12, 255, 1, 2, 3, 255, 4, 5, 6, 255])
+      and clipimg.crop(2, 2, px, (1, 0, 2, 2)) == (1, 2, bytes([4, 5, 6, 0, 10, 11, 12, 0])),
+      "copiar imagem: recorte e formato da área de transferência (de baixo para cima, opaco)")
+
+# --- XP: missões (progresso da caça, entrega com manual e Kafra) e modo automático ------------------
+ev = [(0, fr.status(ME, 250, True, 1800000, 1800000, 100)), (0, fr.status(ME, 1085, True, 600000000, 600000000, 0)),
+      (1000, fr.quest_hunt([(5964, 59640, 1000, 640)])), (2000, fr.quest_hunt([(5964, 59640, 1000, 641), (7777, 1, 10, 3)])),
+      (65000, fr.quest_done(5964)), (66000, fr.quest_done(4242)), (70000, fr.stop(ME, 1, 1))]
+cq = combat_of(fr.build(ME, ev, xp=(7100, 0, 10 ** 12))[0])
+hq = xpmod.hunts(cq)
+eq0 = xpmod.estimate(cq, {})
+check(eq0["quest_xp"] == 0 and eq0["xp"] == 0 and len(eq0["quests"]) == 2 and eq0["quests_unknown"] == 2
+      and xpmod.quests_uncounted(cq, {}) == 2,
+      "missões: a XP das entregas fica fora da conta (recurso desligado), mas as entregas são listadas e a tela avisa")
+xpmod.QUEST_XP_ON = True                     # o mecanismo continua testado para quando a regra fechar
+qr = xpmod.quest_rows(cq, {})
+eq = xpmod.estimate(cq, {})
+check([(h["quest"], h["parts"]) for h in hq] == [(7777, [(3, 10)])] and 5964 not in cq.quest_hunts,
+      "missões: o progresso da caça aparece e some quando a missão é entregue -> %s" % hq)
+check(qr[0]["mult"] == 2.5 and qr[0]["xp"] == 5586774400 and qr[1]["xp"] is None and eq["quest_xp"] == 5586774400
+      and eq["xp"] == 5586774400 and eq["kill_xp"] == 0 and eq["quests_unknown"] == 1 and eq["per_min"] == 0,
+      "missões: Jantar do Diabo com manual 100%% e Kafra rende ×2,5 (5.586.774.400), fora do ritmo dos abates -> %s"
+      % [(q["quest"], q["mult"], q["xp"]) for q in qr])
+check(xpmod.quest_base(4242, {"xp_quests": {"4242": {"base": 1000}}}) == 1000 and xpmod.quest_base(4242, {}) is None,
+      "missões: a recompensa aprendida vale no lugar da tabela")
+xpmod.QUEST_XP_ON = False
+check(xpmod.factor(cq, {})[1][0] == "auto" and xpmod.factor(cq, {"xp_mode": "lista"})[1][0] == "lista",
+      "XP: sem nada escolhido o modo é o automático (aproximado até haver medida)")
+xpmod.MAX_AGE_S = None                       # nos testes as gravações são antigas
+cfgm = {}
+check(xpmod.remember_manual(cq, cfgm) and cfgm["xp_manual_last"] == {"7100": 100}
+      and xpmod.settings(cfgm, cq)["manual"]["last"] == 100 and not xpmod.remember_manual(cq, cfgm),
+      "XP: o %% do último manual visto fica guardado para o personagem -> %s" % cfgm)
+wm = {"manual": [(0, 100, 0)]}
+check(xpmod.bonus_at(10, wm, xpmod.settings(cfgm, cq)) == 100 and xpmod.bonus_at(10, wm, xpmod.settings({})) == 50,
+      "XP: manual já ativo no começo usa o último %% visto, senão o digitado")
+with tempfile.TemporaryDirectory() as tmp2:
+    # 3 abates de 37 de XP pela lista sem evento (111); a gravação seguinte mostra +333 = ×3: evento de +200%
+    ev = []
+    for i, aid in enumerate((52001, 52002, 52003)):
+        ev += [(i * 300000, fr.spawn(aid, "mob", 1122, "Goblin")), (i * 300000 + 200, fr.skill_damage(ME, aid, 5000)),
+               (i * 300000 + 400, fr.vanish(aid, 1))]
+    for name, date, exp, events in (("a.rrf", (2026, 11, 5, 19, 35, 0), 1000, ev),
+                                    ("b.rrf", (2026, 11, 5, 19, 45, 40), 1000 + 333, [])):
+        with open(os.path.join(tmp2, name), "wb") as f:
+            f.write(fr.build(ME, events, date=date, xp=(7100, exp, 10 ** 9))[0])
+    rfa = meter.ReplayFile(os.path.join(tmp2, "a.rrf"))
+    rfa.poll(max_bytes=1 << 30)
+    cfga = {}
+    corr = xpmod.calibrate(rfa.combat, cfga, meter.xp_after)
+    esta = xpmod.estimate(rfa.combat, cfga)
+    check(cfga["xp_bonuses"]["server"] == {"on": True, "pct": 200, "auto": True} and corr == 1.0
+          and round(esta["xp"]) == 333 and esta["source"][0] == "medido",
+          "XP automática: o evento do servidor (+200%%) sai da XP exata e a lista fecha sozinha -> %s %s" % (
+              cfga.get("xp_bonuses"), corr))
+    cfgl = {"xp_mode": "lista"}
+    xpmod.calibrate(rfa.combat, cfgl, meter.xp_after)
+    check("xp_bonuses" not in cfgl, "XP: no modo \"pela lista\" o programa não mexe no evento do servidor")
+xpmod.MAX_AGE_S = 24 * 3600
 
 # --- Milagre Solar, Lunar e Estelar (status 160 de 1 hora, sem ícone) e bônus dos itens ----------------
 ev = [(1000, fr.status(ME, 984, True, 2592000, 2592000, 0)),          # VIP

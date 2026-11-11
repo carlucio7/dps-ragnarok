@@ -549,10 +549,15 @@ class TimelineTab:
             if not d["dmg"].get(aid):
                 mark += _(" (sem dano)")
             check(aid, c.name_of(aid) + mark, win.color_of(aid), False, self.players_on)
-        spans = [l for l in d["lanes"] if l["kind"] == "span"]
+        spans = [l for l in d["lanes"] if l["kind"] == "span" and not l.get("area")]
         if spans:
             head(_("No chefe"))
             for lane in spans:
+                check(lane["key"], lane["name"], lane["color"], lane["on"], self.on)
+        areas = [l for l in d["lanes"] if l["kind"] == "span" and l.get("area")]
+        if areas:
+            head(_("Áreas no chão"))
+            for lane in areas:
                 check(lane["key"], lane["name"], lane["color"], lane["on"], self.on)
         points = [l for l in d["lanes"] if l["kind"] == "point"]
         if points:

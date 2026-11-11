@@ -19,7 +19,9 @@ import clientdata
 import contrib
 import dedoduro as dd
 import itemkind
+import clipimg
 import meter
+import quests
 import sprites
 import testes
 import xp
@@ -28,7 +30,8 @@ from i18n import _
 
 # cor de cada efeito no gráfico "Por jogador" (o dano próprio usa a cor do jogador)
 EFFECT_COLORS = {1142: "#22d3ee", 1183: "#4ade80", 730: "#a78bfa", 1402: "#f59e0b", 1403: "#fbbf24", 22: "#f472b6",
-                 1182: "#a3e635", 608: "#ef4444", 1319: "#94a3b8"}
+                 1182: "#a3e635", 608: "#ef4444", 1319: "#94a3b8",
+                 -285: "#fb923c", -2468: "#d6a38f", -286: "#38bdf8", -287: "#bef264"}   # áreas no chão (−skill)
 # cores bem diferentes entre si; cada jogador fica com a mesma cor em todas as tabelas e gráficos
 PALETTE = ["#ff7a59", "#5b9cff", "#4ade80", "#c084fc", "#fbbf24", "#22d3ee", "#f472b6",
            "#a3e635", "#d6a38f", "#94a3b8", "#e11d48", "#2dd4bf"]
@@ -775,6 +778,15 @@ class AnalysisWindow:
         self.status_lbl.pack(side="left", padx=(12, 0))
         self.copy_btn = ttk.Button(head, text=_("Copiar ranking"), style="An.TButton", command=self.copy_ranking)
         self.copy_btn.pack(side="right")
+        # imagem da aba para colar no Discord; Ctrl+Shift+C copia só o gráfico que está sob o mouse (com a dica aberta)
+        self.copy_img_btn = ttk.Button(head, text=_("Copiar imagem"), style="An.TButton", command=self.copy_image)
+        self.copy_img_btn.pack(side="right", padx=(0, 6))
+        self.hide_names_var = tk.BooleanVar(self.top, bool(self.app.cfg.get("copy_hide_names")))
+        ttk.Checkbutton(head, text=_("sem nomes"), variable=self.hide_names_var, style="An.TCheckbutton",
+                        command=self.hide_names_changed).pack(side="right", padx=(0, 6))
+        self.label(head, _("Ctrl+Shift+C: só o gráfico sob o mouse"), "small", "muted").pack(side="right", padx=(0, 10))
+        for seq in ("<Control-Shift-C>", "<Control-Shift-c>"):
+            self.top.bind(seq, self.copy_hovered)
         bar = tk.Frame(self.top, bg=c["bg"])
         bar.pack(fill="x", padx=14, pady=(4, 6))
         self.label(bar, _("Recorte:"), color="muted").pack(side="left")
@@ -993,7 +1005,8 @@ class AnalysisWindow:
         for r in rows:
             r["slot_txt"] = _(r["slot"])
         self.t_equip.set_rows(rows, lambda r: r["slot"])
-        self.eq_title.configure(text=_("Equipamento de %s") % (c.session.player or _("quem gravou")) if rows
+        self.eq_title.configure(text=_("Equipamento de %s") % (
+            (c.name_of(c.me) if meter.HIDE_NAMES else c.session.player) or _("quem gravou")) if rows
                                 else _("Equipamento — o replay não trouxe a lista de itens de quem gravou"))
         # visual: o do início da gravação, com chapéus/capa/arma/escudo dos itens vestidos no momento escolhido
         grf = clientdata.NAMES.grf
@@ -1406,9 +1419,11 @@ class AnalysisWindow:
         self.xp_tiles.pack(fill="x", padx=10, pady=(10, 0))
         self.label(tab, _("O replay não grava a XP ganha: só a XP total no início de cada gravação. A estimativa soma "
                           "a XP de cada monstro que você ajudou a matar (rAthena e Divine Pride), com a penalidade de "
-                          "nível e a sua parte do dano, vezes os bônus. Os bônus de XP somam entre si, e o Milagre "
-                          "multiplica o total (com +100%, dobra); os manuais e outros consumíveis competem entre si "
-                          "(vale o maior). O replay mostra quando VIP, Cetro, Kafra Buff, manual, Banquete de Njord e "
+                          "nível e a sua parte do dano, vezes os bônus. Evento do servidor, VIP e Cetro somam entre "
+                          "si; os bônus dos itens e o Banquete de Njord multiplicam esse grupo; manual e Kafra Buff "
+                          "somam por fora; e o Milagre dobra tudo (conta medida com a XP exata do jogo). Os manuais "
+                          "competem entre si (vale o maior). O replay mostra quando VIP, Cetro, Kafra Buff, manual, "
+                          "Banquete de Njord e "
                           "Milagre estão ativos, mas não o evento do servidor: marque-o. \"Medido\" corrige a lista "
                           "com a XP exata: cada subida de nível (a XP de cada nível é conhecida) e duas gravações "
                           "seguidas do mesmo personagem; trechos com menos de 10 min não contam."),
@@ -1421,12 +1436,12 @@ class AnalysisWindow:
         pw.add(left, weight=2)
         pw.add(right, weight=3)
         self.section(left, _("Bônus de XP"), bg="tile")
-        self.xp_mode = tk.StringVar(self.top, "lista")
+        self.xp_mode = tk.StringVar(self.top, "auto")
         modes = tk.Frame(left, bg=c["tile"])
         modes.pack(fill="x", padx=10)
         self.xp_mode_btns = {}
-        for key, text in (("lista", _("Pela lista abaixo")), ("medido", _("Medido nas gravações")),
-                          ("fixo", _("Valor fixo (%):"))):
+        for key, text in (("auto", _("Automático (recomendado)")), ("lista", _("Pela lista abaixo")),
+                          ("medido", _("Medido nas gravações")), ("fixo", _("Valor fixo (%):"))):
             row = tk.Frame(modes, bg=c["tile"])
             row.pack(fill="x", pady=1)
             rb = tk.Radiobutton(row, text=text, variable=self.xp_mode, value=key, command=self.xp_save,
@@ -1442,6 +1457,9 @@ class AnalysisWindow:
                 ent.pack(side="left", padx=6, ipady=2)
                 ent.bind("<Return>", lambda e: self.xp_save())
                 ent.bind("<FocusOut>", lambda e: self.xp_save())
+            if key == "auto":
+                self.label(row, _("a lista, corrigida pela XP exata; confere o evento do servidor sozinho"), "small",
+                           "muted", "tile").pack(side="left", padx=6)
             if key == "medido":
                 self.xp_measured = self.label(row, "", "small", "muted", "tile")
                 self.xp_measured.pack(side="left", padx=6)
@@ -1512,6 +1530,16 @@ class AnalysisWindow:
             ("kills", _("Abates"), 65, "e", "int"), ("pen_txt", _("Penalidade"), 85, "e", "text"),
             ("xp_txt", _("XP estimada"), 120, "e", "text"), ("each_txt", _("Por abate"), 105, "e", "text")], height=6)
         self.t_xp.pack(fill="both", expand=True, padx=6, pady=6)
+        qtab = tk.Frame(sub, bg=c["tile"])
+        sub.add(qtab, text=_("Missões"))
+        self.t_xp_quests = Table(qtab, self, [
+            ("when", _("Quando"), 90, "w", "text"), ("name", _("Missão"), 250, "w", "text"),
+            ("xp_txt", _("XP"), 120, "e", "text"), ("how", _("Como conta"), 260, "w", "text")], height=6)
+        self.t_xp_quests.pack(fill="both", expand=True, padx=6, pady=(6, 2))
+        self.label(qtab, _("O replay mostra a entrega e o progresso das caças, mas não quanto cada missão rende. Por "
+                           "enquanto a XP das missões fica fora da estimativa: depois de uma entrega, o nível mostrado "
+                           "fica abaixo do real até a próxima subida de nível ou a próxima gravação."), "small",
+                   "muted", "tile", anchor="w", justify="left", wraplength=640).pack(fill="x", padx=8, pady=(0, 6))
         cmp_tab = tk.Frame(sub, bg=c["tile"])
         sub.add(cmp_tab, text=_("Comparar com outra gravação"))
         bar = tk.Frame(cmp_tab, bg=c["tile"])
@@ -1544,7 +1572,7 @@ class AnalysisWindow:
             self.xp_on[key].set(st["on"])
             if key not in ("gear", "gear_event"):
                 self.xp_pct[key].set("%g" % st["pct"])
-        self.xp_mode.set(cfg.get("xp_mode") if cfg.get("xp_mode") in xp.MODES else "lista")
+        self.xp_mode.set(cfg.get("xp_mode") if cfg.get("xp_mode") in xp.MODES else "auto")
         if isinstance(cfg.get("xp_fixed"), (int, float)):
             self.xp_fixed.set("%g" % cfg["xp_fixed"])
         pct = sets["manual"]["pct"]
@@ -1573,6 +1601,11 @@ class AnalysisWindow:
         for b in xp.BONUSES:
             pct = number(self.xp_pct[b["key"]].get())
             saved[b["key"]] = dict(on=bool(self.xp_on[b["key"]].get()), pct=pct if pct is not None else b["pct"])
+        old = xp.settings(cfg)
+        if any((old[k]["on"], old[k]["pct"]) != (v["on"], v["pct"]) for k, v in saved.items()):
+            cfg["xp_corr"] = {}                  # as medidas guardadas eram sobre a lista antiga
+            if old["manual"]["pct"] != saved["manual"]["pct"]:
+                cfg["xp_manual_last"] = {}       # a pessoa escolheu o manual: vale o que ela disse
         cfg["xp_bonuses"] = saved
         cfg["xp_mode"] = self.xp_mode.get()
         cfg["xp_fixed"] = number(self.xp_fixed.get())
@@ -1607,8 +1640,11 @@ class AnalysisWindow:
         put = self.xp_tiles.put
         put("est", full(round(est["xp"])), short=num(est["xp"]), color=self.c["accent"])
         if est["pct"] is not None:              # % do nível primeiro, número depois (como no jogo)
-            put("est", dec("%.2f%%" % est["pct"]), _("do nível · %s XP") % full(round(est["xp"])),
-                color=self.c["accent"])
+            sub = _("do nível · %s XP") % full(round(est["xp"]))
+            if est["quests"]:
+                sub += " · " + (_("com %d missão(ões)") % len(est["quests"]) if not est["quests_unknown"] else
+                                _("sem a XP de %d missão(ões)") % est["quests_unknown"])
+            put("est", dec("%.2f%%" % est["pct"]), sub, color=self.c["accent"])
         if est["per_min"] is not None:
             put("min", dec("%.3f%%" % est["per_min_pct"]) if est["per_min_pct"] is not None else num(est["per_min"]),
                 _("do nível · %s/min") % num(est["per_min"]) if est["per_min_pct"] is not None else "")
@@ -1622,6 +1658,8 @@ class AnalysisWindow:
             put("eta", _("calculando…"), _("depois de 10 min de farm ou 1% do nível"))
         elif eta is None:
             put("eta", "—", _("sem ritmo de XP no recorte"))
+        elif eta and xp.quests_uncounted(c, cfg):
+            put("eta", xp.span_text(eta), _("pode ser menos: a XP das missões entregues não entra na conta"))
         else:
             put("eta", xp.span_text(eta) if eta else _("já subiu"),
                 (_("faltam %s XP") % full(round(left))) if left else _("pela XP estimada"))
@@ -1635,6 +1673,8 @@ class AnalysisWindow:
                 if info == "nivel" else _("lista × %s, de %d medidas") % (dec("%.3f" % est["correction"]), info)
         elif kind == "fixo":
             how = _("valor fixo: +%g%%") % info
+        elif kind == "auto":
+            how = _("pela lista, aproximado: ainda sem XP exata para conferir")
         else:
             how = _("pela lista de bônus")
         put("factor", "×" + dec("%.2f" % est["factor"]), how)
@@ -1642,7 +1682,8 @@ class AnalysisWindow:
         prog = meter.level_progress(ses)
         pr = xp.progress(c, cfg)
         if pr is not None and pr["pct"] is not None:   # agora: o último ponto exato + a XP estimada desde ele
-            put("level", "%d" % pr["level"], _("%s agora (estimado)") % dec("%.2f%%" % min(100.0, pr["pct"])))
+            put("level", "%d" % pr["level"], (_("%s agora (sem a XP das missões)") if xp.quests_uncounted(c, cfg)
+                                             else _("%s agora (estimado)")) % dec("%.2f%%" % min(100.0, pr["pct"])))
         else:
             put("level", "%d" % ses.base_level if ses.base_level else "—",
                 dec("%.2f%%" % (100 * prog)) if prog is not None else "")
@@ -1727,6 +1768,21 @@ class AnalysisWindow:
                              each_txt=full(round(total / r["kills"])) if total is not None else "—", xp=total))
         rows.sort(key=lambda r: -(r["xp"] or 0))
         self.t_xp.set_rows(rows, lambda r: r["key"], lambda r: [] if r["xp"] is not None else ["warn"])
+        # missões: as entregues no recorte (com a XP, quando se sabe) e as caças em andamento
+        qrows = []
+        for i, q in enumerate(est["quests"]):
+            extra = round((q["mult"] - 1.0) * 100)
+            qrows.append(dict(key="d%d" % i, when=dur(q["t"]), name=quests.title(q["quest"]), known=q["xp"] is not None,
+                              xp_txt=full(round(q["xp"])) if q["xp"] is not None else _("fora da conta"),
+                              how=(_("recompensa %s, sem bônus") % full(round(q["base"])) if not extra else
+                                   _("recompensa %s +%d%% (manual e Kafra)") % (full(round(q["base"])), extra))
+                              if q["base"] else _("entregue: a XP desta missão ainda não entra na estimativa")))
+        for h in xp.hunts(c):
+            qrows.append(dict(key="h%d" % h["quest"], when=_("em andamento"), name=quests.title(h["quest"]), known=True,
+                              xp_txt=" · ".join("%d/%d" % p for p in h["parts"]),
+                              how=_("caça: %s feito") % dec("%.0f%%" % (100.0 * h["count"] / h["goal"]))
+                              if h["goal"] else ""))
+        self.t_xp_quests.set_rows(qrows, lambda r: r["key"], lambda r: [] if r["known"] else ["warn"])
         self.refresh_xp_compare(c)
 
     def xp_event_menu(self):
@@ -2093,7 +2149,7 @@ class AnalysisWindow:
         rng, dur_ms = an.scope_range(c, scope)
         self.rng, self.dur_ms = rng, dur_ms
         s = c.session
-        self.title_lbl.configure(text="%s · %s" % (s.player, c.map or s.map))
+        self.title_lbl.configure(text="%s · %s" % (c.name_of(c.me) if meter.HIDE_NAMES else s.player, c.map or s.map))
         live = c.active() and (scope is None or c.is_live(scope))
         _y, mo, d, hh, mm, _ss = s.recorded_at
         state = _("● ao vivo") if live else (_("gravando") if not c.finished else _("replay encerrado"))
@@ -2138,7 +2194,8 @@ class AnalysisWindow:
     def refresh_summary(self, c):
         sm = an.summary(c, self.rng, self.dur_ms)
         me = c.session
-        self.sum_title.configure(text=_("%s · %s · nível %d") % (me.player, an.job_of(c, c.me), me.base_level))
+        self.sum_title.configure(text=_("%s · %s · nível %d") % (
+            c.name_of(c.me) if meter.HIDE_NAMES else me.player, an.job_of(c, c.me), me.base_level))
         t = self.sum_tiles
         t.put("dealt", full(sm["dealt"]), _("%s do grupo") % _fmt("pct", sm["share"]), self.c["accent"])
         t.put("dps", full(round(sm["dps"])), _("tempo em combate %s") % dur(sm["combat_ms"]))
@@ -2486,7 +2543,7 @@ class AnalysisWindow:
                             kind=r["kind"], desc=e["rule"] if e else meter.status_desc(r.get("efst"))))
         for e in est.values():
             out.append(dict(key=e["name"], name=e["name"], contrib=e["contrib"], share=e["share"], uptime=e["uptime"],
-                            kind_txt="", now_txt="", kind="", desc=e["rule"]))
+                            kind_txt=e.get("kind_txt", ""), now_txt="", kind="", desc=e["rule"]))
         # hierarquia: o que rendeu dano estimado; depois suporte do grupo, buffs de classe, consumíveis e serviços
         tier = {"Grupo/suporte": 0, "Classe/outros": 1, "Consumível": 2, "Outro": 3, "Serviço": 4}
         out.sort(key=lambda r: (-(r["contrib"] or 0), tier.get(r["kind"], 1), -(r["uptime"] or 0), r["name"]))
@@ -2539,7 +2596,7 @@ class AnalysisWindow:
 
         def text_of(r):
             bits = [dec("%.1f%%" % (100.0 * r["total"] / total)), full(round(r["total"]))]
-            bits += ["%s %s" % (meter.status_name(ef), dec("%.1f%%" % (100.0 * v / total)))
+            bits += ["%s %s" % (contrib.effect_name(ef), dec("%.1f%%" % (100.0 * v / total)))
                      for ef, v in sorted(r["via"].items(), key=lambda kv: -kv[1]) if v >= total * 0.0005]
             if r["via"] and r["own"] >= total * 0.0005:
                 bits.append(_("próprio %s") % dec("%.1f%%" % (100.0 * r["own"] / total)))
@@ -2573,7 +2630,7 @@ class AnalysisWindow:
         x += f["small"].measure(_("cor do jogador = dano próprio")) + 16 * d
         for ef in used:
             cv.create_rectangle(x, y - 5 * d, x + 10 * d, y + 5 * d, fill=EFFECT_COLORS.get(ef, col["accent"]), outline="")
-            label = meter.status_name(ef)
+            label = contrib.effect_name(ef)
             cv.create_text(x + 14 * d, y, anchor="w", fill=col["muted"], font=f["small"], text=label)
             x += 14 * d + f["small"].measure(label) + 14 * d
 
@@ -2654,12 +2711,19 @@ class AnalysisWindow:
                     "%d%%" % round(d["hp_pct"] * 100) if d["hp_pct"] is not None else _("20% ou menos"))
             elif d["no_hit"]:
                 d["cause"] = _("sem golpe visível (efeito, debuff ou algo fora da tela)")
+            elif d["special"] == "boom":
+                d["cause"] = _("%s · %s (dano fixo, sem número na tela)") % (d["skill"], d["killer"])
+            elif d["special"] == "offscreen":
+                d["cause"] = _("provável golpe de %s fora da tela (sobrecarga há %d s)") % (
+                    d["killer"], round(d["overload_ms"] / 1000.0))
             elif d["unclear"]:
                 d["cause"] = _("último golpe: %s · %s (não bastava sozinho)") % (d["skill"], d["killer"])
             else:
                 d["cause"] = "%s · %s" % (d["skill"], d["killer"])
             if d["unclear"] or d["fusion"] or not d["overkill"]:
                 d["overkill"] = None
+            if d["special"]:
+                d["hit"] = None                # explosão sem pacote de dano / golpe de fora da tela: não há número
         self.death_rows = rows
         self.t_deaths.set_rows(rows, lambda r: r["key"], lambda r: ["me"] if r["me"] else [],
                                lambda r: self.color_of(r["aid"]))
@@ -2694,6 +2758,10 @@ class AnalysisWindow:
                 title += _(" · overkill ~%s") % full(d["overkill"])
         elif d["fusion"]:
             title += _(" — União Solar, Lunar e Estelar")
+        elif d["special"] == "boom":
+            title += _(" — %s de %s (dano fixo, sem número na tela)") % (d["skill"], d["killer"])
+        elif d["special"] == "offscreen":
+            title += _(" — provável golpe de %s fora da tela") % d["killer"]
         elif not d["no_hit"] and not d["unclear"]:
             title += _(" — %s de %s: %s") % (d["skill"], d["killer"], full(d["hit"]))
             if d["overkill"]:
@@ -2719,6 +2787,13 @@ class AnalysisWindow:
         elif d["hp_before"] is not None:
             bits.append(_("HP antes do último golpe: %s%s") % (full(d["hp_before"]),
                         _(" de %s") % full(d["max_hp"]) if d["max_hp"] else ""))
+        if d["special"] == "boom":
+            bits.append(_("a explosão não manda pacote de dano: tira um valor fixo de HP de quem está perto "
+                        "(no Aquila, 120.000 na %s e 300.000 na %s)") % (_("Executiva"), _("Primeira Classe")))
+        elif d["special"] == "offscreen":
+            bits.append(_("o chefe estava fora da tela e em sobrecarga há %d s: o golpe dele cresce a cada segundo "
+                        "de sobrecarga e, de fora da tela, não chega ao replay nem aparece no jogo")
+                        % round(d["overload_ms"] / 1000.0))
         if d["no_hit"] and d["hp_loss"] and not d["fusion"]:
             bits.append(_("perdeu %s de HP sem golpe visível") % full(d["hp_loss"]))
         if d["unclear"] and not d["fusion"]:
@@ -3193,6 +3268,45 @@ class AnalysisWindow:
         self.top.clipboard_append(text)
         self.copy_btn.configure(text=_("Copiado!"))
         self.top.after(1500, lambda: self.copy_btn.configure(text=_("Copiar ranking")))
+
+    def hide_names_changed(self):
+        self.app.cfg["copy_hide_names"] = bool(self.hide_names_var.get())
+        self.app.save()
+
+    def copy_hovered(self, _event=None):
+        """Ctrl+Shift+C: copia só o gráfico (Canvas) que está sob o mouse; fora de um gráfico, a aba inteira."""
+        try:
+            x, y = self.top.winfo_pointerxy()
+            w = self.top.winfo_containing(x, y)
+        except (tk.TclError, KeyError):
+            w = None
+        self.copy_image(w if isinstance(w, tk.Canvas) else None)
+        return "break"
+
+    def copy_image(self, widget=None):
+        """Copia a janela (ou um gráfico) como imagem. Com "sem nomes", redesenha antes com cada jogador como a
+        classe e volta ao normal depois."""
+        c = self.combat()
+        hide = bool(self.app.cfg.get("copy_hide_names")) and c is not None
+        ok = False
+        try:
+            if hide:
+                meter.HIDE_NAMES = True
+                c.version += 1                    # o que está guardado com os nomes de verdade é refeito
+                self.refresh(force=True)
+            self.top.update_idletasks()
+            if hide:
+                self.top.update()
+            ok = clipimg.copy_widget(self.top, widget)
+        except Exception:  # noqa: BLE001
+            self.app.log_error(*__import__("sys").exc_info())
+        finally:
+            if hide:
+                meter.HIDE_NAMES = False
+                c.version += 1
+                self.refresh(force=True)
+        self.copy_img_btn.configure(text=_("Imagem copiada!") if ok else _("Não deu para copiar"))
+        self.top.after(1500, lambda: self.copy_img_btn.configure(text=_("Copiar imagem")))
 
     def close(self):
         try:

@@ -42,6 +42,9 @@ SEGURIDAD
   nuevos, como los de la Biosfera de Varmundt) y, en el registro de Windows,
   dónde se instaló el juego. No cambia nada de eso, no lee la memoria del juego,
   no inyecta nada, no captura paquetes de red y no accede a internet.
+- Para el recordatorio de grabación apagada solo mira si el juego está abierto
+  (el nombre del programa en la lista de Windows). Se puede desactivar en el menú.
+- "Copiar imagen" copia solo las ventanas del propio Replay Master.
 - Solo guarda su propia configuración, las pruebas guardadas y una caché de los
   nombres en %APPDATA%\RODpsMeter.
 - El programa no tiene firma digital, así que Windows puede mostrar "Windows

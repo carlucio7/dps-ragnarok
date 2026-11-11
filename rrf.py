@@ -19,6 +19,7 @@ com k1/k2 derivados da data/hora do cabecalho. Bytes que sobram depois da
 ultima palavra inteira ficam em claro.
 """
 
+import re
 import struct
 
 MAGIC = b"<< Ragnarok Replay File Version"
@@ -325,6 +326,8 @@ P_SKILL = 0x01DE         # ZC_NOTIFY_SKILL
 P_VANISH = 0x0080        # ZC_NOTIFY_VANISH (tipo 1 = morreu)
 P_MAPMOVE = 0x0091       # ZC_NPCACK_MAPMOVE
 P_GROUND_UNIT = 0x09CA   # ZC_SKILL_ENTRY5 (unidade de skill no chao)
+P_GROUND_GONE = 0x0120   # ZC_SKILL_DISAPPEAR: a unidade saiu do chão (acabou, foi apagada ou saiu da visão)
+P_GROUND_SKILL = 0x0117  # ZC_NOTIFY_GROUNDSKILL: skill usada numa célula (Vulcão, Insígnia, Chuva de Meteoros...)
 P_HP_INFO = 0x0977       # ZC_HP_INFO
 P_SPAWN_IDLE = 0x09FE
 P_SPAWN_STAND = 0x09FF
@@ -349,6 +352,9 @@ P_WEAR = 0x0999            # equipou
 P_TAKEOFF = 0x099A         # desequipou
 P_ITEM_ADD = 0x0A37        # item entrou na bolsa
 P_OPTION = 0x0229          # opções visuais de uma unidade (montaria, falcão, "voando" da União...)
+P_STARSKILL = 0x020E       # ZC_STARSKILL: alvo da Oposição (monstro no byte 26, casa 0-2 no 30, resultado no 31)
+P_QUEST_DONE = 0x02B4      # ZC_DEL_QUEST: missão concluída ou entregue (id no byte 2)
+P_QUEST_HUNT = 0x0AFE      # ZC_UPDATE_MISSION_HUNT: progresso de caça das missões (a cada abate que conta)
 P_SPRITE = 0x01B0          # ZC_SPRITE_CHANGE: monstro trocou de forma (ex.: Aquila em sobrecarga = 21588)
 P_EFFECT = 0x01F3          # efeito especial numa unidade
 P_RESURRECT = 0x0148       # jogador ressuscitou
@@ -359,6 +365,7 @@ MAP_DAMAGE_EFFECTS = {537: "Armadilha da Torre da Constelação"}
 EF_TRAP = 537
 OPTION_FLYING = 0x8000     # Mestre Taekwon com a União Solar, Lunar e Estelar ativa
 
+P_BROADCAST = 0x01C3       # ZC_BROADCAST2: anúncio do mapa; nas instâncias o texto vem como chave (\x1cCHAVE\x1c)
 P_ITEM_FALL = 0x0ADD       # ZC_ITEM_FALL_ENTRY: item caiu no chão (drop de monstro, com efeito)
 P_ITEM_ENTRY = 0x009D      # ZC_ITEM_ENTRY: item que já estava no chão entrou na visão
 P_ITEM_GONE = 0x00A1       # ZC_ITEM_DISAPPEAR: item saiu do chão (pegaram ou acabou o tempo)
@@ -376,7 +383,8 @@ POSITION_PACKETS = {P_MOVE_SELF, P_STOP} | P_SLIDE
 STATUS_PACKETS = {P_STATUS, P_STATUS2, P_STATUS3}
 WANTED = DAMAGE_PACKETS | SPAWN_PACKETS | SKILL_USE_PACKETS | CAST_PACKETS | STATUS_PACKETS | POSITION_PACKETS | ITEM_PACKETS | {
     P_VANISH, P_MAPMOVE, P_GROUND_UNIT, P_HP_INFO, 0x010F, P_PARAM, P_PARTY_HP, P_WEAR, P_TAKEOFF, P_ITEM_ADD,
-    P_OPTION, P_EFFECT, P_RESURRECT, P_SPRITE}
+    P_OPTION, P_EFFECT, P_RESURRECT, P_SPRITE, P_STARSKILL, P_QUEST_DONE, P_QUEST_HUNT, P_GROUND_GONE,
+    P_GROUND_SKILL, P_BROADCAST}
 
 
 def posdir(b):
@@ -401,10 +409,21 @@ def spawn_move(pid, d):
         if pid in (P_SPAWN_WALK, P_SPAWN_NEW):
             a, b = movedata(d[tail - 8:tail - 2])
         else:
-            a = b = posdir(d[tail - 5:tail - 2])
+            a = b = posdir(d[63:66])           # o mesmo lugar nos dois: o 0x09ff só tem 1 byte a mais depois (estado)
         return a, b, speed
     except (struct.error, IndexError):
         return None
+
+
+_BROADCAST_KEY = re.compile(rb"\x1c([A-Za-z0-9+/]{2,8})\x1c")
+
+
+def broadcast_keys(d):
+    """Chaves de texto de um anúncio (0x01c3): os avisos das instâncias vêm como \x1cCHAVE\x1c, a mesma em
+    qualquer idioma (o cliente troca pelo texto da tabela dele)."""
+    return [k.decode("ascii") for k in _BROADCAST_KEY.findall(d[4:])]
+
+
 SP_HP, SP_MAXHP = 5, 6
 SP_BASELEVEL = 11          # 0x00b0: nível de base (chega quando quem grava sobe de nível)
 
@@ -499,6 +518,30 @@ def parse_skill_use(pid, d):
         return src, dst, skill
     except struct.error:
         return None
+
+
+def skill_use_level(pid, d):
+    """Nível com que a skill sem dano foi usada (0x011a / 0x09cb). Na Oposição é o que diz a casa: 1 Solar,
+    2 Lunar, 3 Estelar."""
+    try:
+        return struct.unpack_from("<i" if pid == P_SKILL_NODMG else "<H", d, 4)[0]
+    except struct.error:
+        return 0
+
+
+def parse_quest_hunt(d):
+    """0x0afe: progresso de caça -> [(missão, id da caça, meta, contagem)]. Cada entrada tem 16 bytes: missão,
+    id da caça, tipo do alvo, meta e contagem (ex.: Jantar do Diabo 5964, meta 1000)."""
+    try:
+        n = struct.unpack_from("<H", d, 4)[0]
+        out = []
+        for i in range(n):
+            if 6 + 16 * i + 16 <= len(d):
+                quest, ident, _kind, goal, count = struct.unpack_from("<IIIHH", d, 6 + 16 * i)
+                out.append((quest, ident, goal, count))
+        return out
+    except struct.error:
+        return []
 
 
 def parse_cast(d):
@@ -737,10 +780,24 @@ def parse_option(d):
 
 
 def parse_ground_unit(d):
-    """0x09ca: unidade de skill no chao -> quem lancou."""
+    """0x09ca: unidade de skill no chão -> (id da unidade, quem lançou, x, y, tipo, raio, nível).
+    O tipo é o da unidade (0x9a = Vulcão, 0xf4 = Insígnia da Terra...); o raio conta células para cada lado."""
     try:
-        unit, caster = struct.unpack_from("<II", d, 4)
-        return unit, caster
+        unit, caster, x, y = struct.unpack_from("<IIhh", d, 4)
+        if len(d) >= 23:
+            kind, radius, _visible, level = struct.unpack_from("<IbBB", d, 16)
+        else:                                     # formato antigo: tipo em 1 byte
+            kind, radius, level = d[16], 0, d[-1]
+        return unit, caster, x, y, kind, max(0, radius), level
+    except (struct.error, IndexError):
+        return None
+
+
+def parse_ground_skill(d):
+    """0x0117: skill usada numa célula -> (quem usou, skill, nível, x, y). Monstros mandam nível 65535."""
+    try:
+        skill, src, level, x, y = struct.unpack_from("<HIHhh", d, 2)
+        return src, skill, level, x, y
     except struct.error:
         return None
 

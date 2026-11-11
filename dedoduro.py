@@ -58,7 +58,9 @@ ELEMENTS = ["Neutral", "Water", "Earth", "Fire", "Wind", "Poison", "Holy", "Dark
 ELEMENT_PT = {"Neutral": _("Neutro"), "Water": _("Água"), "Earth": _("Terra"), "Fire": _("Fogo"), "Wind": _("Vento"),
               "Poison": _("Veneno"), "Holy": _("Sagrado"), "Dark": _("Sombrio"), "Ghost": _("Fantasma"), "Undead": _("Maldito")}
 # Chefes que o rAthena não tem (conferido no Divine Pride)
-BOSS_ELEMENTS = {20994: ("Neutral", 2)}          # Betelgeuse
+BOSS_ELEMENTS = {20994: ("Neutral", 2),           # Betelgeuse
+                 21531: ("Neutral", 3), 21588: ("Neutral", 1),   # Aquila e a forma de sobrecarga
+                 20573: ("Dark", 3)}             # Fantasma de Amdarais
 # Status que trocam o elemento da arma (encantamentos, conversores e poções de ataque elemental)
 ENDOWS = {90: "Fire", 91: "Water", 92: "Wind", 93: "Earth", 97: "Undead", 146: "Dark", 148: "Ghost", 17: "Holy",
           6: "Poison", 897: "Neutral", 898: "Water", 899: "Earth", 900: "Fire", 901: "Wind", 902: "Poison",
@@ -856,6 +858,185 @@ def _ash(x, alerts, rows):
     rows.append(row)
 
 
+# --- áreas no chão do Mestre Elemental ---------------------------------------------------
+
+# (skill, quem tem que estar em cima, elemento que ela fortalece): Vulcão/Dilúvio/Furacão valem para quem bate de
+# dentro; cada Insígnia abre o alvo que está em cima dela para o elemento que vence o dela
+AREA_RULES = [(285, "src", "Fire"), (286, "src", "Water"), (287, "src", "Wind"),
+              (2468, "dst", "Fire"), (2465, "dst", "Water"), (2466, "dst", "Wind"), (2467, "dst", "Earth")]
+AREA_ELEMENT_MIN = 0.3        # só se cobra a área quando pelo menos isso do dano do grupo no clímax é do elemento dela
+
+
+def _hit_el(x, h):
+    el = hit_element(h.skill)
+    if el == "Weapon":
+        el = weapon_element(x, h.src, h.t) if h.raw == h.src else None
+    return el
+
+
+def _areas(x, alerts, rows):
+    """Vulcão e Insígnia da Terra (e os equivalentes dos outros elementos). O replay não mostra status de quem
+    está em cima: vale a posição no instante de cada golpe. Insígnia: % do dano do elemento que acertou o chefe em
+    cima dela. Vulcão: % do dano do elemento que saiu de dentro da área. Pelo dano, e não pelo tempo, porque numa
+    luta de rajada o clímax dura poucos segundos. Faltar é sempre atenção (amarelo)."""
+    c = x.c
+    pset = set(x.party)
+    by_el, total = collections.Counter(), 0
+    for h in x.hits:
+        if h.src in pset and h.t >= x.climax:
+            by_el[_hit_el(x, h)] += h.dmg
+            total += h.dmg
+    for skill, side, el in AREA_RULES:
+        prov = [a for a in x.party if skill in JOB_SKILLS.get(x.jobs[a], set())]
+        areas = c.areas_of(skill, x.start, x.end)
+        share = by_el[el] / float(total) if total else 0.0
+        if not areas and (not prov or share < AREA_ELEMENT_MIN):
+            continue                            # ninguém põe essa área, ou o grupo não bate com o elemento dela
+        name = meter.skill_name(skill)
+        owners = sorted({c.resolve(a["src"]) for a in areas}) or prov
+        who = _names(c, owners)
+        el_name = ELEMENT_PT.get(el, el).lower()
+        cd = _skill(skill).get("cd", 0)
+        ups = []
+        for p in x.phases:
+            inside = dmg = 0
+            for h in x.hits:
+                if h.src in pset and h.dst_raw == p["aid"] and _active(p["win"], h.t) and _hit_el(x, h) == el:
+                    dmg += h.dmg
+                    pos = c.pos_at(h.dst_raw if side == "dst" else h.src, h.t)
+                    if any(c.in_area(a, pos, h.t) for a in areas):
+                        inside += h.dmg
+            ups.append(inside / float(dmg) if dmg else None)
+        notes = [(_("%% do dano de %s que acertou o chefe em cima dela") if side == "dst"
+                  else _("%% do dano de %s que saiu de dentro da área")) % el_name]
+        if cd >= LONG_CD_MS:
+            notes.append(_("recarga %d s") % round(cd / 1000))
+        row = dict(key="area|%d" % skill, debuff=_("%s (área no chão)") % name, who=who, note=" · ".join(notes))
+        _phase_cols(row, ups)
+        row["bad"] = any(u is not None and u < BAD for u in ups)
+        rows.append(row)
+        if share < AREA_ELEMENT_MIN:
+            continue                            # a área estava lá, mas o grupo quase não bateu com o elemento dela
+        group = _("o grupo bateu com %s em %s do dano do clímax") % (el_name, _pct(share))
+        if not areas:
+            _alert(alerts, 1, x.whole, _("%s %s") % (name, _("faltou")), who,
+                   _("ninguém pôs %s no chão nesta luta · %s") % (name, group))
+            continue
+        for p, u in zip(x.phases, ups):
+            if u is None or u >= BAD:
+                continue
+            if u < 0.005:
+                detail = (_("o chefe não estava em cima dela quando o grupo bateu · %s") if side == "dst"
+                          else _("ninguém bateu de dentro da área · %s")) % group
+            elif side == "dst":
+                detail = _("só %s do dano de %s acertou o chefe em cima dela · %s") % (_pct(u), el_name, group)
+            else:
+                detail = _("só %s do dano de %s saiu de dentro da área · %s") % (_pct(u), el_name, group)
+            begin = p["climax_start"] or p["start"]
+            ends = [(e, a) for a in areas for _s, e in c.area_spans(a) if p["start"] - 5000 <= e <= p["end"]]
+            causes = sorted({an.area_end_cause(c, a, e) for e, a in ends} - {""})
+            if causes:
+                detail += " · " + ", ".join(causes)
+            last = max((u2[0] for u2 in c.uses if u2[4] == skill and u2[3] == 0 and u2[0] < begin), default=None)
+            if cd >= LONG_CD_MS and last is not None and last + cd > begin:
+                detail += " · " + _("recarga de %d s, usada em %s") % (cd // 1000, an._dur(last))
+            _alert(alerts, 1, x.phase_name(p), _("%s %s") % (name, _("faltou") if u < 0.2 else _("durou pouco")),
+                   who, detail)
+
+
+# --- Oposição Solar, Lunar e Estelar ------------------------------------------------------
+
+HATE_SKILL = meter.HATE_SKILL
+HATE_NAMES = {1: _("Oposição Solar"), 2: _("Oposição Lunar"), 3: _("Oposição Estelar")}   # pelo nível do uso
+HATE_SIZE = {"S": 1, "M": 2, "L": 3}        # a casa certa para o tamanho do monstro
+HATE_EARLY_MS = 60000         # luta que começa antes disso de gravação: a marca pode ter sido feita antes de gravar
+
+
+def use_name(c, u):
+    """Nome de um uso (de c.uses) para mostrar: a Oposição sai com a casa (Solar, Lunar ou Estelar)."""
+    if u[4] == HATE_SKILL:
+        lv = next((h[3] for h in c.hate_uses if h[0] == u[0] and h[1] == u[2]), None)
+        if lv in HATE_NAMES:
+            return HATE_NAMES[lv]
+    return meter.skill_name(u[4])
+
+
+def _hate(x, alerts, aids):
+    """Oposição: quem tem a skill e bateu no chefe precisa ter marcado o chefe na casa do tamanho dele (Solar
+    pequeno, Lunar médio, Estelar grande). Casa errada ou esquecer é grave (regra de quem pediu). A marca vale para
+    o tipo do monstro e fica até outra entrar na mesma casa; o replay só mostra as que foram usadas na gravação."""
+    c = x.c
+    e = c.entities.get(x.key)
+    if e is None or meter.DUMMY_MIN <= e.job <= meter.DUMMY_MAX:
+        return
+    size = meter.MOB_SIZE.get(e.job)
+    need = HATE_SIZE.get(size)
+    if need is None:
+        return
+    size_txt = _({"S": "pequeno", "M": "médio", "L": "grande"}[size])
+    early = x.start < HATE_EARLY_MS or an.caught_midway(c, x.key)
+    for a in aids:
+        if HATE_SKILL not in JOB_SKILLS.get(job_id(c, a), ()) or not x.dmg.get(a):
+            continue
+        slot, last, wrong = {}, {}, []          # casa -> tipo e alvo marcados por último; usos errados no chefe
+        for t, src, dst, lv in sorted(c.hate_uses):
+            if src != a or t > x.end:
+                continue
+            te = c.entities.get(dst)
+            slot[lv], last[lv] = (te.job if te is not None else None), dst
+            if dst == x.key and lv != need and t >= x.start - 30000:
+                wrong.append(lv)
+        if slot.get(need) == e.job:
+            continue                            # marcou certo (nesta luta ou antes, na mesma gravação)
+        if wrong:
+            _alert(alerts, 2, x.whole, _("Oposição errada"), c.name_of(a),
+                   _("usou %s no chefe, que é %s: a certa é a %s") % (
+                       HATE_NAMES.get(wrong[-1], "?"), size_txt, HATE_NAMES[need]))
+        elif need in last:                      # usou a casa certa, mas em outro alvo: a marca saiu do chefe
+            _alert(alerts, 2, x.whole, _("Oposição esquecida"), c.name_of(a),
+                   _("bateu no chefe (%s) sem marcar com a %s") % (size_txt, HATE_NAMES[need])
+                   + " · " + _("a última dele foi em %s") % c.name_of(last[need]))
+        else:
+            _alert(alerts, 1 if early else 2, x.whole, _("Oposição esquecida"), c.name_of(a),
+                   _("bateu no chefe (%s) sem marcar com a %s") % (size_txt, HATE_NAMES[need])
+                   + (" · " + _("a gravação começou em cima da luta: a marca pode ter sido feita antes")
+                      if early else ""))
+
+
+def _erased(x, alerts):
+    """Skills que o chefe joga numa célula e que apagaram áreas do grupo (o Ganbantein do Betelgeuse): em cima de
+    quem caíram e o que levaram. Só informa: nos replays o chefe mira um jogador (em 71% das vezes o último em
+    quem bateu), não a área."""
+    c = x.c
+    casts = sorted(u for u in c.uses if u[3] == 0 and u[4] in an.AREA_ERASERS and u[2] in x.boss_aids
+                   and x.start - 5000 <= u[0] <= x.end + 1000)
+    if not casts:
+        return
+    times = [u[0] for u in casts]
+    took = collections.defaultdict(set)         # índice do uso -> skills das áreas que perderam células nele
+    for a in c.areas:
+        if not c.is_friendly(a["src"]):
+            continue
+        for cell in a["units"]:
+            if cell[1] is None:
+                continue
+            i = bisect.bisect_left(times, cell[1])
+            near = [j for j in (i - 1, i) if 0 <= j < len(times) and abs(times[j] - cell[1]) <= an.AREA_ERASE_MS]
+            if near:
+                took[min(near, key=lambda j: abs(times[j] - cell[1]))].add(a["skill"])
+    if not took:
+        return
+    who, lost = collections.Counter(), collections.Counter()
+    for i, skills in took.items():
+        lost.update(skills)
+        who.update(an.ground_use_on(c, casts[i], x.party + x.others))
+    name = meter.skill_name(collections.Counter(casts[i][4] for i in took).most_common(1)[0][0])
+    _alert(alerts, 0, x.whole, _("%s apagou áreas do grupo") % name,
+           ", ".join("%s %d×" % (c.name_of(a), n) for a, n in who.most_common(4)) or _("chefe"),
+           _("%d vez(es) · levou %s · em \"Quem\", em cima de quem caiu") % (
+               len(took), ", ".join("%s %d×" % (meter.skill_name(s), n) for s, n in lost.most_common())))
+
+
 def _late(dead_ms):
     return round(dead_ms / 100.0) > DEAD_LIMIT_MS / 100      # 2,0 s não conta; 2,1 s sim
 
@@ -1468,6 +1649,9 @@ def analyze(c, key, rng=None):
     _before_claw(x, alerts, refl, x.party)
     debuffs = _debuffs(x, alerts, refl, poisoned, claw)
     _ash(x, alerts, debuffs)
+    _areas(x, alerts, debuffs)
+    _erased(x, alerts)
+    _hate(x, alerts, x.party)
     deaths = _deaths(x, x.party, alerts, True)
     element, flor, defense = _elements(x, alerts, set(x.party), True)
     _magus(x, alerts, flor)
@@ -1480,6 +1664,7 @@ def analyze(c, key, rng=None):
     o_claw, o_claw_execs = _claw(x, o_alerts, refl, x.others, False)
     _before_claw(x, o_alerts, refl, x.others)
     _elo(x, o_alerts, x.others)
+    _hate(x, o_alerts, x.others)
     total = x.total or 1
     party_rows = [dict(key=a, aid=a, name=c.name_of(a), job=meter.job_name(x.jobs[a]), me=a == c.me,
                        dmg=x.dmg.get(a, 0), share=x.dmg.get(a, 0) / total,

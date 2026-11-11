@@ -41,6 +41,9 @@ SAFETY
   ones in the Varmundt Biosphere) and, in the Windows registry, where the game
   was installed. It changes none of these, does not read game memory, inject
   anything, capture network packets or access the internet.
+- For the recording-off reminder it only checks whether the game is open (the
+  program name in the Windows list). You can turn it off in the menu.
+- "Copy image" copies only Replay Master's own windows.
 - It only writes its own settings, saved tests and a name cache to
   %APPDATA%\RODpsMeter.
 - The program is not digitally signed, so Windows may show "Windows protected

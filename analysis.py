@@ -144,11 +144,24 @@ BOSS_USUAL = {20994: 1, 21531: 1, 21588: 1}   # o nível que os grupos costumam 
 # cresce com a duração da luta: ~0,8M/s no Nível 1 (~6% do HP por minuto), mais ~18M de overkill.
 BOSS_REGEN = {20994: 0.001}
 # Chefes com regeneração só numa forma e dano que o replay não mostra (frações do HP máx.). Aquila: os valores mais
-# prováveis, ajustados em 5 lutas (2 abates e 1 luta incompleta na Executiva, 2 sem abate na Primeira Classe;
-# fecham com folga de ~0,5% do HP): regenera ~1,1% por segundo só em sobrecarga, e cada quebra de defesa (o
-# Tetra Vortex que ele lança em si mesmo) tira ~12%. Não é certeza: o replay não mostra o HP dele.
-BOSS_MODEL = {_mob: dict(regen=0.011, form=21588, hidden=0.12, hidden_skills=(2218, 2219, 2220, 2221))
+# prováveis, ajustados em 7 lutas (4 abates e 1 luta incompleta na Executiva, 2 sem abate na Primeira Classe):
+# regenera só em sobrecarga, ~0,55% por segundo na Executiva (os 4 abates fecham com erro de até ~11M, 2% do HP)
+# e pelo menos ~1,05% na Primeira Classe (senão a luta de 24 min sem abate teria matado o chefe); cada quebra de
+# defesa (o Tetra Vortex que ele lança em si mesmo) tira ~4,5%. A Econômica não tem lutas: vai como a Executiva.
+# Não é certeza: o replay não mostra o HP dele. `regen` é por dificuldade, na ordem de BOSS_LEVELS.
+BOSS_MODEL = {_mob: dict(regen=(0.0055, 0.0055, 0.011), form=21588, hidden=0.045,
+                         hidden_skills=(2218, 2219, 2220, 2221))
               for _mob in AQUILA}
+
+
+def boss_regen(model, mob, hp):
+    """Regeneração do modelo para a dificuldade cuja vida é `hp` (a da Executiva se não achar)."""
+    regen = model["regen"]
+    if not isinstance(regen, tuple):
+        return regen
+    levels = [v for _n, v in BOSS_LEVELS.get(mob, [])]
+    i = levels.index(hp) if hp in levels else BOSS_USUAL.get(mob, 0)
+    return regen[min(i, len(regen) - 1)]
 LEVEL_SLACK = 0.05            # folga do dano: overkill de cada fase, ou a morte que o replay não mostrou
 HP_CHOICE = {}                # (gravação, chave do chefe) -> nível escolhido na análise
 
@@ -410,7 +423,8 @@ def monster_skills(c, rng, key, target=None):
         if src == key and _in(rng, t) and (target is None or c.resolve(dst) == target):
             a = acc(skill)
             a["nodmg"] += 1
-            a["targets"].add(dst)
+            if dst:                               # skill usada numa célula (Chuva de Meteoros...) não tem alvo
+                a["targets"].add(dst)
     if target is None:
         for t, src, _raw, _dst, skill, ms in c.casts:
             if src == key and _in(rng, t):
@@ -605,6 +619,15 @@ def _full(v):
 # --- mortes ----------------------------------------------------------------------
 
 RECAP_MS = 10000
+LETHAL_MS = 1600          # a vida só cai ~1 s depois do pacote do golpe: quem matou pode não ser o último golpe
+LAND_MS = 1200            # ...e depois disso o golpe já caiu: quem aparece vivo mais tarde não morreu dele
+BOOM_BEFORE_MS = 500      # a morte vem até isto depois da Autodestruição
+BOOM_AFTER_MS = 150       # ...ou um pouco antes, pela ordem dos pacotes
+BOOM_REACH = 8            # a explosão alcança ~5 células; a posição do monstro é a do último passo (folga)
+BOOM_CHASE_MS = 3000      # quem batia na vítima até isto antes da explosão estava colado nela
+OFFSCREEN_MIN_MS = 15000  # sobrecarga do Aquila: o golpe dele dobra a cada ~5 s; antes disto não mata ninguém
+OFFSCREEN_LAND_MS = 1000  # o golpe dele cai ~1 s depois de sair
+FUSION_KILL_PCT = 0.25    # a União mata quem ataca com 20% de HP ou menos: acima disto (com folga) a causa é outra
 
 
 TRAP_NAME = _("Armadilha do mapa")
@@ -645,6 +668,40 @@ def trap_damage(c, x):
     return round(pct * x["max_hp"]) if pct and x["max_hp"] else (x["drop"] or 0)
 
 
+def boom_near(c, aid, t, recent=()):
+    """A Autodestruição que pegou `aid` na morte em t: (instante, monstro) ou None. Vale a de um monstro a até
+    BOOM_REACH células, ou a de um que batia na vítima logo antes (estava colado). No Aquila ela tira um valor fixo
+    de HP sem pacote de dano, então a morte fica sem golpe no replay."""
+    me = c.pos_at(aid, t)
+    best = None
+    for when, mob, xy in reversed(c.booms):
+        if when < t - BOOM_BEFORE_MS:
+            break
+        if when > t + BOOM_AFTER_MS:
+            continue
+        dist = max(abs(xy[0] - me[0]), abs(xy[1] - me[1])) if xy is not None and me is not None else None
+        chased = any(h.raw == mob and when - BOOM_CHASE_MS <= h.t <= when for h in recent)
+        if chased or (dist is not None and dist <= BOOM_REACH):
+            rank = (0 if chased else 1, dist if dist is not None else 0)
+            if best is None or rank < best[0]:
+                best = (rank, when, mob)
+    return best[1:] if best is not None else None
+
+
+def offscreen_boss(c, t):
+    """O Aquila em sobrecarga e fora da tela pouco antes de t: (chefe, ms de sobrecarga) ou None. De fora da tela
+    o golpe dele não chega ao replay (nem aparece no jogo), e em sobrecarga ele acerta de longe e cada vez mais
+    forte."""
+    at = t - OFFSCREEN_LAND_MS
+    ms = c.overload_at(at)
+    if ms is None or ms < OFFSCREEN_MIN_MS:
+        return None
+    for boss, e in c.entities.items():
+        if e.kind == "mob" and e.job in AQUILA and c.in_sight(boss, at) is False:
+            return boss, ms
+    return None
+
+
 def death_recap(c, aid, t):
     """O que aconteceu com `aid` nos 10 s antes de morrer em `t`."""
     recent = [h for h in c.hits if not h.out and h.dst_raw == aid and t - RECAP_MS <= h.t <= t + 300]
@@ -654,7 +711,21 @@ def death_recap(c, aid, t):
     max_hp = max(seen) if seen else None
     killing = next((h for h in reversed(recent) if h.t <= t + 300 and t - h.t <= 3000 and h.dmg > 0), None)
     hp_before = None
-    if killing is not None:
+    # quem matou nem sempre é o último golpe: a vida só cai ~1 s depois do pacote, e nesse meio tempo chegam golpes
+    # menores (ex.: os reflexos seguintes da Dor Máxima). Vale o primeiro dos últimos LETHAL_MS que sozinho era
+    # maior que a vida que encontrou, desde que a vítima não tenha aparecido viva depois de ele cair
+    alive = [s for s in c.hp_log.get(aid, []) if s[1] is not None and s[1] > 1 and t - 60000 <= s[0] <= t]
+    single = None
+    for h in recent:
+        if h.dmg <= 0 or h.miss or not t - LETHAL_MS <= h.t <= t + 300:
+            continue
+        found = [s[1] for s in alive if s[0] <= h.t]
+        if found and h.dmg >= found[-1] and not any(s[0] > h.t + LAND_MS for s in alive):
+            single = (h, found[-1])
+            break
+    if single is not None:
+        killing, hp_before = single
+    elif killing is not None:
         before = [s for s in hp if s[0] <= killing.t]
         hp_before = before[-1][1] if before else None
         # o pacote do golpe chega antes de a vida cair (às vezes mais de 1 s, ex.: Dor Máxima); uma cura no meio
@@ -685,6 +756,20 @@ def death_recap(c, aid, t):
             hp_before = lethal["hp_before"]
         overkill = max(0, trap_est - lethal["hp_before"]) if trap_est and lethal["hp_before"] is not None else 0
         fusion = unclear = False
+    # nenhum golpe explica a morte: a explosão de um monstro colado (os Robovacs do Aquila) ou o golpe do Aquila em
+    # sobrecarga vindo de fora da tela
+    special = special_src = special_t = overload_ms = None
+    fusion_low = fusion and (hp_pct is None or hp_pct <= FUSION_KILL_PCT)
+    if lethal is None and not fusion_low and (killing is None or unclear):
+        boom = boom_near(c, aid, t, recent)
+        off = None if boom is not None else offscreen_boss(c, t)
+        if boom is not None:
+            special, special_t, special_src = "boom", boom[0], boom[1]
+        elif off is not None:
+            special, special_t, special_src, overload_ms = "offscreen", t - OFFSCREEN_LAND_MS, off[0], off[1]
+        if special is not None:
+            hp_before = alive[-1][1] if alive else hp_before
+            killing, unclear, overkill, fusion, fusion_cost = None, False, 0, False, None
     window5 = [h for h in recent if h.t >= t - 5000]
     taken5 = sum(h.dmg for h in window5) + sum(x["drop"] or 0 for x in traps if x["t"] >= t - 5000)
     active = sorted({meter.status_name(e) for a, e, s, end in c.statuses(aid)
@@ -723,12 +808,22 @@ def death_recap(c, aid, t):
                                  name=_("HP perdido (efeitos no momento: %s)") % ", ".join(map(str, near)),
                                  dmg=prev[1] - hpv, hp=hpv, miss=False))
         prev = (st, hpv)
+    if special == "boom":
+        rows.append(dict(rel=special_t - t, kind="dano", source=c.target_name(special_src),
+                         name=meter.skill_name(meter.SELF_DESTRUCT) + _(" (sem número na tela)"),
+                         dmg=None, hp=None, miss=False))
+    elif special == "offscreen":
+        rows.append(dict(rel=special_t - t, kind="dano", source=c.target_name(special_src),
+                         name=_("golpe fora da tela"), dmg=None, hp=None, miss=False))
     rows.sort(key=lambda r: (r["rel"], r["kind"] != "dano"))
     hp_loss = None
     if len(hp) >= 2 and not recent and not traps:
         hp_loss = max(s[1] for s in hp) - hp[-1][1]
     if lethal is not None:
         killer, skill, hit = TRAP_NAME, _("Armadilha"), round(trap_est) if trap_est else 0
+    elif special is not None:
+        killer, hit = c.target_name(special_src), 0
+        skill = meter.skill_name(meter.SELF_DESTRUCT) if special == "boom" else _("golpe fora da tela")
     else:
         killer = c.target_name(killing.src) if killing else ""
         skill = meter.skill_name(killing.skill) if killing else ""
@@ -739,14 +834,15 @@ def death_recap(c, aid, t):
         overkill_x=(hit / hp_before) if hit and hp_before else None,
         taken_5s=taken5, hits_5s=len(window5) + sum(1 for x in traps if x["t"] >= t - 5000), statuses=active,
         rows=rows, trap=lethal is not None, trap_pct=trap_pct, traps=len(traps),
-        no_hit=killing is None and lethal is None, hp_loss=hp_loss, unclear=unclear,
+        no_hit=killing is None and lethal is None and special is None, hp_loss=hp_loss, unclear=unclear,
         fusion=fusion, hp_last=hp_last, hp_pct=hp_pct, fusion_cost=fusion_cost,
+        special=special, special_src=special_src, overload_ms=overload_ms, kill_hit=killing,
     )
 
 
 DEATH_CARD_MS = 5000      # o resumo de morte do widget olha os 5 s antes da morte
 HEALED_FRAC = 0.95        # ...mas se a vida voltou a 95% ou mais nesse meio tempo, o que veio antes não conta
-MAXPAIN_ATK = 717         # reflexo da Dor Máxima: ~11% de um golpe no chefe, no mesmo instante, em todos em volta
+MAXPAIN_ATK = meter.MAXPAIN_ATK   # reflexo da Dor Máxima: ~11% de um golpe no chefe, no mesmo instante, em todos em volta
 MAXPAIN_RATIO = (0.08, 0.14, 0.11)
 MIXED_ELEMENT_SKILLS = {2217}   # Tetra Vortex: um golpe de cada propriedade (fogo, água, vento, terra)
 
@@ -759,6 +855,45 @@ def element_name(el):
         return _("várias")
     import dedoduro
     return dedoduro.ELEMENT_PT.get(el, el)
+
+
+def element_advice(defense, level=1, top=2):
+    """Contra um alvo de propriedade `defense` (nível `level`): ([(ataque, %)] melhores, [(ataque, %)] a evitar),
+    pela tabela de vantagem elemental do rAthena. A evitar = 50% ou menos."""
+    import dedoduro
+    table = (dedoduro.RATHENA.get("attr") or {}).get(str(max(1, min(4, level or 1)))) or {}
+    rates = [(atk, row.get(defense)) for atk, row in table.items() if row.get(defense) is not None]
+    if not rates:
+        return [], []
+    best_pct = max(p for _a, p in rates)
+    best = sorted([(a, p) for a, p in rates if p == best_pct or (p > 100 and p >= best_pct - 25)], key=lambda r: -r[1])
+    if best_pct <= 100:
+        best = []
+    avoid = sorted([(a, p) for a, p in rates if p <= 50], key=lambda r: r[1])
+    return best[:top], avoid[:top]
+
+
+def my_attack_element(c, t, window=15000):
+    """Propriedade da maior parte do dano de quem grava nos últimos `window` ms (skill de elemento fixo, ou o da arma:
+    conversor/encantamento ativo, senão Neutro). None sem golpes."""
+    import dedoduro
+    agg = {}
+    st = [(ef, s, e, c.status_val.get((a, ef, s), -1)) for a, ef, s, e in c.statuses(c.me)
+          if ef in dedoduro.ENDOWS or ef == dedoduro.WEAPONPROPERTY]
+    for h in c.hits:
+        if not h.out or h.src != c.me or h.dmg <= 0 or not t - window <= h.t <= t:
+            continue
+        el = dedoduro.hit_element(h.skill)
+        if el == "Weapon":
+            el = "Neutral"
+            for ef, s, e, v in st:
+                if s <= h.t <= e:
+                    if ef in dedoduro.ENDOWS:
+                        el = dedoduro.ENDOWS[ef]
+                    elif 0 <= v < len(dedoduro.ELEMENTS):
+                        el = dedoduro.ELEMENTS[v]
+        agg[el] = agg.get(el, 0) + h.dmg
+    return max(agg, key=agg.get) if agg else None
 
 
 def attack_element(c, src, skill):
@@ -816,8 +951,8 @@ def death_card(c, aid, t, window=DEATH_CARD_MS):
 
     # o golpe que matou sempre conta: às vezes a vida só cai mais de 1 s depois do pacote do golpe, e uma cura no
     # meio desse tempo pareceria "antes" dele
-    kh = next((h for h in reversed(c.hits) if not h.out and h.dst_raw == aid and h.dmg > 0 and not h.miss
-               and t - 3000 <= h.t <= t + 300), None)
+    kh = rec["kill_hit"] or next((h for h in reversed(c.hits) if not h.out and h.dst_raw == aid and h.dmg > 0
+                                  and not h.miss and t - 3000 <= h.t <= t + 300), None)
     for h in c.hits:
         if h.out or h.dst_raw != aid or h.miss or h.dmg <= 0 or not (start < h.t <= t + 300 or h is kh):
             continue
@@ -827,7 +962,10 @@ def death_card(c, aid, t, window=DEATH_CARD_MS):
                 TRAP_NAME, _("Sem golpe visível")):
             add(r["source"], _("Armadilha") if r["source"] == TRAP_NAME else _("HP perdido"), None, r["dmg"])
     hp_seen = [(st, hp) for st, hp, mx in c.hp_log.get(aid, []) if start <= st <= t + 300 and hp is not None]
-    if not groups and rec["no_hit"]:
+    if rec["special"]:
+        # explosão sem pacote de dano / golpe de fora da tela: levou a vida que restava
+        add(c.name_of(rec["special_src"]), rec["skill"], None, rec["hp_before"] or 0, rec["special_src"])
+    elif not groups and rec["no_hit"]:
         # a vida caiu sem nenhum golpe no replay (efeito do mapa, algo fora da tela...): mostra quanto caiu
         before = [hp for st, hp in hp_seen if st < t and hp]
         if before:
@@ -842,7 +980,7 @@ def death_card(c, aid, t, window=DEATH_CARD_MS):
         add(_("União Solar"), _("custo de HP dos ataques"), None, cost)
         fusion = groups[(_("União Solar"), _("custo de HP dos ataques"))]
     total = sum(g["dmg"] for g in groups.values())
-    killer = c.name_of(_killer_aid(c, aid, t) or 0)
+    killer = c.name_of(rec["special_src"] if rec["special"] else (kh.src if kh is not None else 0))
     for g in groups.values():
         g["share"] = g["dmg"] / float(total) if total else 0.0
         g["count"] = len(g["mobs"])
@@ -1013,6 +1151,63 @@ def mob_debuffs(c, rng, key, group=True):
     rows = [dict(r, uptime=(r["on_ms"] / total) if total else None) for r in agg.values()]
     rows.sort(key=lambda r: (not r["important"], -(r["uptime"] or 0)))
     return rows, total
+
+
+# --- áreas no chão ------------------------------------------------------------------
+
+AREA_ERASERS = {483, 288, 285, 286, 287}   # Ganbantein, Proteger Terreno e os três campos (um troca o outro)
+AREA_ERASE_MS = 300
+
+
+def cell_players(c, cell, t, aids=None):
+    """Jogadores que estavam em cima da célula no instante t (ou colados nela, a 1 célula, se ninguém estava
+    exatamente em cima). Vazio quando não há ninguém."""
+    if cell is None:
+        return []
+    if aids is None:
+        aids = [a for a in list(c.pos_t) if a == c.me or (a in c.entities and c.entities[a].kind == "pc")]
+    best, out = 2, []
+    for a in aids:
+        p = c.pos_at(a, t)
+        if p is None:
+            continue
+        d = max(abs(p[0] - cell[0]), abs(p[1] - cell[1]))
+        if d < best:
+            best, out = d, [a]
+        elif d == best:
+            out.append(a)
+    return out
+
+
+def ground_use_on(c, u, aids=None):
+    """Em cima de quem caiu uma skill usada numa célula (`u` é um uso de c.uses sem alvo). O Ganbantein do
+    Betelgeuse cai na célula de um jogador (94 de 106 nos replays), quase sempre em quem o chefe está batendo."""
+    return cell_players(c, c.ground_cells.get((u[0], u[2], u[4])), u[0], aids)
+
+
+def area_eraser(c, area, t):
+    """O uso (de c.uses) que apagou a área no instante t: alguém usou, na mesma hora, uma skill que apaga ou troca
+    o que está no chão (Ganbantein, Proteger Terreno, outro campo). None quando só acabou o tempo."""
+    for u in c.uses:
+        if u[3] == 0 and abs(u[0] - t) <= AREA_ERASE_MS and u[4] in AREA_ERASERS:
+            if u[4] == area["skill"] and abs(u[0] - area["t"]) <= AREA_ERASE_MS:
+                continue                          # o próprio lançamento desta área
+            return u
+    return None
+
+
+def area_end_cause(c, area, t):
+    """Texto de por que a área saiu do chão no instante t (vazio quando só acabou o tempo). Quando foi skill de
+    monstro, diz também em cima de quem ela caiu."""
+    u = area_eraser(c, area, t)
+    if u is None:
+        return ""
+    text = _("apagada por %s (%s)") % (meter.skill_name(u[4]), c.name_of(c.resolve(u[2])))
+    if not c.is_friendly(u[2]):
+        on = ground_use_on(c, u)
+        if on:
+            text += _(", que caiu em %s") % ", ".join(c.name_of(a) for a in on)
+    return text
 
 
 def equipment(c, t):

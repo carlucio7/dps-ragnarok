@@ -30,6 +30,10 @@ LANE_COLORS = {dd.DARK_CLAW: "#a78bfa", dd.FLORESCER: "#4ade80", 1402: "#f59e0b"
                1142: "#22d3ee", dd.VENOM_IMPRESS: "#a3e635"}
 EVENT_COLORS = {"boss": "#f97316", "reflect": "#ef4444", "claw": "#a78bfa", "strong": "#fbbf24", "elo": "#38bdf8",
                 "res": "#4ade80"}
+# áreas no chão: cor de cada skill, as que começam desligadas e o que apaga uma área (skills usadas numa célula)
+AREA_COLORS = {285: "#fb923c", 286: "#38bdf8", 287: "#bef264", 288: "#94a3b8", 405: "#e2e8f0", 2465: "#f87171",
+               2466: "#60a5fa", 2467: "#a3e635", 2468: "#d6a38f"}
+AREA_OFF = {288}              # Proteger Terreno não muda o dano: fica na lista, desligado
 
 
 def fights(c, rng=None):
@@ -58,7 +62,7 @@ def build(c, key, rng=None):
     e = c.entities.get(key)
     mob = e.job if e is not None else 0
     model = an.BOSS_MODEL.get(mob) if x.hp_table else None
-    regen = (model["regen"] if model else an.BOSS_REGEN.get(mob, 0)) if x.hp_table else 0
+    regen = (an.boss_regen(model, mob, x.hp) if model else an.BOSS_REGEN.get(mob, 0)) if x.hp_table else 0
     wins = an.form_windows(c, x.boss_aids, model["form"], x.start, x.end) if model else None
     hidden = an.hidden_hits(c, x.boss_aids, model["hidden_skills"], x.start, x.end) if model else []
 
@@ -92,6 +96,29 @@ def build(c, key, rng=None):
                     for a, ef, s, e in c.statuses() if a in x.boss_aids and ef == RELIEVE and e >= t0 and s <= t1)
     if relief:
         lanes.insert(0, _lane("st%d" % RELIEVE, _("Alívio (redução de dano)"), "span", "#94a3b8", True, relief))
+    # áreas no chão (Vulcão, Insígnias, Proteger Terreno, Prisão de Teia): uma faixa por skill, com os trechos em
+    # que havia alguma no chão; cada começo e fim vai para a lista de eventos com quem pôs e o que a apagou
+    area_spans, area_events = collections.defaultdict(list), []
+    for a in c.areas:
+        name = meter.skill_name(a["skill"])
+        for s, e in c.area_spans(a):
+            if e < t0 or s > t1:
+                continue
+            area_spans[a["skill"]].append((max(s, t0), min(e, t1)))
+            who = c.resolve(a["src"])
+            base = dict(kind="area", lane="ar%d" % a["skill"], aid=who, who=c.name_of(who), value=None)
+            if s >= t0:
+                area_events.append(dict(base, t=s, what=_("No chão: %s começou") % name,
+                                        detail=_("nível %d") % a["level"]))
+            if e <= t1 and e < c.now:
+                cause = an.area_end_cause(c, a, e)
+                area_events.append(dict(base, t=e, what=_("No chão: %s acabou") % name,
+                                        detail=_("durou %s") % dd._secs(e - s) + (" · " + cause if cause else "")))
+    for skill, spans in sorted(area_spans.items()):
+        lane = _lane("ar%d" % skill, meter.skill_name(skill), "span", AREA_COLORS.get(skill, "#94a3b8"),
+                     skill not in AREA_OFF, [tuple(sp) for sp in dd._merge(spans)])
+        lane["area"] = True
+        lanes.append(lane)
 
     events = []
 
@@ -114,7 +141,12 @@ def build(c, key, rng=None):
             k = (u[0] // 300, u[4])
             if k not in seen:
                 seen.add(k)
-                ev(u[0], "boss", "boss", None, meter.skill_name(u[4]))
+                # skill jogada numa célula (Ganbantein, Chuva de Meteoros): em cima de quem caiu
+                on = an.ground_use_on(c, u, pset) if u[3] == 0 else []
+                ev(u[0], "boss", "boss", None, meter.skill_name(u[4]),
+                   _("em cima de %s") % ", ".join(c.name_of(a) for a in on) if on else "")
+                if on:
+                    events[-1]["target"] = on[0]
     # dano devolvido pela Dor Máxima: um ponto por onda, com o total e quantos jogadores levaram
     back = sorted((h for h in c.hits if not h.out and h.src == key and h.skill in dd.REFLECT_SKILLS
                    and t0 <= h.t <= t1), key=lambda h: h.t)
@@ -180,12 +212,15 @@ def build(c, key, rng=None):
                 events[-1]["target"] = u[3]
                 continue
             if u[2] in pset or c.is_friendly(u[2]):
-                ev(u[0], "pskill", "pskills", u[1] if u[1] in pset else u[2], _("usou %s") % meter.skill_name(u[4]),
+                ev(u[0], "pskill", "pskills", u[1] if u[1] in pset else u[2], _("usou %s") % dd.use_name(c, u),
                    ((c.name_of(u[2]) if u[2] != u[1] else "") + tgt).strip())
                 events[-1]["target"] = u[3]
             else:
+                on = an.ground_use_on(c, u, pset) if u[3] == 0 else []
+                if on:
+                    tgt = _("em cima de %s") % ", ".join(c.name_of(a) for a in on)
                 ev(u[0], "mobskill", "mobskills", None, _("usou %s") % meter.skill_name(u[4]), tgt.strip())
-                events[-1].update(who=c.name_of(u[2]), mob=True, target=u[3])
+                events[-1].update(who=c.name_of(u[2]), mob=True, target=on[0] if on else u[3])
     for u in c.casts:
         # conjuração instantânea (0 s, ex.: Cardeal com conjuração instantânea) só repete o "usou" que vem junto
         if t0 <= u[0] <= t1 and u[5] > 0:
@@ -237,14 +272,14 @@ def build(c, key, rng=None):
                 events=events,
                 marks=sorted(marks), players=order, party=set(x.party), dmg=dmg,
                 names={a: c.name_of(a) for a in order}, starts=starts, phase_dmg=dd.phase_damage(x),
-                lane_events=status_events(c, lanes))
+                lane_events=status_events(c, lanes) + area_events)
 
 
 def status_events(c, lanes):
     """Começo e fim de cada trecho das faixas de status, para a lista de eventos."""
     out = []
     for lane in lanes:
-        if lane["kind"] != "span":
+        if lane["kind"] != "span" or lane.get("area"):
             continue
         for item in lane["items"]:
             s, e = item[0], item[1]
@@ -271,6 +306,11 @@ def death_cause(d):
             "%d%%" % round(d["hp_pct"] * 100) if d.get("hp_pct") is not None else "?")
     if d["no_hit"]:
         return _("sem golpe visível (efeito, debuff ou algo fora da tela)")
+    if d["special"] == "boom":
+        return _("%s · %s (dano fixo, sem número na tela)") % (d["skill"], d["killer"])
+    if d["special"] == "offscreen":
+        return _("provável golpe de %s fora da tela (sobrecarga há %d s)") % (
+            d["killer"], round(d["overload_ms"] / 1000.0))
     return "%s · %s · %s" % (d["skill"], d["killer"], an._full(d["hit"]))
 
 

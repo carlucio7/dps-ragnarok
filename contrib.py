@@ -15,6 +15,7 @@ from i18n import _
 
 LEX = 22
 LEX_SKILLS = (78, 5072)       # Lex Aeterna e Vituperatum aplicam o status 22
+WEB, WEB_SKILL = 129, 405     # Prisão de Teia: status no alvo e a skill
 
 
 def _ele(bonus):
@@ -41,6 +42,76 @@ EFFECTS = {
     1403: ("me", _("+5% por nível no dano físico"), lambda h, v, b: _mul(5 * (v or 10)) if h["phys"] else None),
 }
 NAME = {1142: None}          # nomes vêm de meter.status_name (com o nome do simulador, ex.: Cometa)
+
+# Áreas no chão do Mestre Elemental. O replay não traz status de quem está em cima: vale a posição de cada um no
+# instante do golpe. Chave = −skill (não colide com os ids de status). "src": vale para quem bate de dentro da área;
+# "dst": para o alvo que está em cima dela. Valores do rAthena (battle_attr_fix), na mesma parcela do elemento em
+# que entram Pólen e Cometa: Vulcão/Dilúvio/Furacão somam para o atacante; cada Insígnia abre o alvo para o
+# elemento que vence o dela (Terra → fogo, Fogo → água, Água → vento, Vento → terra).
+FIELD_PCT = (10, 14, 17, 19, 20)
+INSIGNIA_PCT = 50
+AREAS = {-285: ("src", "Fire"), -286: ("src", "Water"), -287: ("src", "Wind"),
+         -2468: ("dst", "Fire"), -2465: ("dst", "Water"), -2466: ("dst", "Wind"), -2467: ("dst", "Earth")}
+AREA_KIND = _("Área no chão")
+
+
+def effect_name(key):
+    """Nome de um efeito: status (id positivo) ou área no chão (−skill)."""
+    return meter.skill_name(-key) if key < 0 else meter.status_name(key)
+
+
+def area_pct(key, level):
+    if AREAS[key][0] == "dst":
+        return INSIGNIA_PCT
+    return FIELD_PCT[max(1, min(level or 5, 5)) - 1]
+
+
+def area_rule(key, level):
+    side, el = AREAS[key]
+    name = dd.ELEMENT_PT.get(el, el).lower()
+    if side == "src":
+        return _("+%d%% no dano de %s de quem bate de dentro da área (rAthena)") % (area_pct(key, level), name)
+    return _("+%d%% no dano de %s no alvo que está em cima dela (rAthena)") % (area_pct(key, level), name)
+
+
+def live_areas(c, x):
+    """{chave: áreas que estiveram no chão durante a luta}."""
+    out = {}
+    for key in AREAS:
+        areas = c.areas_of(-key, x.start, x.end)
+        if areas:
+            out[key] = areas
+    return out
+
+
+def area_bonus(c, live, info, h):
+    """[(chave, quem pôs a área, bônus em %)] das áreas que valem neste golpe."""
+    out = []
+    for key, areas in live.items():
+        side, el = AREAS[key]
+        if info["el"] != el:
+            continue
+        if side == "src":
+            e = c.entities.get(h.raw)
+            if h.raw != h.src and e is not None and e.kind != "pc":
+                continue                         # golpe de invocação: a posição dela não se vê
+            pos = c.pos_at(h.src, h.t)
+        else:
+            pos = c.pos_at(h.dst_raw, h.t)
+        a = next((a for a in areas if c.in_area(a, pos, h.t)), None)
+        if a is not None:
+            out.append((key, c.resolve(a["src"]), area_pct(key, a["level"])))
+    return out
+
+
+def area_uptime(c, x, key, areas, player=None):
+    """[(início, fim)] em que a área valia: o chefe em cima dela (Insígnias) ou, nas de atacante, o jogador
+    escolhido dentro dela (sem jogador escolhido: a área no chão)."""
+    if AREAS[key][0] == "dst":
+        return [sp for p in x.phases for sp in c.inside_spans(areas, p["aid"], p["start"], p["end"])]
+    if player:
+        return c.inside_spans(areas, player, x.start, x.end)
+    return [sp for a in areas for sp in c.area_spans(a)]
 
 
 def classify(x, h):
@@ -107,6 +178,7 @@ def fight(c, key, rng=None, player=None):
             spans[k] = _spans(c, aid, efst)
         return next((v for s, e_, v in spans[k] if s <= t < e_), False)
     lex_hits = lex_consumed(c, x)
+    live = live_areas(c, x)
     for h in hits:
         if h.dmg <= 0:
             continue
@@ -120,6 +192,8 @@ def fight(c, key, rng=None, player=None):
             if r is None:
                 continue
             (ele if r[0] == "ele" else mul)[efst] = r[1]
+        for akey, _who, b in area_bonus(c, live, info, h):
+            ele[akey] = b
         base = 100.0 + sum(ele.values())
         for efst, b in ele.items():
             contrib[efst] += h.dmg * b / base
@@ -155,6 +229,22 @@ def fight(c, key, rng=None, player=None):
         rows.append(dict(key=efst, efst=efst, name=meter.status_name(efst), where=where, rule=rule,
                          uptime=up, affected=affected[efst], contrib=contrib[efst], hits=n[efst],
                          share=contrib[efst] / float(total) if total else 0.0))
+    for akey, areas in live.items():
+        on = area_uptime(c, x, akey, areas, player)
+        up = dd._total(dd._intersect(dd._merge(on), wins)) / float(win_ms) if on else 0.0
+        rows.append(dict(key=akey, efst=akey, name=effect_name(akey), kind_txt=AREA_KIND,
+                         where="boss" if AREAS[akey][0] == "dst" else "me",
+                         rule=area_rule(akey, max(a["level"] for a in areas)), uptime=up, affected=affected[akey],
+                         contrib=contrib[akey], hits=n[akey], share=contrib[akey] / float(total) if total else 0.0))
+    # Prisão de Teia: só o reconhecimento (ainda não apareceu em nenhuma gravação para medir o efeito)
+    web_on = [(s, e_) for p in x.phases for s, e_, _v in _spans(c, p["aid"], WEB)]
+    web_used = sum(1 for u in c.uses if u[4] == WEB_SKILL and x.start - 5000 <= u[0] <= x.end)
+    if web_on or web_used:
+        rule = (_("o próximo golpe de fogo sai dobrado e a teia some (rAthena)") if web_on
+                else _("usada %d vez(es), mas o status não apareceu no chefe") % web_used)
+        up = dd._total(dd._intersect(dd._merge(web_on), wins)) / float(win_ms) if web_on else 0.0
+        rows.append(dict(key=WEB, efst=WEB, name=meter.status_name(WEB), where="boss", rule=rule, uptime=up,
+                         affected=0, contrib=0, hits=0, share=0.0))
     rows.sort(key=lambda r: -r["contrib"])
     return rows, total
 
@@ -208,6 +298,7 @@ def credit(c, key, rng=None):
     boss_fx = {efst: appliers(c, x, efst) for efst, (where, _r, _f) in EFFECTS.items() if where == "boss"}
     lex_hits = lex_consumed(c, x)
     lex_uses = sorted((u[0], u[2]) for u in c.uses if u[4] in LEX_SKILLS and u[3] in x.boss_aids)
+    live = live_areas(c, x)
     me_spans = {}
     own, via = collections.Counter(), collections.defaultdict(collections.Counter)
     total = 0
@@ -234,6 +325,7 @@ def credit(c, key, rng=None):
             r = fn(info, v, boss)
             if r is not None:
                 (ele if r[0] == "ele" else mul).append((efst, who, r[1]))
+        ele += area_bonus(c, live, info, h)     # áreas no chão: o crédito vai para quem pôs a área
         factors = []                            # (efeito, quem, multiplicador)
         sum_ele = sum(b for _e, _w, b in ele)
         if sum_ele:

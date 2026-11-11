@@ -2,6 +2,31 @@
 
 Português · [English](#english) · [Español](#español)
 
+## 1.5.0
+
+Avisos do chefe e resumo da luta no widget, botão de copiar imagem, XP automática e as áreas do Mestre Elemental.
+
+- Cartão do chefe: o widget mostra por 5 s quando o chefe troca de propriedade, fica imune a uma ou muda de tamanho, com o que bater, o que evitar e quanto o seu ataque rende. Dá para desligar no menu ou com o botão direito no cartão.
+- Avisos de mecânica no mesmo cartão: Dor Máxima ligou ou acabou, Aliviar muito alto com o número de Almas ativas, e modo defesa e defesa caída do Aquila.
+- O aviso de Dor Máxima aparece mesmo quando o chefe a usa fora da tela.
+- Resumo no fim da luta contra chefe: tempo, a sua parte do dano e as principais conclusões do Dedo Duro por alguns segundos. Clique para abrir o Dedo Duro.
+- Copiar imagem: um botão no widget e outro na análise deixam a imagem pronta para colar no Discord. Ctrl+Shift+C copia só o gráfico sob o mouse, e dá para esconder os nomes dos jogadores.
+- Lembrete de gravação desligada quando o jogo está aberto e nada está sendo gravado.
+- XP: no Ragnarok, bônus de evento, VIP e Cetro somam; itens e Banquete multiplicam esse grupo; manual e Kafra somam por fora; Milagre dobra tudo. A nova versão reflete esta regra.
+- XP: modo automático, agora o padrão. Usa a lista de bônus, corrige a conta com a XP exata e marca sozinho o evento do servidor.
+- XP: o manual que já estava ativo no começo da gravação vale pelo último manual que você usou.
+- XP: a entrega de missões não distorce mais a calibração, e o programa avisa que a XP delas fica fora da estimativa.
+- XP: o progresso das caças aparece na aba XP do widget e pode ser fixado.
+- XP: o alvo da Oposição rende mais no dia certo do mês, quando não há Milagre.
+- Mestre Elemental: Vulcão, Insígnias, Proteger Terreno e Prisão de Teia são lidos do replay.
+- Linha do tempo: faixas das áreas no chão, com quem pôs, quanto durou e o que apagou.
+- Linha do tempo: as skills que o chefe joga no chão aparecem, com o jogador em cima de quem caíram.
+- Buffs e Debuffs: quanto cada área rendeu e o dano creditado a quem a pôs.
+- Dedo Duro: alerta amarelo de "faltou" ou "durou pouco" para Vulcão e Insígnia, e um resumo de quando o Ganbantein apagou áreas do grupo.
+- Dedo Duro: Oposição errada ou esquecida no chefe é erro grave.
+- Mortes: o resumo aponta o golpe que realmente matou, e reconhece a explosão dos Robovacs e o golpe do Aquila vindo de fora da tela.
+- Aquila: o suporte à luta foi aprimorado.
+
 ## 1.4.0
 
 Resumo da morte no widget, previsão de XP muito mais precisa em sessões longas e a vida do Aquila na Linha do tempo.
@@ -129,6 +154,31 @@ Primeira versão pública.
 
 ## English
 
+### 1.5.0
+
+Boss alerts and a fight summary on the widget, a copy-image button, automatic XP and the Elemental Master ground areas.
+
+- Boss card: the widget shows for 5 s when the boss changes property, becomes immune to one or changes size, with what to hit with, what to avoid and how much your attack does. You can turn it off in the menu or by right-clicking the card.
+- Mechanic alerts on the same card: Max Pain started or ended, Relieve very high with the number of Souls alive, and Aquila in defense mode or with its defense down.
+- The Max Pain alert shows up even when the boss uses it off screen.
+- Summary at the end of a boss fight: time, your share of the damage and the main Snitch findings for a few seconds. Click to open the Snitch.
+- Copy image: a button on the widget and another in the analysis leave the image ready to paste on Discord. Ctrl+Shift+C copies only the chart under the mouse, and you can hide player names.
+- Recording-off reminder when the game is open and nothing is being recorded.
+- XP: in Ragnarok, the event, VIP and Scepter bonuses add up; items and the Banquet multiply that group; the manual and Kafra are added on top; the Miracle doubles everything. The new version follows this rule.
+- XP: automatic mode, now the default. It uses the bonus list, corrects the math with the exact XP and ticks the server event by itself.
+- XP: a manual that was already active when the recording started counts as the last manual you used.
+- XP: quest turn-ins no longer skew the calibration, and the program warns that their XP is left out of the estimate.
+- XP: hunt progress shows on the XP tab of the widget and can be pinned.
+- XP: the Opposition target gives more on the right day of the month, when there is no Miracle.
+- Elemental Master: Volcano, Insignias, Land Protector and Spider Web are read from the replay.
+- Timeline: lanes for the ground areas, with who placed them, how long they lasted and what erased them.
+- Timeline: the skills the boss throws on the ground show up, with the player they landed on.
+- Buffs and Debuffs: how much each area gave and the damage credited to whoever placed it.
+- Snitch: yellow alert for "missing" or "too short" Volcano and Insignia, and a summary of when Ganbantein erased the areas of the party.
+- Snitch: a wrong or forgotten Opposition on the boss is a serious mistake.
+- Deaths: the summary points to the hit that actually killed you, and recognises the Robovac explosion and Aquila's hit coming from off screen.
+- Aquila: support for the fight was improved.
+
 ### 1.4.0
 
 Death summary on the widget, a much more accurate XP forecast in long sessions and Aquila's HP on the Timeline.
@@ -255,6 +305,31 @@ First public version.
 ---
 
 ## Español
+
+### 1.5.0
+
+Avisos del jefe y resumen de la pelea en el widget, botón de copiar imagen, XP automática y las áreas del Maestro Elemental.
+
+- Tarjeta del jefe: el widget muestra por 5 s cuando el jefe cambia de propiedad, se vuelve inmune a una o cambia de tamaño, con qué pegarle, qué evitar y cuánto rinde tu ataque. Se puede desactivar en el menú o con clic derecho en la tarjeta.
+- Avisos de mecánica en la misma tarjeta: Dolor Máximo empezó o terminó, Aliviar muy alto con el número de Almas activas, y modo defensa y defensa caída del Aquila.
+- El aviso de Dolor Máximo aparece aunque el jefe lo use fuera de pantalla.
+- Resumen al final de la pelea contra jefe: tiempo, tu parte del daño y las principales conclusiones del Soplón por unos segundos. Clic para abrir el Soplón.
+- Copiar imagen: un botón en el widget y otro en el análisis dejan la imagen lista para pegar en Discord. Ctrl+Shift+C copia solo el gráfico bajo el ratón, y se pueden ocultar los nombres de los jugadores.
+- Recordatorio de grabación apagada cuando el juego está abierto y no se está grabando nada.
+- XP: en Ragnarok, los bonos de evento, VIP y Cetro se suman; los objetos y el Banquete multiplican ese grupo; el manual y Kafra se suman aparte; el Milagro lo duplica todo. La nueva versión refleja esta regla.
+- XP: modo automático, ahora el predeterminado. Usa la lista de bonos, corrige la cuenta con la XP exacta y marca solo el evento del servidor.
+- XP: el manual que ya estaba activo al empezar la grabación vale por el último manual que usaste.
+- XP: la entrega de misiones ya no distorsiona la calibración, y el programa avisa que su XP queda fuera de la estimación.
+- XP: el progreso de las cazas aparece en la pestaña XP del widget y se puede fijar.
+- XP: el objetivo de la Oposición rinde más en el día correcto del mes, cuando no hay Milagro.
+- Maestro Elemental: Volcán, Insignias, Proteger Terreno y Telaraña se leen del replay.
+- Línea de tiempo: franjas de las áreas en el suelo, con quién las puso, cuánto duraron y qué las borró.
+- Línea de tiempo: aparecen las habilidades que el jefe lanza al suelo, con el jugador sobre el que cayeron.
+- Buffs y Debuffs: cuánto rindió cada área y el daño acreditado a quien la puso.
+- Soplón: alerta amarilla de "faltó" o "duró poco" para Volcán e Insignia, y un resumen de cuándo el Ganbantein borró áreas del grupo.
+- Soplón: una Oposición equivocada u olvidada en el jefe es un error grave.
+- Muertes: el resumen señala el golpe que realmente mató, y reconoce la explosión de los Robovacs y el golpe del Aquila desde fuera de pantalla.
+- Aquila: se mejoró el soporte de la pelea.
 
 ### 1.4.0
 

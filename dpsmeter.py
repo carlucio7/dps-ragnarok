@@ -27,6 +27,7 @@ import clientdata
 import itemkind
 import sprites
 import meter
+import quests
 import testes
 import xp
 from analysis_ui import AnalysisWindow
@@ -63,6 +64,27 @@ MIRACLE_BANNER_S = 6.0
 MIRACLE_COLORS = ("#fbbf24", "#fde68a", "#c084fc", "#f9a8d4", "#ffffff", "#a5b4fc")
 POLL_MS = 150         # ler o pedaço novo do arquivo custa < 1 ms
 DEATH_CARD_S = 10.0   # o resumo da morte fica no widget por esse tempo
+BOSS_CARD_S = 5.0     # o aviso de chefe que mudou (propriedade, imunidade, tamanho) fica esse tempo
+BOSS_MERGE_MS = 2000  # mudanças do mesmo chefe quase juntas viram um cartão só (ex.: volta a ser grande e vira Sombrio)
+SUMMARY_CARD_S = 14.0     # o resumo do fim da luta (conclusões do Dedo Duro) fica esse tempo
+SUMMARY_WAIT_MS = 2500    # depois da morte do chefe, espera os últimos pacotes da luta
+SUMMARY_PHASE_MS = 14000  # chefe em fases que morreu antes da 3ª: espera para ver se vem outra fase
+REC_OFF_S = 45.0          # jogo aberto e nada gravando há esse tempo: lembrete de gravação desligada
+GAME_CHECK_S = 5.0        # de quanto em quanto tempo olha se o jogo está aberto
+SIZE_NAMES = {"S": "pequeno", "M": "médio", "L": "grande"}
+# Padrão único dos cartões (chefe mudou, mecânica, fim da luta), no formato do resumo da morte: moldura e título
+# na cor da gravidade, desenho do chefe no alto e linhas centradas. Todos ocupam a mesma área do widget.
+SEV_COLORS = {"grave": "#ef4444", "atencao": "#f59e0b", "bom": "#22c55e", "info": "#38bdf8"}
+CARD_BG, CARD_DIM, CARD_WHITE = "#14161c", "#a3a8b5", "#ffffff"
+# avisos de mecânica: (título, gravidade, [(linha, cor ou None)]); traduzidos na hora de desenhar
+MECH_CARDS = {
+    "maxpain_on": ("Dor Máxima ativa", "grave", [("Segure os golpes grandes", "#f87171"),
+                                                 ("Ela devolve parte de cada golpe", None)]),
+    "maxpain_off": ("Dor Máxima acabou", "bom", [("Pode soltar os golpes grandes", "#4ade80")]),
+    "defense": ("modo defesa", "atencao", [("O dano quase não entra (99%)", None)]),
+    "relief": ("Aliviar muito alto", "grave", []),        # as linhas (Almas ativas, redução) são montadas na hora
+    "def_break": ("a defesa caiu", "bom", [("5 s de dano total: solte tudo", "#4ade80")]),
+}
 DEATH_RED = "#ef4444"
 DEATH_CARD_BG = "#1f0606"   # cartão escuro no meio do widget
 # título do resumo a cada morte no mesmo encontro (1ª, 2ª, ...); a última vale dali em diante, com o número
@@ -95,6 +117,8 @@ GAP_CHOICES = [(5, _("5 segundos sem dano")), (10, _("10 segundos sem dano")), (
 TARGET_CHOICES = [("all", _("Todos os monstros")), ("mvp", _("Só MVPs e bonecos de treino"))]
 HINTS = {
     "pin": _("Fixar sempre por cima das outras janelas"), "chart": _("Análise completa (abre outra janela)"),
+    "shot": _("Copiar a imagem do widget (cole com Ctrl+V)"),
+    "summary": _("Clique: abrir o Dedo Duro · botão direito: desligar o resumo da luta"),
     "more": _("Opções"), "min": _("Minimizar"), "close": _("Fechar o medidor"), "reset": _("Zerar: começa a contar de novo"),
     "view": _("Escolher o que mostrar: tudo ou uma luta"), "prev": _("Luta anterior"), "next": _("Próxima luta"),
     "group": _("Dano de cada jogador"), "skills": _("O seu dano por skill"), "targets": _("Em quem você bateu"),
@@ -104,6 +128,7 @@ HINTS = {
     "pinbar": _("Informação fixada · botão direito para desafixar"),
     "row": _("Botão direito: fixar no widget, ocultar..."),
     "death": _("Clique: fechar · botão direito: desligar o resumo da morte"),
+    "bosscard": _("Clique: fechar · botão direito: desligar o aviso do chefe"),
 }
 # o que dá para fixar na faixa abaixo das abas (além dos itens da aba Drops)
 PIN_STATS = [("xp_min", _("XP por minuto")), ("xp_hour", _("XP por hora")), ("xp_total", _("XP estimada")),
@@ -119,9 +144,10 @@ ICONS = {
     "prev": ("\uE76B", "‹"), "next": ("\uE76C", "›"), "file": ("\uE8E5", "📂"),
     "chart": ("\uE9D2", "📊"),
     "where": ("\uE707", "📍"),
+    "shot": ("\uE722", "📷"),
 }
 
-CONFIG_VERSION = 2
+CONFIG_VERSION = 3
 DEFAULTS = {
     "theme": "Grafite", "scale": 1.0, "alpha": 0.92, "pinned": True,
     "rows": 6, "gap_s": 15, "tab": "group", "session": True, "show_pct": False,
@@ -135,8 +161,10 @@ DEFAULTS = {
     "xp_corr": {},         # {personagem: {"samples": [[XP real ÷ lista, XP real, quando, arquivo#trecho]]}}
     "xp_levels": {},       # {classe: {nível: XP do nível}} visto no começo das gravações
     "xp_bonuses": {},      # {bônus: {"on", "pct"}} da lista de bônus de XP (xp.BONUSES)
-    "xp_mode": "lista",    # "lista" (bônus marcados), "medido" ou "fixo"
+    "xp_mode": "auto",     # "auto" (lista + correção medida + evento deduzido), "lista", "medido" ou "fixo"
     "xp_fixed": None,      # bônus fixo (%) do modo "fixo"
+    "xp_manual_last": {},  # {personagem: % do último manual que o jogo mandou} (para o manual já ativo no começo)
+    "xp_quests": {},       # {missão: {"base": XP sem bônus, "level"}} aprendido de trechos com XP exata
     "xp_event_off": [],    # itens de evento cujo bônus "[Durante o Evento]" não vale mais
     "drop_favs": [],       # itens favoritos (ficam no topo da aba Drops)
     "drop_hidden": [],     # itens que a pessoa ocultou para sempre (somem das listas de drops)
@@ -145,6 +173,11 @@ DEFAULTS = {
     "fusion_sound": False,  # som curto quando o HP fica baixo com a União
     "fusion_volume": 40,
     "death_card": True,     # quando você morre, o widget mostra por 10 s o que te matou
+    "alert_boss": True,     # cartão de 5 s: o chefe trocou de propriedade/tamanho, ou mecânica (Dor Máxima, defesa)
+    "fight_summary": True,  # no fim da luta contra chefe, as principais conclusões do Dedo Duro por alguns segundos
+    "alert_rec": True,      # lembrar quando o jogo está aberto e nenhum replay está sendo gravado
+    "rec_sound": False,     # ...com um som curto (uma vez)
+    "copy_hide_names": False,   # "copiar imagem" troca os nomes dos jogadores pela classe
 }
 
 
@@ -284,7 +317,10 @@ def load_config():
                 cfg["session"] = True
                 if cfg["gap_s"] in (0, 10):
                     cfg["gap_s"] = 15
-                cfg["v"] = CONFIG_VERSION
+            if saved.get("v", 1) < 3 and cfg.get("xp_mode") == "lista":
+                # v3: a XP sai de "pela lista" (o padrão antigo, que quase ninguém escolheu) para o automático
+                cfg["xp_mode"] = "auto"
+            cfg["v"] = CONFIG_VERSION
     except (OSError, ValueError):
         pass
     if cfg["theme"] not in THEMES:
@@ -341,6 +377,8 @@ class DpsApp:
         clientdata.NAMES.load()
         self.names_v = clientdata.NAMES.version
         self.xp_seen = None
+        self.xp_auto_at = 0.0                  # última conferência automática da XP (manual lembrado, evento)
+        self.xp_lvl_seen = None                # (gravação, nº de subidas de nível) já conferido
         self.miracle_at = -1e9                 # quando o Milagre ativou (o widget brilha por uns segundos)
         self.press_xy = None
         self.enc_back = 0                   # 0 = encontro atual, 1 = anterior...
@@ -360,6 +398,13 @@ class DpsApp:
         self.last_autosave = 0.0
         self.alert = None             # (texto, tipo, quando apareceu)
         self.death_card = None        # (resumo da morte, quando apareceu)
+        self.boss_card = None         # (o que mudou no chefe, quando apareceu)
+        self.summary_card = None      # (resumo do fim da luta, quando apareceu)
+        self.summary_due = None       # (gravação, nº do aviso da morte do chefe) esperando os últimos pacotes
+        self.game_on = False          # o jogo está aberto? (olhado a cada 5 s, para o lembrete de gravação)
+        self.game_check_at = 0.0
+        self.rec_seen_at = time.time()   # última vez em que havia gravação (ou em que o jogo não estava aberto)
+        self.rec_warned = False       # o som do lembrete já tocou neste episódio
         self.sprite_photos = {}       # (monstro, largura, altura) -> PhotoImage do sprite
         self.press_target = None
         self.alert_seen = 0
@@ -571,6 +616,9 @@ class DpsApp:
         if f is not None and f.ready:
             f.combat.finished = not self.watcher.recording(now)
             self.check_alerts(f, now)
+            if now - self.xp_auto_at >= 3.0:
+                self.xp_auto_at = now
+                self.xp_auto(f.combat)
             if self.cfg["auto_tests"] and now - self.last_autosave >= 2.0:
                 self.last_autosave = now
                 try:
@@ -578,7 +626,9 @@ class DpsApp:
                 except Exception:  # noqa: BLE001
                     self.log_error(*sys.exc_info())
         self.phase = (self.phase + 1) % 8
-        if now - self.miracle_at < MIRACLE_FLASH_S + 0.3 or self.death_card:
+        self.check_recording(now)
+        if (now - self.miracle_at < MIRACLE_FLASH_S + 0.3 or self.death_card or self.boss_card
+                or self.summary_card):
             self.dirty = True
         if self.dirty or now - self.last_draw >= 1.0:
             try:
@@ -592,13 +642,48 @@ class DpsApp:
                 self.log_error(*sys.exc_info())
 
     def xp_calibrate(self, c):
-        """Fator de XP do personagem: XP exata até a próxima gravação ÷ XP estimada dos abates desta."""
+        """Fator de XP do personagem: XP exata até a próxima gravação ÷ XP estimada dos abates desta. No modo
+        automático a mesma medida confere o evento do servidor e aprende a XP das missões."""
         try:
-            if xp.calibrate(c, self.cfg, meter.xp_after):
+            before = json.dumps([self.cfg.get(k) for k in ("xp_bonuses", "xp_quests", "xp_manual_last")], sort_keys=True)
+            server = xp.settings(self.cfg)["server"]
+            done = xp.calibrate(c, self.cfg, meter.xp_after)
+            now = xp.settings(self.cfg)["server"]
+            if (server["on"], server["pct"]) != (now["on"], now["pct"]):
+                self.xp_server_found(now["pct"] if now["on"] else 0)
+            after = json.dumps([self.cfg.get(k) for k in ("xp_bonuses", "xp_quests", "xp_manual_last")], sort_keys=True)
+            if done or before != after:
                 self.save()
                 self.dirty = True
         except Exception:  # noqa: BLE001
             self.log_error(*sys.exc_info())
+
+    def xp_auto(self, c):
+        """Automático da XP durante a gravação: guarda o % do manual que o jogo mandou e, a cada subida de nível
+        (XP exata), confere o evento do servidor."""
+        try:
+            changed = xp.remember_manual(c, self.cfg)
+            sig = (id(c), len(c.level_ups))
+            if sig != self.xp_lvl_seen:
+                self.xp_lvl_seen = sig
+                if c.level_ups:
+                    changed = self.xp_server_found(xp.detect_server(c, self.cfg)) or changed
+            if changed:
+                self.save()
+                self.dirty = True
+        except Exception:  # noqa: BLE001
+            self.log_error(*sys.exc_info())
+
+    def xp_server_found(self, pct):
+        """Avisa no rodapé que o evento do servidor foi deduzido da XP exata (pct None = nada mudou)."""
+        if pct is None:
+            return False
+        text = (_("XP: evento do servidor de +%d%% detectado e marcado") % pct) if pct else _(
+            "XP: sem evento do servidor agora (desmarcado pela XP exata)")
+        self.alert = (text, "info", time.time())
+        if self.analysis is not None:
+            self.analysis.xp_loaded = False       # a lista de bônus da análise relê o que mudou
+        return True
 
     def check_alerts(self, f, now):
         """Mostra no rodapé o aviso mais novo (buff que acabou, morte) por alguns segundos."""
@@ -610,8 +695,13 @@ class DpsApp:
             self.alert_seen = seq
             if kind == "death" and self.cfg["death_card"]:
                 self.show_death_card(c, seq, now)
+            if kind == "boss" and self.cfg.get("alert_boss", True):
+                self.show_boss_card(c, seq, now)
+            if kind == "bossdead" and self.cfg.get("fight_summary", True):
+                self.summary_due = (c, seq)
             if ((kind == "buff" and self.cfg["alert_buffs"]) or (kind == "death" and self.cfg["alert_death"])
                     or (kind == "fusion" and self.cfg["alert_fusion"])
+                    or (kind == "boss" and self.cfg.get("alert_boss", True))
                     or (kind == "miracle" and self.cfg["alert_miracle"])):
                 self.alert = (text, kind, now)
                 self.dirty = True
@@ -627,6 +717,131 @@ class DpsApp:
         if self.death_card and now - self.death_card[1] > DEATH_CARD_S:
             self.death_card = None
             self.dirty = True
+        if self.boss_card and now - self.boss_card[1] > BOSS_CARD_S:
+            self.boss_card = None
+            self.dirty = True
+        if self.summary_card and now - self.summary_card[1] > SUMMARY_CARD_S:
+            self.summary_card = None
+            self.dirty = True
+        self.check_summary(c, now)
+
+    def check_summary(self, c, now):
+        """O chefe morreu: depois dos últimos pacotes (ou de ver que não vem outra fase), mostra o resumo da luta."""
+        due = self.summary_due
+        if due is None:
+            return
+        if due[0] is not c or due[1] not in c.fight_ends:
+            self.summary_due = None
+            return
+        key, t = c.fight_ends[due[1]]
+        e = c.entities.get(key)
+        phased = e is not None and e.job in meter.PHASED_BOSSES and c.phases.get(key, 1) < 3
+        if c.now < t + (SUMMARY_PHASE_MS if phased else SUMMARY_WAIT_MS) and not c.finished:
+            return
+        self.summary_due = None
+        if any(h.out and h.dst == key and h.t > t + 1000 for h in c.hits[-300:]):
+            return                                # veio outra fase: a luta continua
+        self.show_summary(c, key, now)
+
+    def show_summary(self, c, key, now):
+        """Monta o cartão do fim da luta: tempo, a sua parte do dano e as principais conclusões do Dedo Duro."""
+        try:
+            import dedoduro
+            r = dedoduro.analyze(c, key)
+            if not r:
+                return
+            rows = sorted(r["party"] + r["others"], key=lambda p: -p["dmg"])
+            mine = next((i for i, p in enumerate(rows) if p.get("me")), None)
+            bad = [a for a in r["alerts"] if a["sev"] >= 1]
+            e = c.entities.get(key)
+            form = c.sprite_log[key][-1][1] if c.sprite_log.get(key) else (e.job if e is not None else 0)
+            spec = ("mob", form) if form else None
+            sprites.MONSTERS.start(clientdata.NAMES.grf)
+            sprites.MONSTERS.image(spec)
+            self.summary_card = (dict(
+                key=key, sprite=spec, name=c.name_of(key), killed=r["killed"], ms=r["end"] - r["start"],
+                share=rows[mine]["share"] if mine is not None else None,
+                rank=mine + 1 if mine is not None else None, players=len(rows),
+                alerts=[(a["sev"], a["what"], a["who"]) for a in bad[:3]],
+                grave=sum(1 for a in bad if a["sev"] == 2), warn=sum(1 for a in bad if a["sev"] == 1)), now)
+        except Exception:  # noqa: BLE001 - o resumo é um extra
+            self.log_error(*sys.exc_info())
+        self.dirty = True
+
+    def open_summary(self):
+        """Clique no resumo: abre a análise no Dedo Duro, na luta do cartão."""
+        card, self.summary_card = self.summary_card, None
+        self.dirty = True
+        self.open_analysis()
+        if self.analysis is not None and card:
+            try:
+                self.analysis.dd_key = card[0]["key"]
+                self.analysis.select_tab("dedo")
+                self.analysis.refresh(force=True)
+            except Exception:  # noqa: BLE001
+                self.log_error(*sys.exc_info())
+
+    def summary_menu(self):
+        m = self.new_menu()
+        m.add_command(label=_("Abrir o Dedo Duro desta luta…"), command=self.open_summary)
+        m.add_command(label=_("Fechar este resumo"), command=lambda: (setattr(self, "summary_card", None),
+                                                                     setattr(self, "dirty", True)))
+        m.add_command(label=_("Não mostrar mais o resumo da luta"), command=lambda: self.toggle_cfg("fight_summary"))
+        return m
+
+    def draw_summary_card(self):
+        """Cartão do fim da luta: verde quando o chefe morreu (azul se não), a sua parte do dano e até 3 conclusões
+        do Dedo Duro, cada uma com a bolinha da gravidade dela."""
+        if not self.summary_card:
+            return
+        d, shown = self.summary_card
+        title = (_("%s: derrotado em %s") % (d["name"], dur(d["ms"]))) if d["killed"] else _("%s: não morreu") % d["name"]
+        lines = []
+        if d["share"] is not None:
+            lines.append((_("Você: %s do dano · %dº de %d") % (dec("%.1f%%" % (100 * d["share"])), d["rank"],
+                                                               d["players"]), CARD_WHITE))
+        for sev, what, who in d["alerts"]:
+            lines.append(("%s %s · %s" % ("●" if sev == 2 else "◐", what, who), "#fca5a5" if sev == 2 else "#fcd34d"))
+        more = d["grave"] + d["warn"] - len(d["alerts"])
+        if not d["alerts"]:
+            lines.append((_("Nada grave nem de atenção no Dedo Duro"), "#4ade80"))
+        elif more > 0:
+            lines.append((_("mais %d no Dedo Duro (clique para abrir)") % more, CARD_DIM))
+        self.draw_card("summary", shown, SUMMARY_CARD_S, "bom" if d["killed"] else "info", title, lines, d.get("sprite"))
+
+    def show_boss_card(self, c, seq, now):
+        """Cartão do chefe que mudou; o que chega do mesmo chefe logo depois entra no mesmo cartão."""
+        info = getattr(c, "boss_alerts", {}).get(seq)
+        if info is None:
+            return
+        try:
+            info = dict(info)
+            cur = self.boss_card[0] if self.boss_card else None
+            if (cur and cur["aid"] == info["aid"] and 0 <= info["t"] - cur["t"] <= BOSS_MERGE_MS
+                    and not info.get("mech") and not cur.get("mech")):
+                info = dict(cur, **{k: v for k, v in info.items() if v is not None})
+            if info.get("mech"):                  # mecânica: o HP de quem grava dá o tamanho do golpe que mata
+                log = c.hp_log.get(c.me) or ()
+                info["hp"] = next((hp for _t, hp, _m in reversed(log) if hp), None)
+            e = c.entities.get(info["aid"])
+            form = info.get("form") or (c.sprite_log[info["aid"]][-1][1] if c.sprite_log.get(info["aid"])
+                                        else (e.job if e is not None else 0))
+            info["name"] = c.name_of(info["aid"])
+            info["job"] = e.job if e is not None else None
+            info["sprite"] = ("mob", form) if form else None
+            info["mine"] = analysis.my_attack_element(c, info["t"])
+            if not info.get("element") and form:          # forma nova: a propriedade dela, se conhecida
+                import dedoduro
+                known = dedoduro.BOSS_ELEMENTS.get(form) or (
+                    (dedoduro.MOB_DB.get(str(form)) or {}).get("e"), (dedoduro.MOB_DB.get(str(form)) or {}).get("l"))
+                if known and known[0]:
+                    info["form_element"] = known
+            sprites.MONSTERS.start(clientdata.NAMES.grf)
+            sprites.MONSTERS.image(info["sprite"])
+            self.boss_card = (info, now)
+        except Exception:  # noqa: BLE001 - o aviso no rodapé continua
+            self.log_error(*sys.exc_info())
+        self.dirty = True
 
     def show_death_card(self, c, seq, now):
         """Monta o resumo da morte (fontes de dano nos 5 s antes) para mostrar por cima das linhas."""
@@ -657,6 +872,28 @@ class DpsApp:
         f = self.watcher.file
         return f.combat if f is not None and f.ready else None
 
+    def check_recording(self, now):
+        """Lembrete de gravação desligada: o jogo está aberto e nenhum replay está sendo escrito há algum tempo."""
+        if not self.cfg.get("alert_rec", True):
+            self.rec_seen_at = now
+            return
+        if now - self.game_check_at >= GAME_CHECK_S:
+            self.game_check_at = now
+            self.game_on = meter.game_running()
+        w = self.watcher
+        writing = w.file is not None and not w.pinned and now - w.last_change <= w.ACTIVE_S
+        if not self.game_on or writing or w.pinned:
+            self.rec_seen_at = now
+            self.rec_warned = False
+        elif self.rec_off(now) and not self.rec_warned:
+            self.rec_warned = True                # uma vez por episódio: o rodapé segue avisando
+            self.dirty = True
+            if self.cfg.get("rec_sound"):
+                play_beep(self.cfg["fusion_volume"])
+
+    def rec_off(self, now):
+        return bool(self.cfg.get("alert_rec", True)) and self.game_on and now - self.rec_seen_at > REC_OFF_S
+
     def status(self):
         """(texto, cor_da_bolinha) do rodapé."""
         t = self.t
@@ -665,6 +902,8 @@ class DpsApp:
         if not w.folders:
             return _("Pasta Replay não encontrada"), t["live"], False
         f = w.file
+        if self.rec_off(now):
+            return _("Gravação desligada: ligue o replay no jogo"), t["live"], True
         if f is None:
             return _("Aguardando gravação de replay…"), t["muted"], False
         if not f.ready:
@@ -709,6 +948,7 @@ class DpsApp:
                                   ("min", self.icon("min"), t["muted"]),
                                   ("more", self.icon("more"), t["muted"]),
                                   ("chart", self.icon("chart"), t["muted"]),
+                                  ("shot", self.icon("shot"), t["muted"]),
                                   ("pin", self.icon("pin_on" if self.cfg["pinned"] else "pin_off"),
                                    t["accent"] if self.cfg["pinned"] else t["muted"])):
             self.icon_button(key, x, TOP_Y * s, glyph, color)
@@ -716,7 +956,7 @@ class DpsApp:
         title_right = x + 8 * s
         if cb is not None:
             sess = cb.session
-            name = sess.player or _("Personagem")
+            name = (cb.name_of(cb.me) if meter.HIDE_NAMES else sess.player) or _("Personagem")
             job = meter.job_name(sess.job)
         else:
             name, job = _("Medidor de DPS"), "Ragnarok"
@@ -772,6 +1012,10 @@ class DpsApp:
 
         # linhas (o resumo da morte fica por cima delas por alguns segundos)
         self.draw_rows(snap)
+        if not self.death_card:
+            self.draw_boss_card()
+            if not self.boss_card:
+                self.draw_summary_card()
         self.draw_death()
 
         # rodapé
@@ -874,6 +1118,9 @@ class DpsApp:
         elif d["fusion"]:
             cause = _("União Solar: atacou com %s de HP") % (
                 "%d%%" % round(d["hp_pct"] * 100) if d["hp_pct"] is not None else _("pouco"))
+        elif d["special"] == "offscreen":
+            cause = _("Provável golpe de %s fora da tela · sobrecarga há %d s") % (
+                d["killer"], round(d["overload_ms"] / 1000.0))
         elif kill is not None and not d["unclear"]:
             cause = _("Golpe final: %s") % self.source_label(dict(kill, count=1))
             el = analysis.element_name(kill["element"])
@@ -1252,8 +1499,8 @@ class DpsApp:
         rng = self.view_rng(cb)
         est = xp.estimate(cb, self.cfg, rng)
         kind, _info = est["source"]
-        how = {"medido": _("×%s medido"), "fixo": _("×%s fixo")}.get(kind, _("×%s pela lista")) % dec(
-            "%.2f" % est["factor"])
+        how = {"medido": _("×%s medido"), "fixo": _("×%s fixo"), "auto": _("×%s aproximado")}.get(
+            kind, _("×%s pela lista")) % dec("%.2f" % est["factor"])
         rows = []
         # porcentagem do nível primeiro, número absoluto depois (quando o jogo mandou quanto falta para o nível)
         pct = est["pct"] is not None
@@ -1268,9 +1515,13 @@ class DpsApp:
                              value=dec("%.2f%%" % est["per_hour_pct"]) if pct else num(est["per_hour"]),
                              right=(_("%s/h") % num(est["per_hour"])) if pct else "", frac=1.0, me=True, pin="xp_hour"))
             eta, left = xp.time_to_level(cb, self.cfg)      # pelo ritmo dos últimos minutos de farm
+            missing = xp.quests_uncounted(cb, self.cfg)     # missões entregues cuja XP não entra na conta
             if eta is not None:
+                right = (_("faltam %s") % num(left)) if left else ""
+                if missing and eta:
+                    right = _("pode ser menos: missões fora da conta")
                 rows.append(dict(label=_("Até o próximo nível"), value=xp.span_text(eta) if eta else _("já subiu"),
-                                 right=(_("faltam %s") % num(left)) if left else "", frac=1.0, me=True, pin="xp_eta"))
+                                 right=right, frac=1.0, me=True, pin="xp_eta"))
             elif xp.warming_up(cb, self.cfg):
                 rows.append(dict(label=_("Até o próximo nível"), value=_("calculando…"),
                                  right=_("10 min de farm ou 1%"), frac=1.0, me=True, pin="xp_eta"))
@@ -1278,11 +1529,31 @@ class DpsApp:
         if est["unknown"]:
             per = (per + " · " if per else "") + _("%d sem XP") % est["unknown"]
         rows.append(dict(label=_("Abates"), value="%d" % est["kills"], right=per, frac=0.0, me=False, pin="kills"))
+        # missões: o que já foi entregue no recorte e o progresso das caças em andamento (dá para fixar na faixa)
+        if est["quests"] and not est["quest_xp"]:
+            # o jogo não grava quanto a missão rende: por enquanto só avisa que essa XP ficou de fora
+            rows.append(dict(label=_("Missões entregues"), value="%d" % len(est["quests"]),
+                             right=_("XP fora da conta: estimativa abaixo do real"), frac=0.0, me=False))
+        elif est["quests"]:
+            nxt_exp = cb.session.next_exp
+            known = est["quest_xp"]
+            right = _("%d entregue(s)") % len(est["quests"])
+            if est["quests_unknown"]:
+                right += " · " + _("%d sem XP conhecida") % est["quests_unknown"]
+            rows.append(dict(label=_("XP de missões"),
+                             value=dec("%.2f%%" % (100.0 * known / nxt_exp)) if nxt_exp else num(known),
+                             right=right, frac=1.0, me=True))
+        for h in xp.hunts(cb)[:3]:
+            rows.append(dict(label=quests.title(h["quest"]), value=" · ".join("%d/%d" % p for p in h["parts"]),
+                             right=dec("%.0f%%" % (100.0 * h["count"] / h["goal"])) if h["goal"] else "",
+                             frac=min(1.0, h["count"] / float(h["goal"])) if h["goal"] else 0.0, me=False,
+                             pin="quest:%d" % h["quest"]))
         pr = xp.progress(cb, self.cfg)
         prog = meter.level_progress(cb.session)
         if pr is not None and pr["pct"] is not None:   # onde está agora: o último ponto exato + a XP estimada
             rows.append(dict(label=_("Nível %d") % pr["level"], value=dec("%.1f%%" % min(100.0, pr["pct"])),
-                             right=_("agora (estimado)"), frac=min(1.0, pr["pct"] / 100.0), me=False, pin="level"))
+                             right=_("agora (sem as missões)") if xp.quests_uncounted(cb, self.cfg)
+                             else _("agora (estimado)"), frac=min(1.0, pr["pct"] / 100.0), me=False, pin="level"))
         elif prog is not None:
             rows.append(dict(label=_("Nível %d") % cb.session.base_level, value=dec("%.1f%%" % (100 * prog)),
                              right=_("no início da gravação"), frac=prog, me=False, pin="level"))
@@ -1308,6 +1579,10 @@ class DpsApp:
                 r = items.get(item)
                 out.append((key, meter.item_name(item), "×%d" % ((r["mine"] + r["mvp"]) if r else 0), "",
                             self.item_color(item)))
+            elif key.startswith("quest:"):       # caça de missão: some da aba quando é entregue, a faixa avisa
+                r = stats.get(key)
+                out.append((key, quests.title(int(key[6:])), r["value"] if r else _("entregue ou sem progresso"),
+                            r["right"] if r else "", None))
             else:
                 r = stats.get(key)
                 out.append((key, PIN_LABELS.get(key, key), r["value"] if r else "—", r["right"] if r else "", None))
@@ -1431,6 +1706,10 @@ class DpsApp:
                 var = self.keep(tk.BooleanVar(self.root, True))
                 pm.add_checkbutton(label=_("Drop: %s") % meter.item_name(int(key[5:])), variable=var,
                                    command=lambda k=key: self.toggle_pin_stat(k))
+            elif key.startswith("quest:"):
+                var = self.keep(tk.BooleanVar(self.root, True))
+                pm.add_checkbutton(label=_("Missão: %s") % quests.title(int(key[6:])), variable=var,
+                                   command=lambda k=key: self.toggle_pin_stat(k))
         pm.add_separator()
         pm.add_command(label=_("Até %d. Também dá para fixar com o botão direito numa linha das abas XP e Drops.")
                        % MAX_PINS, state="disabled")
@@ -1456,6 +1735,10 @@ class DpsApp:
             vm.add_command(label=_("Tocar o som agora"), command=lambda k=vol_key, p=play: p(self.cfg[k]))
             sm.add_cascade(label=vol_label, menu=vm)
             sm.add_separator()
+        var = self.keep(tk.BooleanVar(self.root, self.cfg["rec_sound"]))
+        sm.add_checkbutton(label=_("Tocar um som quando a gravação estiver desligada"), variable=var,
+                           command=lambda: self.toggle_cfg("rec_sound"))
+        sm.add_separator()
         sm.add_command(label=_("Os sons só tocam com o aviso do Milagre ou da União ligado."), state="disabled")
         return sm
 
@@ -1725,6 +2008,139 @@ class DpsApp:
         self.death_card = None
         self.dirty = True
 
+    def boss_menu(self):
+        m = self.new_menu()
+        m.add_command(label=_("Fechar este aviso"), command=lambda: (setattr(self, "boss_card", None),
+                                                                     setattr(self, "dirty", True)))
+        m.add_command(label=_("Não mostrar mais o aviso do chefe"), command=lambda: self.toggle_cfg("alert_boss"))
+        return m
+
+    def draw_card(self, hit, shown, secs, sev, title, lines, spec=None):
+        """Cartão no padrão único: moldura e título na cor da gravidade, desenho do chefe no alto, linhas centradas e
+        a contagem regressiva embaixo. Ocupa sempre a mesma área (das abas até o fim das linhas), então todos têm o
+        mesmo tamanho; num widget com poucas linhas o desenho encolhe ou some, e sobram as linhas que couberem."""
+        k = time.time() - shown
+        if not 0 <= k < secs:
+            return
+        c, s, W = self.canvas, self.s, self.W
+        col = SEV_COLORS[sev]
+        x0, x1 = 8 * s, W - 8 * s
+        y0 = (TABS_Y0 - 2) * s
+        y1 = (self.rows_y0() + self.cfg["rows"] * ROW_H - 3) * s
+        pad = 9 * s
+        c.create_polygon(round_rect_pts(x0, y0, x1, y1, 10 * s), smooth=True, fill=CARD_BG, outline=col,
+                         width=max(1, int(2 * s)))
+        self.hits.append(((hit, None), (x0, y0, x1, y1)))
+        cx = (x0 + x1) / 2
+        cid = c.create_text(x1 - pad, y0 + pad + 4 * s, anchor="e", text="%d s  ✕" % max(1, round(secs - k)),
+                            font=self.fonts["small"], fill=CARD_DIM)
+        count_w = c.bbox(cid)[2] - c.bbox(cid)[0]
+        room = (y1 - y0) - 2 * pad
+
+        def text_h(n):                         # título + n linhas
+            return (22 + 14 * n) * s
+        n = len(lines)
+        while n > 1 and room < text_h(n):
+            n -= 1
+        sprite_h = 0
+        if spec and sprites.MONSTERS.expected(spec):
+            sprite_h = min(56 * s, room - text_h(n))
+            if sprite_h < 26 * s:
+                sprite_h = 0
+        if sprite_h:
+            foot = y0 + pad + sprite_h
+            c.create_oval(cx - 30 * s, foot - 4 * s, cx + 30 * s, foot + 3 * s, fill="#23262f", outline="")
+            photo = self.sprite_photo(spec, int(sprite_h), int((x1 - x0) - 2 * pad - 2 * count_w))
+            if photo is not None:
+                c.create_image(cx, foot, anchor="s", image=photo)
+            y = foot + 6 * s
+            xr = x1 - pad
+        else:                                  # sem desenho: o texto fica no meio da altura
+            y = y0 + max(pad, ((y1 - y0) - text_h(n)) / 2)
+            xr = x1 - pad - (count_w + 6 * s if y < y0 + pad + 14 * s else 0)
+        self.center_text(cx, y + 8 * s, title.upper(), self.fonts["title"], col, x0 + pad, xr)
+        y += 22 * s
+        for text, fill in lines[:n]:
+            self.center_text(cx, y + 5 * s, text, self.fonts["small"], fill or CARD_DIM, x0 + pad, x1 - pad)
+            y += 14 * s
+        left = 1.0 - k / secs
+        c.create_line(x0 + 10 * s, y1 - 3 * s, x0 + 10 * s + (x1 - x0 - 20 * s) * left, y1 - 3 * s, fill=col,
+                      width=max(2, int(2 * s)))
+
+    def center_text(self, cx, cy, text, font, fill, xl, xr):
+        """Texto centrado em cx; se não couber entre xl e xr, encosta na esquerda e corta com reticências."""
+        c = self.canvas
+        tid = c.create_text(cx, cy, text=text, font=font, fill=fill)
+        b = c.bbox(tid)
+        if b[2] - b[0] > xr - xl or b[2] > xr:
+            c.itemconfigure(tid, anchor="w")
+            c.coords(tid, xl, cy)
+            self.clip_text(tid, text, xr)
+        return tid
+
+    def draw_boss_card(self):
+        """Cartão de 5 s do chefe: o que mudou (propriedade, imunidade, tamanho) com o que bater e o que evitar, ou a
+        mecânica que começou (Dor Máxima, Aliviar muito alto, defesa do Aquila)."""
+        if not self.boss_card:
+            return
+        d, shown = self.boss_card
+        dim = CARD_DIM
+        el = d.get("immune") or d.get("element") or (d.get("form_element") or (None, 1))[0]
+        level = 1 if d.get("element") or d.get("immune") else (d.get("form_element") or (None, 1))[1] or 1
+        mine = d.get("mine")
+        mech = MECH_CARDS.get(d.get("mech"))
+        lines = []
+        if mech:
+            sev = mech[1]
+            title = "%s: %s" % (d["name"], _(mech[0]))
+            lines = [(_(text), fill) for text, fill in mech[2]]
+            if d["mech"] == "maxpain_on" and d.get("hp"):
+                # o reflexo é ~11% do golpe: acima de HP ÷ 0,11 o próprio golpe mata quem bateu
+                lines.append((_("Golpe acima de %s te mata agora") % num(d["hp"] / analysis.MAXPAIN_RATIO[2]),
+                              "#fbbf24"))
+            elif d["mech"] == "defense" and d.get("job") in meter.DEF_BREAK_BOSSES:
+                lines.append((_("Falta éter verde para a defesa cair"), "#4ade80"))
+            elif d["mech"] == "relief":
+                lines.append(((_("%d almas ativas ou mais") if d.get("more") else _("%d almas ativas"))
+                              % d.get("souls", 0), "#fbbf24"))
+                lines.append((_("O chefe está levando %d%% a menos de dano") % d.get("pct", 0), dim))
+            el = None
+        elif d.get("immune"):
+            sev = "grave" if mine == d["immune"] else "atencao"      # grave quando é a propriedade do seu ataque
+            title = _("%s: imune a %s") % (d["name"], analysis.element_name(d["immune"]))
+        elif d.get("element"):
+            sev = "atencao"
+            title = _("%s virou %s") % (d["name"], analysis.element_name(d["element"]))
+        else:
+            sev = "atencao"
+            title = (_("%s ficou pequeno") if d.get("size") == "S" else _("%s ficou grande") if d.get("size") == "L"
+                     else _("%s ficou médio")) % d["name"]
+        if d.get("size") and d.get("prev_size"):
+            lines.append((_("Tamanho: %s (era %s)") % (_(SIZE_NAMES.get(d["size"], "?")),
+                                                       _(SIZE_NAMES.get(d["prev_size"], "?"))), dim))
+        if d.get("immune"):
+            lines.append((_("Golpes de %s não tiram dano") % analysis.element_name(d["immune"]), "#f87171"))
+        elif el:
+            if not d.get("element"):
+                lines.append((_("Propriedade: %s %d") % (analysis.element_name(el), level), dim))
+            best, avoid = analysis.element_advice(el, level)
+            if best:
+                lines.append((_("Bata com: %s") % " · ".join("%s %d%%" % (analysis.element_name(a), p)
+                                                             for a, p in best), "#4ade80"))
+            if avoid:
+                lines.append((_("Evite: %s") % " · ".join("%s %d%%" % (analysis.element_name(a), p)
+                                                         for a, p in avoid), "#f87171"))
+        if mine and (el or d.get("immune")):
+            if d.get("immune"):
+                pct = 0 if mine == d["immune"] else 100
+            else:
+                import dedoduro
+                pct = ((dedoduro.RATHENA.get("attr") or {}).get(str(level)) or {}).get(mine, {}).get(el)
+            if pct is not None:
+                lines.append((_("Seu ataque: %s → %d%%") % (analysis.element_name(mine), pct),
+                              "#f87171" if pct < 100 else ("#4ade80" if pct > 100 else dim)))
+        self.draw_card("bosscard", shown, BOSS_CARD_S, sev, title, lines, d.get("sprite"))
+
     def death_menu(self):
         """Botão direito no resumo da morte: fechar ou desligar de vez (volta pelo menu de opções)."""
         m = self.new_menu()
@@ -1831,8 +2247,33 @@ class DpsApp:
             "more": lambda: self.popup_at(target, self.main_menu),
             "view": lambda: self.popup_at(target, self.view_menu), "reset": self.reset, "chart": self.open_analysis,
             "prev": lambda: self.browse(1), "next": lambda: self.browse(-1), "where": self.copy_where,
+            "shot": self.copy_image,
         }
         actions[key]()
+
+    def copy_image(self):
+        """Copia o widget como imagem (para colar no Discord). Com "sem nomes", cada jogador aparece como a classe."""
+        import clipimg
+        cb = self.combat()
+        hide = bool(self.cfg.get("copy_hide_names")) and cb is not None
+        ok = False
+        try:
+            if hide:
+                meter.HIDE_NAMES = True
+                cb.version += 1
+            self.hover = None                     # sem o realce do botão que acabou de ser clicado
+            self.draw()
+            self.root.update_idletasks()
+            ok = clipimg.copy_window(self.hwnd)
+        except Exception:  # noqa: BLE001
+            self.log_error(*sys.exc_info())
+        finally:
+            if hide:
+                meter.HIDE_NAMES = False
+                cb.version += 1
+        self.alert = (_("Imagem copiada: cole com Ctrl+V") if ok else _("Não deu para copiar a imagem"), "info",
+                      time.time())
+        self.dirty = True
 
     def copy_where(self):
         """Copia o /navi de onde quem grava está (no formato do jogo: /navi mapa x/y)."""
@@ -1880,9 +2321,16 @@ class DpsApp:
         m.add_command(label=_("Zerar"), command=self.reset)
         m.add_separator()
         m.add_command(label=_("Análise completa…"), command=self.open_analysis)
+        m.add_command(label=_("Copiar a imagem do widget"), command=self.copy_image)
+        hide = self.keep(tk.BooleanVar(self.root, cfg["copy_hide_names"]))
+        m.add_checkbutton(label=_("Copiar imagem sem os nomes dos jogadores"), variable=hide,
+                          command=lambda: self.toggle_cfg("copy_hide_names"))
         for key, label in (("alert_buffs", _("Avisar quando um buff acabar na luta")),
                            ("alert_death", _("Avisar quando eu morrer (com overkill)")),
                            ("death_card", _("Mostrar o que me matou por 10 s (resumo da morte)")),
+                           ("alert_boss", _("Avisos do chefe: propriedade, tamanho e mecânicas (5 s)")),
+                           ("fight_summary", _("Resumo no fim da luta contra chefe (Dedo Duro)")),
+                           ("alert_rec", _("Lembrar quando o jogo está aberto sem gravar")),
                            ("alert_fusion", _("Avisar HP baixo com a União Solar (Mestre Taekwon)")),
                            ("alert_miracle", _("Festejar o Milagre Solar, Lunar e Estelar (Mestre Taekwon)")),
                            ("auto_tests", _("Salvar testes no boneco sozinho"))):
@@ -2030,6 +2478,11 @@ class DpsApp:
             moved = self.press_xy and abs(e.x_root - self.press_xy[0]) + abs(e.y_root - self.press_xy[1]) > 4
             if not moved and self.press_target and self.press_target[0] == "death":
                 self.close_death_card()
+            elif not moved and self.press_target and self.press_target[0] == "bosscard":
+                self.boss_card = None
+                self.dirty = True
+            elif not moved and self.press_target and self.press_target[0] == "summary":
+                self.open_summary()
             elif not moved and not self.watcher.folders:
                 self.pick_folder()
             else:
@@ -2044,6 +2497,10 @@ class DpsApp:
             self.popup(lambda: self.row_menu(tgt), e.x_root, e.y_root)
         elif tgt and tgt[0] == "death":
             self.popup(self.death_menu, e.x_root, e.y_root)
+        elif tgt and tgt[0] == "bosscard":
+            self.popup(self.boss_menu, e.x_root, e.y_root)
+        elif tgt and tgt[0] == "summary":
+            self.popup(self.summary_menu, e.x_root, e.y_root)
         else:
             self.popup(self.main_menu, e.x_root, e.y_root)
 
