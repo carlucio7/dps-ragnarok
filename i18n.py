@@ -1506,13 +1506,15 @@ CATALOG = {
     "XP acumulada": ("Total XP", "XP acumulada"),
     "Itens que caíram de monstros no recorte. \"Pego por\" vem da ação de pegar do jogo; quando ela não aparece, "
     "vale o item que entrou na bolsa de quem grava logo depois de sumir do chão. Botão direito num item: favoritar, "
-    "fixar no widget ou ocultar.": (
+    "fixar no widget, ocultar ou avisar quando cair (um som curto e o lugar do item no widget).": (
         "Items that dropped from monsters in the range. \"Picked by\" comes from the game's pick-up action; when it "
         "is missing, the item that entered the recorder's bag right after leaving the ground counts. Right-click an "
-        "item: favorite, pin to the widget or hide.",
+        "item: favorite, pin to the widget, hide or get an alert when it drops (a short sound and the item's place "
+        "on the widget).",
         "Objetos que soltaron los monstruos en el recorte. \"Recogido por\" viene de la acción de recoger del "
         "juego; cuando no aparece, cuenta el objeto que entró en la bolsa de quien graba justo después de "
-        "desaparecer del suelo. Clic derecho en un objeto: favorito, fijar en el widget u ocultar."),
+        "desaparecer del suelo. Clic derecho en un objeto: favorito, fijar en el widget, ocultar o avisar cuando "
+        "caiga (un sonido corto y el lugar del objeto en el widget)."),
     "Cores (clique para trocar):": ("Colors (click to change):", "Colores (clic para cambiar):"),
     "Tirar dos favoritos": ("Remove from favorites", "Quitar de favoritos"),
     "Favoritar (fica no topo)": ("Favorite (stays on top)", "Favorito (queda arriba)"),
@@ -1521,6 +1523,52 @@ CATALOG = {
     "Itens ocultos": ("Hidden items", "Objetos ocultos"),
     "Nenhum item oculto": ("No hidden items", "Ningún objeto oculto"),
     "Itens ocultos (%d) ▾": ("Hidden items (%d) ▾", "Objetos ocultos (%d) ▾"),
+    # aviso de item (item ping)
+    "Caiu: %s": ("Dropped: %s", "Cayó: %s"),
+    "Prêmio de MVP: %s": ("MVP reward: %s", "Premio de MVP: %s"),
+    "Ficou para trás: %s": ("Left behind: %s", "Quedó atrás: %s"),
+    "Copiar o /navi do item": ("Copy the item's /navi", "Copiar el /navi del objeto"),
+    "Parar de avisar deste item": ("Stop alerting for this item", "Dejar de avisar de este objeto"),
+    "Foi direto para a sua bolsa": ("It went straight to your bag", "Fue directo a tu bolsa"),
+    "Clique: copia o /navi para colar no jogo": ("Click: copies the /navi to paste in the game",
+                                                 "Clic: copia el /navi para pegar en el juego"),
+    "Some do chão quando o tempo acabar": ("It leaves the ground when the time runs out",
+                                           "Desaparece del suelo cuando se acabe el tiempo"),
+    "Parar de avisar quando cair": ("Stop alerting when it drops", "Dejar de avisar cuando caiga"),
+    "Avisar quando cair (som e lugar)": ("Alert when it drops (sound and place)", "Avisar cuando caiga (sonido y lugar)"),
+    "Tocar um som quando cair um item marcado": ("Play a sound when a marked item drops",
+                                                 "Tocar un sonido cuando caiga un objeto marcado"),
+    "Volume do aviso de item": ("Item alert volume", "Volumen del aviso de objeto"),
+    "Tom do aviso de item": ("Item alert tone", "Tono del aviso de objeto"),
+    "Grave": ("Low", "Grave"),
+    "Médio": ("Medium", "Medio"),
+    "Agudo": ("High", "Agudo"),
+    "Bem agudo": ("Very high", "Muy agudo"),
+    "Avisos de item (%d)…": ("Item alerts (%d)…", "Avisos de objeto (%d)…"),
+    "Avisos de item…": ("Item alerts…", "Avisos de objeto…"),
+    "Avisos de item": ("Item alerts", "Avisos de objeto"),
+    "Quando um item marcado cair, o widget toca um som curto e mostra onde ele caiu: um clique no cartão copia o "
+    "/navi para colar no jogo. Se você sair de perto sem pegar, o cartão volta até o item sumir do chão.": (
+        "When a marked item drops, the widget plays a short sound and shows where it fell: one click on the card "
+        "copies the /navi to paste in the game. If you leave without picking it up, the card comes back until the "
+        "item leaves the ground.",
+        "Cuando caiga un objeto marcado, el widget toca un sonido corto y muestra dónde cayó: un clic en la tarjeta "
+        "copia el /navi para pegar en el juego. Si te alejas sin recogerlo, la tarjeta vuelve hasta que el objeto "
+        "desaparezca del suelo."),
+    "Buscar item do jogo:": ("Search the game's items:", "Buscar objeto del juego:"),
+    "Avisar quando este item cair": ("Alert when this item drops", "Avisar cuando caiga este objeto"),
+    "Parar de avisar": ("Stop alerting", "Dejar de avisar"),
+    "Itens com aviso (%d):": ("Items with an alert (%d):", "Objetos con aviso (%d):"),
+    "Nenhum item com aviso ainda.": ("No items with an alert yet.", "Ningún objeto con aviso todavía."),
+    "Digite parte do nome (sem precisar de acentos) ou o número do item.": (
+        "Type part of the name (accents not needed) or the item number.",
+        "Escribe parte del nombre (sin necesidad de acentos) o el número del objeto."),
+    "%d itens": ("%d items", "%d objetos"),
+    "os primeiros 300: digite mais": ("the first 300: type more", "los primeros 300: escribe más"),
+    "Tocar som": ("Play sound", "Tocar sonido"),
+    "Volume:": ("Volume:", "Volumen:"),
+    "Tom:": ("Tone:", "Tono:"),
+    "Ouvir": ("Listen", "Escuchar"),
     "Gravação:": ("Recording:", "Grabación:"),
     "Esta gravação": ("This recording", "Esta grabación"),
     "A outra": ("The other", "La otra"),

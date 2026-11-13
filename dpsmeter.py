@@ -25,6 +25,7 @@ from tkinter import filedialog, messagebox
 import analysis
 import clientdata
 import itemkind
+import itemping
 import sprites
 import meter
 import quests
@@ -63,8 +64,12 @@ MIRACLE_FLASH_S = 9.0  # o widget brilha por esse tempo quando o Milagre ativa
 MIRACLE_BANNER_S = 6.0
 MIRACLE_COLORS = ("#fbbf24", "#fde68a", "#c084fc", "#f9a8d4", "#ffffff", "#a5b4fc")
 POLL_MS = 150         # ler o pedaço novo do arquivo custa < 1 ms
+XP_ROWS_S = 1.0       # as linhas da XP (aba e faixa fixa) são refeitas no máximo a cada tanto...
+XP_ROWS_COST = 20     # ...ou a cada 20× o que a conta levou, se ela ficar cara (sessão de muitas horas)
 DEATH_CARD_S = 10.0   # o resumo da morte fica no widget por esse tempo
 BOSS_CARD_S = 5.0     # o aviso de chefe que mudou (propriedade, imunidade, tamanho) fica esse tempo
+PING_CARD_S = 12.0    # o cartão do item marcado que caiu (com o lugar, para copiar o /navi) fica esse tempo
+PING_SOUND_GAP_S = 0.35   # dois itens marcados caindo juntos tocam o som uma vez só
 BOSS_MERGE_MS = 2000  # mudanças do mesmo chefe quase juntas viram um cartão só (ex.: volta a ser grande e vira Sombrio)
 SUMMARY_CARD_S = 14.0     # o resumo do fim da luta (conclusões do Dedo Duro) fica esse tempo
 SUMMARY_WAIT_MS = 2500    # depois da morte do chefe, espera os últimos pacotes da luta
@@ -133,6 +138,7 @@ HINTS = {
 # o que dá para fixar na faixa abaixo das abas (além dos itens da aba Drops)
 PIN_STATS = [("xp_min", _("XP por minuto")), ("xp_hour", _("XP por hora")), ("xp_total", _("XP estimada")),
              ("xp_eta", _("Até o próximo nível")), ("kills", _("Abates")), ("level", _("Nível"))]
+TONE_NAMES = {"grave": "Grave", "medio": "Médio", "agudo": "Agudo", "bem agudo": "Bem agudo"}
 PIN_LABELS = {"xp_min": _("XP/min"), "xp_hour": _("XP/h"), "xp_total": _("XP"), "xp_eta": _("Próx. nível"),
               "kills": _("Abates"), "level": _("Nível")}
 TABS = [("group", _("Grupo")), ("skills", _("Skills")), ("targets", _("Alvos")), ("drops", _("Drops")),
@@ -178,6 +184,10 @@ DEFAULTS = {
     "alert_rec": True,      # lembrar quando o jogo está aberto e nenhum replay está sendo gravado
     "rec_sound": False,     # ...com um som curto (uma vez)
     "copy_hide_names": False,   # "copiar imagem" troca os nomes dos jogadores pela classe
+    "ping_items": [],       # itens marcados para aviso: quando um cai, o widget mostra onde e toca um som curto
+    "ping_sound": True,     # ...com o som (sem item marcado, nada toca)
+    "ping_volume": 40,
+    "ping_tone": itemping.DEFAULT_TONE,   # tom do som: "grave", "medio", "agudo" ou "bem agudo"
 }
 
 
@@ -298,6 +308,11 @@ def play_beep(volume=40):
     play_wav(beep_wav, volume)
 
 
+def play_ping(volume=40, tone=None):
+    """Toca o aviso de item marcado, no tom escolhido."""
+    play_wav(lambda v: itemping.wav(v, tone), volume)
+
+
 def round_rect_pts(x1, y1, x2, y2, r):
     r = max(0.0, min(r, (x2 - x1) / 2, (y2 - y1) / 2))
     return [x1 + r, y1, x1 + r, y1, x2 - r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y1 + r,
@@ -408,6 +423,10 @@ class DpsApp:
         self.sprite_photos = {}       # (monstro, largura, altura) -> PhotoImage do sprite
         self.press_target = None
         self.alert_seen = 0
+        self._xp_rows = None          # (chave, até quando vale, linhas) da última conta da aba XP
+        self.pings = itemping.Tracker()   # itens marcados para aviso: os que caíram e ainda estão no chão
+        self.ping_card = None         # (item marcado que caiu e onde, quando apareceu)
+        self.ping_played = 0.0
 
         root.title(_("Replay Master"))
         root.report_callback_exception = self.log_error
@@ -616,6 +635,7 @@ class DpsApp:
         if f is not None and f.ready:
             f.combat.finished = not self.watcher.recording(now)
             self.check_alerts(f, now)
+            self.check_pings(f.combat, now)
             if now - self.xp_auto_at >= 3.0:
                 self.xp_auto_at = now
                 self.xp_auto(f.combat)
@@ -628,14 +648,15 @@ class DpsApp:
         self.phase = (self.phase + 1) % 8
         self.check_recording(now)
         if (now - self.miracle_at < MIRACLE_FLASH_S + 0.3 or self.death_card or self.boss_card
-                or self.summary_card):
+                or self.summary_card or self.ping_card):
             self.dirty = True
         if self.dirty or now - self.last_draw >= 1.0:
             try:
                 self.draw()
             except Exception:  # noqa: BLE001 - um erro ao desenhar não pode parar a leitura do replay
                 self.log_error(*sys.exc_info())
-        if self.analysis is not None:
+        if self.analysis is not None and not (self.drag or self.resize):
+            # arrastando ou redimensionando o widget, a análise espera: refazê-la prende a janela por um instante
             try:
                 self.analysis.tick()
             except Exception:  # noqa: BLE001
@@ -724,6 +745,122 @@ class DpsApp:
             self.summary_card = None
             self.dirty = True
         self.check_summary(c, now)
+
+    def ping_items(self):
+        """Os itens marcados para aviso."""
+        out = set()
+        for i in self.cfg.get("ping_items") or []:
+            try:
+                out.add(int(i))
+            except (TypeError, ValueError):
+                pass
+        return out
+
+    def toggle_ping(self, item):
+        """Marca ou desmarca o aviso de um item (botão direito no item, no widget ou na aba Drops da análise)."""
+        items = [i for i in (self.cfg.get("ping_items") or []) if isinstance(i, int)]
+        if item in items:
+            items.remove(item)
+            if self.ping_card and self.ping_card[0]["item"] == item:
+                self.ping_card = None
+        else:
+            items.append(item)
+        self.cfg["ping_items"] = items
+        self.save()
+        self.drops_changed()
+
+    def check_pings(self, c, now):
+        """Aviso de item: quando um item marcado cai, toca o som e mostra o cartão com o lugar. Se ele sair da
+        vista sem ser pego (telou sem querer, foi puxado), o cartão volta até o item sumir do chão."""
+        try:
+            events = self.pings.poll(c, self.ping_items(), self.watcher.recording(now))
+        except Exception:  # noqa: BLE001 - o aviso é um extra
+            self.log_error(*sys.exc_info())
+            events = []
+        for kind, info in events:
+            if kind in ("drop", "mvp", "left"):
+                self.show_ping(kind, info, c, now)
+            elif self.ping_card and self.ping_card[0].get("ref") is info:
+                self.ping_card = None             # pego (por você ou por outro) ou o tempo no chão acabou
+                self.dirty = True
+        if self.ping_card and now - self.ping_card[1] > self.ping_card[0]["secs"]:
+            self.ping_card = None
+            self.dirty = True
+
+    def show_ping(self, kind, info, c, now):
+        item = info["item"]
+        name = meter.item_name(item)
+        secs = PING_CARD_S
+        if kind == "left":                        # fica até o item sumir do chão
+            secs = max(6.0, min(60.0, (itemping.ITEM_LIFE_MS - (c.now - info["t"])) / 1000.0))
+        art = xp.GEAR.art.get(item)
+        spec = ("item", item, art) if art else None
+        try:
+            if spec:
+                sprites.MONSTERS.start(clientdata.NAMES.grf)
+                sprites.MONSTERS.image(spec)
+        except Exception:  # noqa: BLE001 - sem o desenho o cartão aparece do mesmo jeito
+            spec = None
+        self.ping_card = (dict(kind=kind, ref=info, item=item, name=name, count=info.get("count") or 1,
+                               map=info.get("map"), x=info.get("x"), y=info.get("y"), mob=info.get("mob"), secs=secs,
+                               sprite=spec), now)
+        text = {"drop": _("Caiu: %s"), "mvp": _("Prêmio de MVP: %s"), "left": _("Ficou para trás: %s")}[kind] % name
+        self.alert = (text, "info", now)
+        if self.cfg.get("ping_sound", True) and now - self.ping_played >= PING_SOUND_GAP_S:
+            self.ping_played = now
+            play_ping(self.cfg.get("ping_volume", 40), self.cfg.get("ping_tone"))
+        self.dirty = True
+
+    def copy_ping(self):
+        """Clique no cartão do item: copia o /navi do lugar onde ele caiu (para colar no jogo)."""
+        d = self.ping_card[0] if self.ping_card else None
+        cmd = itemping.navi(d)
+        if not cmd:
+            self.ping_card = None
+            self.dirty = True
+            return
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(cmd)
+        except tk.TclError:
+            return
+        self.alert = (_("Copiado: %s") % cmd, "info", time.time())
+        self.dirty = True
+
+    def ping_menu(self):
+        m = self.new_menu()
+        d = self.ping_card[0] if self.ping_card else None
+        if d and itemping.navi(d):
+            m.add_command(label=_("Copiar o /navi do item"), command=self.copy_ping)
+        m.add_command(label=_("Fechar este aviso"), command=lambda: (setattr(self, "ping_card", None),
+                                                                     setattr(self, "dirty", True)))
+        if d:
+            m.add_command(label=_("Parar de avisar deste item"), command=lambda: self.toggle_ping(d["item"]))
+        return m
+
+    def draw_ping_card(self):
+        """Cartão do item marcado que caiu: o lugar (mapa e coordenadas) e, com um clique, o /navi copiado para
+        colar no jogo. Em amarelo quando o item ficou para trás, até ele sumir do chão."""
+        if not self.ping_card:
+            return
+        d, shown = self.ping_card
+        where = "%s · %d/%d" % (d["map"], d["x"], d["y"]) if d.get("x") is not None and d.get("map") else None
+        name = d["name"] + (" ×%d" % d["count"] if d["count"] > 1 else "")
+        lines = []
+        if d["kind"] == "mvp":
+            sev, title = "bom", _("Prêmio de MVP: %s") % name
+            lines.append((_("Foi direto para a sua bolsa"), CARD_DIM))
+        else:
+            sev, title = ("atencao", _("Ficou para trás: %s") % name) if d["kind"] == "left" else (
+                "bom", _("Caiu: %s") % name)
+            if where:
+                lines.append((where, CARD_WHITE))
+                lines.append((_("Clique: copia o /navi para colar no jogo"), "#38bdf8"))
+            if d["kind"] == "left":
+                lines.append((_("Some do chão quando o tempo acabar"), CARD_DIM))
+            elif d.get("mob"):
+                lines.append((_("de %s") % d["mob"], CARD_DIM))
+        self.draw_card("ping", shown, d["secs"], sev, title, lines, d.get("sprite"))
 
     def check_summary(self, c, now):
         """O chefe morreu: depois dos últimos pacotes (ou de ver que não vem outra fase), mostra o resumo da luta."""
@@ -1013,9 +1150,12 @@ class DpsApp:
         # linhas (o resumo da morte fica por cima delas por alguns segundos)
         self.draw_rows(snap)
         if not self.death_card:
-            self.draw_boss_card()
-            if not self.boss_card:
-                self.draw_summary_card()
+            if self.ping_card:                    # o item marcado que caiu passa na frente dos outros avisos
+                self.draw_ping_card()
+            else:
+                self.draw_boss_card()
+                if not self.boss_card:
+                    self.draw_summary_card()
         self.draw_death()
 
         # rodapé
@@ -1396,8 +1536,10 @@ class DpsApp:
             top = max([r["mine"] + r["mvp"] for r in items] + [1])
             first = max(0, min(self.drop_scroll, len(items) - n))
             self.drop_scroll, self.drop_view = first, (first, n, len(items))
+            pings = self.ping_items()
             for r in items[first:first + n]:
-                rows.append(dict(label=r["name"], value="×%d" % (r["mine"] + r["mvp"]),
+                rows.append(dict(label=r["name"] + (" ♪" if r["item"] in pings else ""),
+                                 value="×%d" % (r["mine"] + r["mvp"]),
                                  right=_("prêmio de MVP") if r["mvp"] else "", frac=(r["mine"] + r["mvp"]) / float(top),
                                  me=True, item=r["item"], fav=r["item"] in favs, pin="item:%d" % r["item"],
                                  color=self.item_color(r["item"])))
@@ -1493,9 +1635,25 @@ class DpsApp:
         return mix(color, "#000000", 0.45) if luminance(self.t["bg"]) > 0.5 else color
 
     def xp_rows(self, cb):
-        """Linhas da aba XP (cada uma com a chave para fixar na faixa)."""
+        """Linhas da aba XP (cada uma com a chave para fixar na faixa). O widget se redesenha a cada leitura do
+        replay, mas a XP só muda a cada abate: a conta é refeita no máximo 1 vez por segundo (ou quando a visão ou
+        os bônus marcados mudam). Refazê-la a cada desenho era o que prendia o widget nas sessões longas."""
         if cb is None:
             return []
+        cfg = self.cfg
+        key = (id(cb), cfg["session"], self.enc_back, cfg.get("xp_mode"), cfg.get("xp_fixed"),
+               repr(cfg.get("xp_bonuses")), repr(cfg.get("xp_event_off")), len(cb.level_ups), len(cb.quests_done),
+               cb.finished, xp.GEAR.table is None, i18n.LANG)
+        now = time.monotonic()
+        hit = self._xp_rows
+        if hit and hit[0] == key and now < hit[1]:
+            return hit[2]
+        rows = self.xp_rows_now(cb)
+        cost = time.monotonic() - now
+        self._xp_rows = (key, now + cost + max(XP_ROWS_S, XP_ROWS_COST * cost), rows)
+        return rows
+
+    def xp_rows_now(self, cb):
         rng = self.view_rng(cb)
         est = xp.estimate(cb, self.cfg, rng)
         kind, _info = est["source"]
@@ -1739,8 +1897,34 @@ class DpsApp:
         sm.add_checkbutton(label=_("Tocar um som quando a gravação estiver desligada"), variable=var,
                            command=lambda: self.toggle_cfg("rec_sound"))
         sm.add_separator()
+        # aviso de item: som quando cai um item marcado (botão direito num item › Avisar quando cair)
+        play = lambda v: play_ping(v, self.cfg.get("ping_tone"))            # noqa: E731
+        var = self.keep(tk.BooleanVar(self.root, self.cfg["ping_sound"]))
+        sm.add_checkbutton(label=_("Tocar um som quando cair um item marcado"), variable=var,
+                           command=lambda: self.toggle_cfg("ping_sound"))
+        vm = self.new_menu(sm)
+        vvar = self.keep(tk.IntVar(self.root, self.cfg["ping_volume"]))
+        for v in itemping.VOLUMES:
+            vm.add_radiobutton(label="%d%%" % v, variable=vvar, value=v,
+                               command=lambda v=v: self.set_volume("ping_volume", v, play))
+        vm.add_separator()
+        vm.add_command(label=_("Tocar o som agora"), command=lambda: play(self.cfg["ping_volume"]))
+        sm.add_cascade(label=_("Volume do aviso de item"), menu=vm)
+        tm = self.new_menu(sm)
+        tvar = self.keep(tk.StringVar(self.root, self.cfg.get("ping_tone") or itemping.DEFAULT_TONE))
+        for tone, hz in itemping.TONES:
+            tm.add_radiobutton(label="%s (%d Hz)" % (_(TONE_NAMES[tone]), hz), variable=tvar, value=tone,
+                               command=lambda tone=tone: self.set_ping_tone(tone))
+        sm.add_cascade(label=_("Tom do aviso de item"), menu=tm)
+        sm.add_separator()
         sm.add_command(label=_("Os sons só tocam com o aviso do Milagre ou da União ligado."), state="disabled")
         return sm
+
+    def set_ping_tone(self, tone):
+        """Troca o tom do aviso de item e toca para a pessoa ouvir."""
+        self.cfg["ping_tone"] = tone
+        self.save()
+        play_ping(self.cfg.get("ping_volume", 40), tone)
 
     def row_menu(self, target):
         """Botão direito numa linha das abas XP e Drops (ou na faixa fixa)."""
@@ -1760,6 +1944,8 @@ class DpsApp:
                 fav = item in (self.cfg.get("drop_favs") or [])
                 m.add_command(label=_("Tirar dos favoritos") if fav else _("Favoritar (fica no topo)"),
                               command=lambda: self.toggle_fav(item))
+                m.add_command(label=_("Parar de avisar quando cair") if item in self.ping_items()
+                              else _("Avisar quando cair (som e lugar)"), command=lambda: self.toggle_ping(item))
                 m.add_separator()
                 m.add_command(label=_("Ocultar até fechar o programa"), command=lambda: self.hide_item(item, False))
                 m.add_command(label=_("Ocultar sempre"), command=lambda: self.hide_item(item, True))
@@ -1823,7 +2009,8 @@ class DpsApp:
                 c.itemconfigure("hover_%s_bg" % key, fill=shade(base, 0.12))
         cursor = ""
         if tgt:
-            cursor = {"btn": "hand2", "tab": "hand2", "fav": "hand2", "grip": "size_nw_se"}.get(tgt[0], "")
+            cursor = {"btn": "hand2", "tab": "hand2", "fav": "hand2", "ping": "hand2",
+                      "grip": "size_nw_se"}.get(tgt[0], "")
         c.configure(cursor=cursor)
 
     # ------------------------------------------------------------ ações
@@ -2483,6 +2670,8 @@ class DpsApp:
                 self.dirty = True
             elif not moved and self.press_target and self.press_target[0] == "summary":
                 self.open_summary()
+            elif not moved and self.press_target and self.press_target[0] == "ping":
+                self.copy_ping()
             elif not moved and not self.watcher.folders:
                 self.pick_folder()
             else:
@@ -2501,6 +2690,8 @@ class DpsApp:
             self.popup(self.boss_menu, e.x_root, e.y_root)
         elif tgt and tgt[0] == "summary":
             self.popup(self.summary_menu, e.x_root, e.y_root)
+        elif tgt and tgt[0] == "ping":
+            self.popup(self.ping_menu, e.x_root, e.y_root)
         else:
             self.popup(self.main_menu, e.x_root, e.y_root)
 

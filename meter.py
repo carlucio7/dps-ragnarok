@@ -445,8 +445,10 @@ MECH_REPEAT_MS = 3000         # o mesmo aviso do mesmo chefe não repete antes d
 MAXPAIN_ATK = 717             # o reflexo da Dor Máxima; sem o status no chefe, ele a usou fora da tela
 MAXPAIN_GUESS_MS = 12000      # a Dor Máxima dura 10 s: reflexo depois disso já é outro uso
 SELF_DESTRUCT = 173           # Autodestruição (os Robovacs do Aquila tiram HP fixo, sem pacote de dano)
-# anúncios da sala do Aquila (chave do texto, igual em todo idioma): o éter amarelo acabou / foi fornecido
-ROOM_KEYS = {"ni0XDg": ("overload", True), "nS0XDg": ("overload", False)}
+# anúncios da sala do Aquila (chave do texto, igual em todo idioma): o éter amarelo acabou / foi fornecido, e a
+# recarga do éter verde terminou (a defesa do núcleo some por 5 s: a quebra de defesa)
+ROOM_KEYS = {"ni0XDg": ("overload", True), "nS0XDg": ("overload", False), "my0XDg": ("defbreak", True)}
+DEF_BREAK_SAME_MS = 2000      # o mesmo anúncio repetido em menos que isso é a mesma quebra
 HATE_SKILL = 434              # Oposição Solar, Lunar e Estelar: o nível do uso diz a casa (1, 2, 3)
 HIDE_NAMES = False            # ligado só enquanto se copia uma imagem sem nomes: cada jogador aparece como a classe
 BOSS_ALERT_HP = 50000000      # sem marca de MVP, só avisa de chefe com pelo menos isto de HP na tabela
@@ -571,6 +573,7 @@ class Combat:
         self._last_xy = {}            # monstro à vista -> último pacote de posição: (pid, bytes) ou (None, (x, y))
         self.booms = []               # (t, monstro, (x, y) ou None) de cada Autodestruição
         self.overloads = []           # [começo, fim ou None] da sobrecarga do Aquila, pelos anúncios da sala
+        self.def_breaks = []          # instantes das quebras de defesa do Aquila, pelos anúncios da sala
         self.sight = collections.defaultdict(list)   # chefe -> [(t, à vista?)]: o golpe de fora da tela não chega
         self._relieve_base = {}       # chefe -> Alívio (%) com que apareceu (o nível sem nenhuma Alma)
         self._relieve_last = {}       # chefe -> último Alívio (%) visto
@@ -1065,8 +1068,13 @@ class Combat:
         return mv[1] if mv is not None else None
 
     def on_room(self, t, kind, on):
-        """Anúncio da sala do Aquila: a sobrecarga começou (éter amarelo acabou) ou terminou. Chega a qualquer
-        distância, ao contrário da troca de forma do chefe."""
+        """Anúncio da sala do Aquila: a sobrecarga começou (éter amarelo acabou) ou terminou, ou a defesa do núcleo
+        caiu. Chega a qualquer distância, ao contrário da troca de forma do chefe e das skills dele."""
+        if kind == "defbreak":
+            if not self.def_breaks or t - self.def_breaks[-1] > DEF_BREAK_SAME_MS:
+                self.def_breaks.append(t)
+                self.version += 1
+            return
         if kind != "overload":
             return
         last = self.overloads[-1] if self.overloads else None
@@ -1075,6 +1083,10 @@ class Combat:
             self.version += 1
         elif not on and last is not None and last[1] is None:
             last[1] = t
+            self.version += 1
+        elif not on and last is None:
+            # a gravação começou com a sobrecarga já ligada: ela vale desde o começo
+            self.overloads.append([0, t])
             self.version += 1
 
     def overload_at(self, t):
@@ -1181,11 +1193,12 @@ class Combat:
                 self._alerted[efst] = t
                 self.alert(t, "buff", _("%s acabou") % status_name(efst))
 
-    def lasting(self, efst):
+    def lasting(self, efst, sts=None):
         """[(início, fim)] de um status de quem grava que não acaba com a morte (VIP, manuais, Milagre...):
-        vale pela duração que o jogo mandou, não até a morte (o medidor encerra tudo quando alguém morre)."""
+        vale pela duração que o jogo mandou, não até a morte (o medidor encerra tudo quando alguém morre).
+        `sts`: os status de quem grava, se quem chama já os tem à mão."""
         out = []
-        for a, ef, st, e in self.statuses(self.me):
+        for a, ef, st, e in (self.statuses(self.me) if sts is None else sts):
             if ef != efst:
                 continue
             ln = self.status_len.get((a, ef, st))
@@ -1935,6 +1948,7 @@ class Watcher:
 
     ACTIVE_S = 15.0     # arquivo modificado ha menos que isso = gravando
     FIND_S = 30.0       # de quanto em quanto tempo procura instalações novas
+    FULL_SCAN_S = 2.0   # de quanto em quanto tempo confere todos os .rrf (não só o aberto e os que apareceram)
 
     def __init__(self, folder=None, gap_ms=10000, targets="all", auto=True):
         self.targets = targets
@@ -1948,6 +1962,9 @@ class Watcher:
         self.pinned = False           # True quando o usuario abriu um arquivo manualmente
         self.known = {}
         self.last_change = 0.0
+        self._seen = {}               # pasta -> nomes de .rrf já conferidos
+        self._active = set()          # arquivos que estavam sendo escritos na última varredura
+        self._next_full = 0.0
 
     def open(self, path):
         self.file = ReplayFile(path, self.gap_ms, self.targets)
@@ -1982,23 +1999,43 @@ class Watcher:
         self.follow()
 
     def scan(self, now):
-        best = None
+        """A gravação a seguir: a que começou a ser escrita por último. Com duas gravações ao mesmo tempo (dois
+        clientes abertos), fica na que já está aberta até outra começar: antes o medidor pulava de uma para a outra
+        a cada leitura e relia o arquivo inteiro toda vez, cada vez mais devagar. Quem tem centenas de replays na
+        pasta também pagava caro: agora só o arquivo aberto e os que apareceram são conferidos a cada leitura, e
+        todos a cada FULL_SCAN_S."""
+        full = now >= self._next_full or now < self._next_full - self.FULL_SCAN_S
+        if full:
+            self._next_full = now + self.FULL_SCAN_S
+        cur = os.path.normcase(self.file.path) if self.file is not None and not self.pinned else None
+        active = {}                                   # caminho -> (modificado em, caminho) dos que estão em curso
         for folder in self.folders:
             try:
                 files = os.listdir(folder)
             except OSError:
                 continue                              # pasta que o jogo ainda não criou
+            seen = self._seen.setdefault(folder, set())
             for f in files:
                 if not f.lower().endswith(".rrf"):
                     continue
                 p = os.path.join(folder, f)
+                key = os.path.normcase(p)
+                if not full and f in seen and key != cur and key not in self._active:
+                    continue                          # já conferido e parado: de novo só na varredura completa
+                seen.add(f)
                 try:
                     st = os.stat(p)
                 except OSError:
                     continue
-                if now - st.st_mtime <= self.ACTIVE_S and (best is None or st.st_mtime > best[1]):
-                    best = (p, st.st_mtime)
-        return best[0] if best else None
+                if now - st.st_mtime <= self.ACTIVE_S:
+                    active[key] = (st.st_mtime, p)
+        started = [v for k, v in active.items() if k not in self._active]
+        self._active = set(active)
+        if started:
+            return max(started)[1]                    # uma gravação começou agora
+        if cur in active:
+            return active[cur][1]                     # segue na que já está aberta
+        return max(active.values())[1] if active else None
 
     def poll(self, now):
         """Devolve True se houve dado novo."""

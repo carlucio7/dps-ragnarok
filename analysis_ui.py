@@ -19,6 +19,7 @@ import clientdata
 import contrib
 import dedoduro as dd
 import itemkind
+import itemping
 import clipimg
 import meter
 import quests
@@ -41,6 +42,10 @@ SESSION, LATEST = _("Sessão inteira"), _("Último encontro (acompanha)")
 ZOOMS = (0.8, 0.9, 1.0, 1.1, 1.25, 1.4, 1.6)
 # abas pelo nome (a configuração antiga guardava a posição, na ordem de OLD_TABS)
 TABS = ["resumo", "jogadores", "equip", "monstros", "drops", "xp", "dps", "linha", "buffs", "mortes", "testes", "dedo"]
+# ao vivo, a aba à vista é refeita com dados novos no máximo a cada LIVE_MIN_S, ou a cada LIVE_COST × o que levou
+# para refazer (até LIVE_MAX_S): uma aba que leva 0,5 s numa sessão longa passa a ser refeita a cada 6 s
+LIVE_MIN_S, LIVE_COST, LIVE_MAX_S = 1.0, 12, 30.0
+TONE_LABELS = {"grave": "Grave", "medio": "Médio", "agudo": "Agudo", "bem agudo": "Bem agudo"}   # tom do aviso de item
 OLD_TABS = ["resumo", "jogadores", "monstros", "dps", "buffs", "mortes", "testes", "dedo"]
 FONT_PT = dict(text=10, small=9, head=10, title=13, big=15, tile=17)
 
@@ -80,6 +85,8 @@ class Table:
         self.swatch = swatch
         self.sort = None                     # (chave, decrescente)
         self.rows = {}
+        self._shown = {}                     # linha na tela -> (valores, marcas, imagem): só mexe no que mudou
+        self._order = []                     # as linhas na ordem em que estão na tela
         self.key_fn = lambda r: id(r)
         self.tag_fn = self.color_fn = None
         frame = tk.Frame(parent, bg=win.c["panel"])
@@ -149,24 +156,46 @@ class Table:
             if self.sort and self.sort[0] == key:
                 arrow = " ▼" if self.sort[1] else " ▲"
             self.tree.heading(key, text=title + arrow)
-        tree = self.tree
+        try:
+            self._fill(rows)
+        except tk.TclError:                  # a tela não estava como o guardado: monta a tabela do zero
+            self.tree.delete(*self.tree.get_children())
+            self._shown, self._order = {}, []
+            self._fill(rows)
+
+    def _fill(self, rows):
+        """Põe as linhas na tela mexendo só no que mudou. Uma tabela de milhares de linhas (os eventos de uma
+        sessão longa) era regravada inteira a cada atualização, três chamadas ao Tk por linha: levava segundos."""
+        tree, shown = self.tree, self._shown
         want = [str(self.key_fn(r)) for r in rows]
-        for iid in set(tree.get_children()) - set(want):
-            tree.delete(iid)
+        keep = set(want)
+        gone = [iid for iid in shown if iid not in keep]
+        if gone:
+            tree.delete(*gone)
+            for iid in gone:
+                del shown[iid]
+        kept = [iid for iid in self._order if iid in shown]
+        in_place = want[:len(kept)] == kept  # as que ficam seguem na mesma ordem: as novas entram no fim
+        self._order = want
         for i, (iid, r) in enumerate(zip(want, rows)):
-            values = [_fmt(kind, r.get(key)) for key, _t, _w, _a, kind in self.columns]
+            values = tuple(_fmt(kind, r.get(key)) for key, _t, _w, _a, kind in self.columns)
             tags = ["odd"] if i % 2 else []
             if self.tag_fn:
                 tags += self.tag_fn(r)
             kw = dict(values=values, tags=tags)
+            image = None
             if self.swatch and self.color_fn:
-                kw["image"] = self.win.swatch(self.color_fn(r))
-            if tree.exists(iid):
-                tree.item(iid, **kw)
-                if tree.index(iid) != i:
-                    tree.move(iid, "", i)
+                image = kw["image"] = self.win.swatch(self.color_fn(r))
+            state = (values, tuple(tags), str(image) if image is not None else None)
+            old = shown.get(iid)
+            if old is None:
+                tree.insert("", "end" if in_place else i, iid=iid, **kw)
             else:
-                tree.insert("", i, iid=iid, **kw)
+                if old != state:
+                    tree.item(iid, **kw)
+                if not in_place and tree.index(iid) != i:
+                    tree.move(iid, "", i)
+            shown[iid] = state
 
     def selected(self):
         sel = self.tree.selection()
@@ -645,6 +674,7 @@ class AnalysisWindow:
         self.tables = []
         self._swatches = {}
         self._last = 0.0
+        self._next = 0.0                     # ao vivo, a próxima atualização automática só depois disto
         t = app.theme()
         bg = t["bg"]
         dark = _lum(bg) < 0.5
@@ -1188,7 +1218,8 @@ class AnalysisWindow:
         self.drop_tiles.pack(fill="x", padx=10, pady=(10, 0))
         self.label(tab, _("Itens que caíram de monstros no recorte. \"Pego por\" vem da ação de pegar do jogo; quando "
                           "ela não aparece, vale o item que entrou na bolsa de quem grava logo depois de sumir do "
-                          "chão. Botão direito num item: favoritar, fixar no widget ou ocultar."), "small", "muted",
+                          "chão. Botão direito num item: favoritar, fixar no widget, ocultar ou avisar quando cair "
+                          "(um som curto e o lugar do item no widget)."), "small", "muted",
                    "panel", anchor="w", justify="left", wraplength=1100).pack(fill="x", padx=12, pady=(6, 2))
         legend = tk.Frame(tab, bg=c["panel"])
         legend.pack(fill="x", padx=12, pady=(2, 2))
@@ -1234,8 +1265,12 @@ class AnalysisWindow:
             ("where", _("Onde"), 70, "w", "text"), ("fate", _("Destino"), 140, "w", "text")], height=6)
         self.t_drop_ground.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         f, _lbl = box(1, 1, _("Por item"))
+        # avisos de item: a coluna ♪ marca os que já caíram; o botão abre a busca na lista de itens do jogo
+        self.drop_ping_btn = ttk.Button(f, text="", style="An.TButton", command=self.open_pings)
+        self.drop_ping_btn.place(relx=1.0, x=-6, y=2, anchor="ne")
         self.t_drop_items = Table(f, self, [
-            ("star", "★", 34, "center", "text"), ("name", _("Item"), 200, "w", "text"),
+            ("star", "★", 34, "center", "text"), ("ping", "♪", 30, "center", "text"),
+            ("name", _("Item"), 200, "w", "text"),
             ("fell", _("Caíram"), 70, "e", "int"), ("mine", _("Você pegou"), 90, "e", "int"),
             ("mvp", _("MVP"), 50, "e", "int")], height=6)
         self.t_drop_items.pack(fill="both", expand=True, padx=6, pady=(0, 6))
@@ -1316,6 +1351,8 @@ class AnalysisWindow:
         m.add_separator()
         m.add_command(label=_("Tirar dos favoritos") if fav else _("Favoritar (fica no topo)"),
                       command=lambda: app.toggle_fav(item))
+        m.add_command(label=_("Parar de avisar quando cair") if item in app.ping_items()
+                      else _("Avisar quando cair (som e lugar)"), command=lambda: app.toggle_ping(item))
         pin = "item:%d" % item
         m.add_command(label=_("Desafixar do widget") if pin in (app.cfg.get("pins") or []) else _("Fixar no widget"),
                       command=lambda: app.toggle_pin_stat(pin))
@@ -1385,16 +1422,24 @@ class AnalysisWindow:
         self.t_drop_ground.set_rows(ground_rows, lambda r: r["key"], self.drop_tags)
         marked = self.app.cfg.get("drop_favs") or []
         favs = set(marked)
+        pings = self.app.ping_items()
+        self.drop_ping_btn.configure(text=(_("Avisos de item (%d)…") % len(pings)) if pings else _("Avisos de item…"))
+        dlg = getattr(self, "ping_dlg", None)
+        if dlg is not None and dlg.winfo_exists():        # a janela dos avisos aberta mostra a lista de agora
+            self.ping_fill()
         for r in items:
             r["star"] = "★" if r["item"] in favs else "☆"
+            r["ping"] = "♪" if r["item"] in pings else "·"
         items = itemkind.favorites_first(items, marked)       # favoritos no topo, na ordem em que foram marcados
         self.t_drop_items.set_rows(items, lambda r: r["item"],
                                    lambda r: self.drop_tags(r) or (["me"] if r["mine"] else []))
 
     def drop_star_click(self, e):
-        """Clique na estrela de "Por item": marca/desmarca o favorito (o widget usa a mesma lista)."""
+        """Clique na estrela de "Por item": marca/desmarca o favorito (o widget usa a mesma lista). Na coluna ♪:
+        marca/desmarca o aviso de quando o item cair."""
         tree = self.t_drop_items.tree
-        if tree.identify_column(e.x) != "#1":
+        col = tree.identify_column(e.x)
+        if col not in ("#1", "#2"):
             return None
         row = tree.identify_row(e.y)
         if not row:
@@ -1403,8 +1448,160 @@ class AnalysisWindow:
             item = int(row)
         except ValueError:
             return None
-        self.app.toggle_fav(item)
+        if col == "#1":
+            self.app.toggle_fav(item)
+        else:
+            self.app.toggle_ping(item)
         return "break"
+
+    def open_pings(self):
+        """Janela "Avisos de item": busca na lista de itens do jogo, os itens marcados e as opções do som."""
+        old = getattr(self, "ping_dlg", None)
+        if old is not None and old.winfo_exists():
+            old.lift()
+            return
+        app, c = self.app, self.c
+        dlg = self.ping_dlg = tk.Toplevel(self.top)
+        dlg.title(_("Avisos de item"))
+        dlg.configure(bg=c["panel"])
+        dlg.transient(self.top)
+        box = tk.Frame(dlg, bg=c["panel"], padx=14, pady=12)
+        box.pack(fill="both", expand=True)
+        self.label(box, _("Quando um item marcado cair, o widget toca um som curto e mostra onde ele caiu: um clique "
+                          "no cartão copia o /navi para colar no jogo. Se você sair de perto sem pegar, o cartão volta "
+                          "até o item sumir do chão."), "small", "muted", "panel", anchor="w", justify="left",
+                   wraplength=560).pack(fill="x")
+        row = tk.Frame(box, bg=c["panel"])
+        row.pack(fill="x", pady=(10, 2))
+        self.label(row, _("Buscar item do jogo:"), bg="panel").pack(side="left")
+        query = tk.StringVar(dlg, "")
+        entry = tk.Entry(row, textvariable=query, font=self.f["text"], bg=c["btn"], fg=c["fg"],
+                         insertbackground=c["fg"], relief="flat")
+        entry.pack(side="left", fill="x", expand=True, padx=(8, 0), ipady=3)
+        hint = self.label(box, "", "small", "muted", "panel", anchor="w")
+        hint.pack(fill="x")
+
+        def listbox(height):
+            frame = tk.Frame(box, bg=c["panel"])
+            lb = tk.Listbox(frame, height=height, font=self.f["text"], bg=c["btn"], fg=c["fg"], relief="flat",
+                            selectbackground=c["accent"], selectforeground=c["bg"], highlightthickness=0,
+                            activestyle="none", exportselection=False)
+            sb = ttk.Scrollbar(frame, orient="vertical", command=lb.yview, style="An.Vertical.TScrollbar")
+            lb.configure(yscrollcommand=sb.set)
+            lb.pack(side="left", fill="both", expand=True)
+            sb.pack(side="right", fill="y")
+            return frame, lb
+        frame, found = listbox(9)
+        frame.pack(fill="both", expand=True, pady=(2, 4))
+        add_btn = ttk.Button(box, text=_("Avisar quando este item cair"), style="An.TButton")
+        add_btn.pack(anchor="e")
+        marked_lbl = self.label(box, "", bg="panel", anchor="w")
+        marked_lbl.pack(fill="x", pady=(10, 2))
+        frame, marked = listbox(6)
+        frame.pack(fill="both", expand=True, pady=(0, 4))
+        del_btn = ttk.Button(box, text=_("Parar de avisar"), style="An.TButton")
+        del_btn.pack(anchor="e")
+        state = dict(found=[], marked=[], job=None)
+
+        def fill_marked():
+            ids = [i for i in (app.cfg.get("ping_items") or []) if isinstance(i, int)]
+            state["marked"] = ids
+            marked.delete(0, "end")
+            for i in ids:
+                marked.insert("end", "%s  (%d)" % (meter.item_name(i), i))
+            marked_lbl.configure(text=(_("Itens com aviso (%d):") % len(ids)) if ids else
+                                 _("Nenhum item com aviso ainda."))
+
+        def run_search():
+            state["job"] = None
+            if not dlg.winfo_exists():
+                return
+            text = query.get().strip()
+            rows = itemping.search(text, 300) if text else []
+            if itemping.loading():                       # a lista do jogo ainda está sendo lida
+                hint.configure(text=_("lendo os itens do jogo…"))
+                state["job"] = dlg.after(500, run_search)
+            elif not text:
+                hint.configure(text=_("Digite parte do nome (sem precisar de acentos) ou o número do item."))
+            else:
+                hint.configure(text=(_("%d itens") % len(rows)) if len(rows) < 300 else _("os primeiros 300: digite mais"))
+            state["found"] = rows
+            found.delete(0, "end")
+            for i, name in rows:
+                found.insert("end", "%s  (%d)" % (name, i))
+
+        def search_soon(*_a):
+            if state["job"] is not None:
+                dlg.after_cancel(state["job"])
+            state["job"] = dlg.after(180, run_search)
+
+        def add(_e=None):
+            sel = found.curselection()
+            if not sel:
+                return
+            item = state["found"][sel[0]][0]
+            if item not in app.ping_items():
+                app.toggle_ping(item)
+            fill_marked()
+
+        def remove(_e=None):
+            sel = marked.curselection()
+            if not sel:
+                return
+            item = state["marked"][sel[0]]
+            if item in app.ping_items():
+                app.toggle_ping(item)
+            fill_marked()
+        query.trace_add("write", search_soon)
+        add_btn.configure(command=add)
+        del_btn.configure(command=remove)
+        found.bind("<Double-Button-1>", add)
+        found.bind("<Return>", add)
+        marked.bind("<Double-Button-1>", remove)
+        marked.bind("<Delete>", remove)
+        # som: liga/desliga, volume e tom, com um botão para ouvir
+        snd = tk.Frame(box, bg=c["panel"])
+        snd.pack(fill="x", pady=(12, 0))
+        on = tk.BooleanVar(dlg, bool(app.cfg.get("ping_sound", True)))
+        tones = [(_(TONE_LABELS[t]), t) for t, _hz in itemping.TONES]
+        tone = tk.StringVar(dlg, next((lbl for lbl, t in tones if t == app.cfg.get("ping_tone")), tones[1][0]))
+        vol = tk.StringVar(dlg, "%d%%" % app.cfg.get("ping_volume", 40))
+
+        def save_sound(play=False):
+            app.cfg["ping_sound"] = bool(on.get())
+            app.cfg["ping_tone"] = dict(tones).get(tone.get(), itemping.DEFAULT_TONE)
+            try:
+                app.cfg["ping_volume"] = max(0, min(100, int(vol.get().strip("% "))))
+            except ValueError:
+                pass
+            app.save()
+            if play:
+                self.play_ping()
+        tk.Checkbutton(snd, text=_("Tocar som"), variable=on, command=save_sound, bg=c["panel"], fg=c["fg"],
+                       selectcolor=c["btn"], activebackground=c["panel"], activeforeground=c["fg"],
+                       font=self.f["text"], highlightthickness=0).pack(side="left")
+        self.label(snd, _("Volume:"), bg="panel").pack(side="left", padx=(14, 4))
+        vb = ttk.Combobox(snd, textvariable=vol, values=["%d%%" % v for v in itemping.VOLUMES], state="readonly",
+                          width=6, style="An.TCombobox", font=self.f["text"])
+        vb.pack(side="left")
+        self.label(snd, _("Tom:"), bg="panel").pack(side="left", padx=(14, 4))
+        tb = ttk.Combobox(snd, textvariable=tone, values=[lbl for lbl, _t in tones], state="readonly", width=11,
+                          style="An.TCombobox", font=self.f["text"])
+        tb.pack(side="left")
+        vb.bind("<<ComboboxSelected>>", lambda e: save_sound(True))
+        tb.bind("<<ComboboxSelected>>", lambda e: save_sound(True))
+        ttk.Button(snd, text=_("Ouvir"), style="An.TButton", command=lambda: save_sound(True)).pack(side="left", padx=(10, 0))
+        ttk.Button(snd, text=_("Fechar"), style="An.TButton", command=dlg.destroy).pack(side="right")
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+        fill_marked()
+        run_search()
+        self.ping_fill = fill_marked
+        entry.focus_set()
+
+    def play_ping(self):
+        """Toca o aviso de item com o volume e o tom escolhidos (o som é o do widget)."""
+        import dpsmeter
+        dpsmeter.play_ping(self.app.cfg.get("ping_volume", 40), self.app.cfg.get("ping_tone"))
 
     # ------------------------------------------------------------ XP
 
@@ -2116,15 +2313,37 @@ class AnalysisWindow:
         self.refresh(force=True)
 
     def tick(self):
-        """Chamado pelo widget a cada leitura; redesenha no máximo 1x por segundo."""
+        """Chamado pelo widget a cada leitura do replay. Com dados novos, refaz a aba no máximo 1 vez por segundo,
+        e mais devagar quando refazer custa caro (numa sessão de horas, algumas abas levam mais de 1 s): o widget e
+        a própria janela continuam respondendo. Minimizada, não refaz nada; atualiza quando voltar. O que a pessoa
+        muda (aba, luta, grupo) continua valendo na hora."""
         c = self.combat()
         live = c is not None and c.active()
         sig = (id(c), c.version if c else None, self.scope_var.get(), self.group_var.get(),
                len(self.app.tests.records))
-        if sig != self.sig or (live and time.monotonic() - self._last >= 1.0):
-            self.refresh()
+        now = time.monotonic()
+        if sig == self.sig and not (live and now - self._last >= 1.0):
+            return
+        only_data = self.sig is not None and sig[0] == self.sig[0] and sig[2:] == self.sig[2:]
+        if only_data and now < self._next:
+            return
+        try:
+            if self.top.state() in ("iconic", "withdrawn"):
+                return
+        except tk.TclError:
+            return
+        self.refresh()
 
     def refresh(self, force=False):
+        """Refaz a aba à vista e anota quanto levou, para o tick dosar a próxima atualização ao vivo."""
+        t0 = time.monotonic()
+        try:
+            return self._refresh(force)
+        finally:
+            end = time.monotonic()
+            self._next = end + min(LIVE_MAX_S, max(LIVE_MIN_S, LIVE_COST * (end - t0)))
+
+    def _refresh(self, force=False):
         self._last = time.monotonic()
         c = self.combat()
         if c is not None and id(c) != self.combat_id:

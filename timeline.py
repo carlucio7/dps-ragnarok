@@ -63,8 +63,8 @@ def build(c, key, rng=None):
     mob = e.job if e is not None else 0
     model = an.BOSS_MODEL.get(mob) if x.hp_table else None
     regen = (an.boss_regen(model, mob, x.hp) if model else an.BOSS_REGEN.get(mob, 0)) if x.hp_table else 0
-    wins = an.form_windows(c, x.boss_aids, model["form"], x.start, x.end) if model else None
-    hidden = an.hidden_hits(c, x.boss_aids, model["hidden_skills"], x.start, x.end) if model else []
+    wins = an.regen_windows(c, x.boss_aids, model, x.start, x.end) if model else None
+    hidden = an.hidden_losses(c, x.boss_aids, model, x.start, x.end) if model else []
 
     def gained(a, b):                      # regeneração entre a e b (só dentro das janelas, se houver)
         if wins is None:

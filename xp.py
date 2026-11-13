@@ -16,12 +16,14 @@ O replay não grava a XP ganha: só a XP total no início de cada gravação (se
   é conhecida). Gravações curtas não calibram, e cada medida pesa pela XP que ela cobre.
 """
 
+import bisect
 import datetime
 import json
 import os
 import re
 import sys
 import threading
+import weakref
 
 _DATA = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))), "data")
 
@@ -74,17 +76,56 @@ def penalty(diff):
 _CACHE = {}
 
 
+def _names_version():
+    try:
+        import clientdata
+        return clientdata.NAMES.version
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _kill_state(c):
+    """Os abates da gravação, refeitos só quando chega algo novo. O dano em cada monstro é somado aos poucos (só
+    os golpes que ainda não entraram): numa sessão longa, reler todos os golpes a cada desenho travava o widget."""
+    st = _CACHE.get("k")
+    hits = c.hits
+    first = hits[0] if hits else None
+    names = _names_version()
+    if (st is None or st["c"]() is not c or st["n"] > len(hits) or (st["n"] and st["first"] is not first)
+            or st["names"] != names):
+        st = _CACHE["k"] = dict(c=weakref.ref(c), n=0, first=first, mine={}, total={}, sig=None, res=([], 0),
+                                times=[], ordered=True, names=names)
+    n = st["n"]
+    if n < len(hits):
+        mine, total, me = st["mine"], st["total"], c.me
+        for i in range(n, len(hits)):
+            h = hits[i]
+            if h.dmg > 0:
+                d = h.dst
+                total[d] = total.get(d, 0) + h.dmg
+                if h.src == me:
+                    mine[d] = mine.get(d, 0) + h.dmg
+        st["n"], st["first"] = len(hits), hits[0]
+    sig = (c.version, len(c.death_log), len(hits))
+    if st["sig"] != sig:
+        st["sig"] = sig
+        st["res"] = _all_kills(c, st["mine"], st["total"])
+        times = st["times"] = [r["t"] for r in st["res"][0]]
+        st["ordered"] = all(a <= b for a, b in zip(times, times[1:]))
+    return st
+
+
 def kills(c, rng=None):
     """Abates em que quem grava bateu: (linhas, abates sem XP conhecida).
     linha: t, aid, mob, name, lv, share (parte do dano), pen (%), xp (sem o fator)."""
-    sig = (id(c), c.version)
-    hit = _CACHE.get("k")
-    if not hit or hit[0] != sig:
-        hit = _CACHE["k"] = (sig, _all_kills(c))
-    rows, _unknown = hit[1]
+    st = _kill_state(c)
     if rng is None:
-        return hit[1]
-    rows = [r for r in rows if rng[0] <= r["t"] <= rng[1]]
+        return st["res"]
+    rows = st["res"][0]
+    if st["ordered"]:
+        rows = rows[bisect.bisect_left(st["times"], rng[0]):bisect.bisect_right(st["times"], rng[1])]
+    else:
+        rows = [r for r in rows if rng[0] <= r["t"] <= rng[1]]
     return rows, sum(1 for r in rows if r["xp"] is None)
 
 
@@ -97,14 +138,16 @@ def level_at(c, t):
     return lv
 
 
-def _all_kills(c):
-    dead = {aid for t, aid in c.death_log}
-    mine, total = {}, {}
-    for h in c.hits:
-        if h.dst in dead and h.dmg > 0:
-            total[h.dst] = total.get(h.dst, 0) + h.dmg
-            if h.src == c.me:
-                mine[h.dst] = mine.get(h.dst, 0) + h.dmg
+def _all_kills(c, mine=None, total=None):
+    """As linhas dos abates. `mine` e `total`: dano de quem grava e de todos em cada monstro, se já somados."""
+    if mine is None:
+        dead = {aid for t, aid in c.death_log}
+        mine, total = {}, {}
+        for h in c.hits:
+            if h.dst in dead and h.dmg > 0:
+                total[h.dst] = total.get(h.dst, 0) + h.dmg
+                if h.src == c.me:
+                    mine[h.dst] = mine.get(h.dst, 0) + h.dmg
     rows, unknown = [], 0
     for t, aid in c.death_log:
         e = c.entities.get(aid)
@@ -444,11 +487,33 @@ def remember_manual(c, cfg):
     return True
 
 
+def _moment(c):
+    """O que a gravação tem agora, para guardar contas enquanto nada muda (as janelas dos bônus, o começo do
+    farm): várias partes da tela pedem a mesma conta no mesmo desenho."""
+    m = _CACHE.get("m")
+    sig = (c.version, c.now, len(c.status_log), len(c.status_on), len(getattr(c, "equip_log", ())), id(GEAR.table),
+           tuple(tuple(x) for x in c.miracles), len(c.death_log), len(c.hits))
+    if m is None or m["c"]() is not c or m["sig"] != sig:
+        m = _CACHE["m"] = dict(c=weakref.ref(c), sig=sig, wins={}, fac={}, farm=())
+    return m
+
+
 def windows(c, cfg=None):
     """Quando cada bônus detectável esteve ativo em quem grava: {chave: [(início, fim, valor)]}.
     cfg: para saber se os bônus "[Durante o Evento]" dos itens estão marcados."""
     event_on = settings(cfg or {})["gear_event"]["on"]
     off = event_off(cfg or {})
+    store = _moment(c)["wins"]
+    out = store.get((event_on, off))
+    if out is None:
+        out = store[(event_on, off)] = _windows(c, event_on, off)
+    return dict(out)
+
+
+def _windows(c, event_on, off):
+    mine = {}                        # status de quem grava, por efeito (uma passada só pelo registro)
+    for s in c.statuses(c.me):
+        mine.setdefault(s[1], []).append(s)
     out = {}
     for b in BONUSES:
         if b["status"] is None:
@@ -459,22 +524,23 @@ def windows(c, cfg=None):
         if b["status"] == "equipamento":
             out[b["key"]] = gear_windows(c, event_on, off)
             continue
+        sts = mine.get(b["status"], ())
         if b.get("lasting") and b.get("val"):    # manuais: não acabam com a morte e trazem o % no status
-            out[b["key"]] = _lasting_vals(c, b["status"])
+            out[b["key"]] = _lasting_vals(c, b["status"], sts)
             continue
         if b.get("lasting"):          # bônus de conta/período não acabam com a morte
-            out[b["key"]] = [(s, e, 0) for s, e in c.lasting(b["status"])]
+            out[b["key"]] = [(s, e, 0) for s, e in c.lasting(b["status"], sts)]
             continue
-        out[b["key"]] = sorted((s, e, c.status_val.get((a, ef, s)) or 0)
-                               for a, ef, s, e in c.statuses(c.me) if ef == b["status"])
+        out[b["key"]] = sorted((s, e, c.status_val.get((a, ef, s)) or 0) for a, ef, s, e in sts)
     return out
 
 
-def _lasting_vals(c, efst):
+def _lasting_vals(c, efst, sts=None):
     """[(início, fim, valor)] de um status de quem grava que não acaba com a morte, com o valor que o jogo
-    mandou (0 = não veio: o status já estava ativo quando a gravação começou)."""
+    mandou (0 = não veio: o status já estava ativo quando a gravação começou). `sts`: os status de quem grava, se
+    já estiverem à mão."""
     out = []
-    for a, ef, st, e in c.statuses(c.me):
+    for a, ef, st, e in (c.statuses(c.me) if sts is None else sts):
         if ef == efst:
             ln = c.status_len.get((a, ef, st))
             out.append((st, min(c.now, max(e, st + ln)) if ln else c.now, c.status_val.get((a, ef, st)) or 0))
@@ -555,12 +621,40 @@ def mark_pct(marks, t, mob):
     return max([MARK_PCT[s] for s in range(3) if cur.get(s) == mob and ok[s]] or [0.0])
 
 
-def factor_at(t, wins, sets, mob=None, marks=None):
+def factor_at(t, wins, sets, mob=None, marks=None, parts=None):
     """Fator de XP de um abate: [(1 + g) × (1 + k) + p] × (1 + primeiro passo). `mob` e `marks` (marks_of) entram
-    só para o alvo da Oposição, quando não há Milagre."""
-    a = parts_at(t, wins, sets)
+    só para o alvo da Oposição, quando não há Milagre. `parts`: os bônus do instante, se já calculados."""
+    a = parts_at(t, wins, sets) if parts is None else parts
     first = a["first"] or mark_pct(marks, t, mob)
     return ((1.0 + a["g"] / 100.0) * (1.0 + a["k"] / 100.0) + a["p"] / 100.0) * (1.0 + first / 100.0)
+
+
+class _Parts:
+    """parts_at com memória. Entre duas mudanças de qualquer bônus (um começa ou acaba) as janelas que cobrem o
+    instante são as mesmas, então o resultado também: numa sessão longa são milhares de abates para poucas dezenas
+    de trechos."""
+
+    def __init__(self, wins, sets):
+        self.wins, self.sets, self.memo = wins, sets, {}
+        self.starts = sorted(s for ws in wins.values() for s, _e, _v in ws)
+        self.ends = sorted(e for ws in wins.values() for _s, e, _v in ws)
+
+    def at(self, t):
+        # quantas janelas já começaram e quantas já acabaram: isso fixa quais cobrem o instante
+        key = (bisect.bisect_right(self.starts, t), bisect.bisect_left(self.ends, t))
+        a = self.memo.get(key)
+        if a is None:
+            a = self.memo[key] = parts_at(t, self.wins, self.sets)
+        return a
+
+
+def _parts(c, cfg, wins, sets):
+    store = _moment(c)["fac"]
+    key = (settings(cfg or {})["gear_event"]["on"], event_off(cfg or {}), repr(sorted(sets.items())))
+    p = store.get(key)
+    if p is None:
+        p = store[key] = _Parts(wins, sets)
+    return p
 
 
 def detected(c, cfg=None):
@@ -667,12 +761,13 @@ def estimate(c, cfg, rng=None):
     wins = sets = None
     if f is None:
         wins, sets, marks = windows(c, cfg), settings(cfg, c), marks_of(c)
+        parts = _parts(c, cfg, wins, sets)
     total = base = 0.0
     for r in rows:
         if r["xp"] is None:
             r["total"] = None
             continue
-        k = f if f is not None else factor_at(r["t"], wins, sets, r["mob"], marks) * corr
+        k = f if f is not None else factor_at(r["t"], wins, sets, r["mob"], marks, parts.at(r["t"])) * corr
         r["total"] = r["xp"] * k
         base += r["xp"]
         total += r["total"]
@@ -762,6 +857,8 @@ class _Gear:
 
     def __init__(self):
         self.table, self.names, self.kinds, self._thread = None, {}, {}, None
+        self.display = {}             # item -> nome que o jogo mostra (a lista para a busca do aviso de item)
+        self.art = {}                 # item -> nome do arquivo da ilustração dele no data.grf
 
     def start(self, path):
         if self.table is not None or self._thread is not None or not path:
@@ -774,6 +871,12 @@ class _Gear:
                     items = lub.run(f.read()).get("tbl") or {}
                 self.names = {i: _norm(v.get("identifiedDisplayName")) for i, v in items.items()
                               if isinstance(i, int) and isinstance(v, dict)}
+                self.display = {i: " ".join(v["identifiedDisplayName"].split()) for i, v in items.items()
+                                if isinstance(i, int) and isinstance(v, dict)
+                                and isinstance(v.get("identifiedDisplayName"), str) and v["identifiedDisplayName"].strip()}
+                self.art = {i: v["identifiedResourceName"] for i, v in items.items()
+                            if isinstance(i, int) and isinstance(v, dict)
+                            and isinstance(v.get("identifiedResourceName"), str) and v["identifiedResourceName"]}
                 self.table = parse_gear(items)
                 import itemkind                  # categorias dos itens (cores dos drops), do mesmo arquivo
                 self.kinds = itemkind.parse_kinds(items)
@@ -854,18 +957,33 @@ def gear_bonus(worn, event_on, table=None, names=None, event_off=frozenset()):
 
 
 def gear_windows(c, event_on, event_off=frozenset()):
-    """[(início, fim, %)] do bônus dos itens vestidos, a cada troca de equipamento."""
+    """[(início, fim, %)] do bônus dos itens vestidos. Trocas de equipamento seguidas que dão a mesma % viram uma
+    janela só, e a % de cada troca é calculada uma vez (há quem troque de equipamento mais de mil vezes numa
+    sessão: refazer tudo a cada abate deixava a conta da XP cada vez mais lenta)."""
     GEAR.start(_iteminfo_path())
     if GEAR.table is None:
         return []
-    out = []
     log = getattr(c, "equip_log", None) or [(0, {})]
-    for i, (t, state) in enumerate(log):
+    g = _CACHE.get("g")
+    key = (event_on, event_off, id(GEAR.table))
+    if (g is None or g["c"]() is not c or g["first"] is not log[0] or g["key"] != key
+            or len(g["pct"]) > len(log)):
+        g = _CACHE["g"] = dict(c=weakref.ref(c), first=log[0], key=key, pct=[])
+    pcts = g["pct"]
+    for i in range(len(pcts), len(log)):
+        pcts.append(gear_bonus(log[i][1], event_on, event_off=event_off)[0])
+    out = []
+    for i, (t, _state) in enumerate(log):
+        pct = pcts[i]
+        if not pct:
+            continue
         end = log[i + 1][0] if i + 1 < len(log) else max(c.now, t)
-        pct, _who = gear_bonus(state, event_on, event_off=event_off)
-        if pct:
+        if out and out[-1][1] == t and out[-1][2] == pct:
+            out[-1] = (out[-1][0], end, pct)
+        else:
             out.append((t, end, pct))
     return out
+
 
 
 def recordings_before(path, session, limit=20):
@@ -930,6 +1048,13 @@ def hunts(c):
 def farm_start(c):
     """Quando o farm começou de verdade: o começo do 1º minuto que rendeu pelo menos 40% do melhor minuto até agora
     (os primeiros minutos costumam ser preparação: buffs, ir até o mapa, alguns abates no caminho). None sem abates."""
+    m = _moment(c)
+    if not m["farm"]:
+        m["farm"] = (_farm_start(c),)
+    return m["farm"][0]
+
+
+def _farm_start(c):
     rows = [r for r in kills(c)[0] if r["t"] <= c.now and r["xp"]]
     if not rows:
         return None

@@ -817,6 +817,23 @@ class Bestiary:
     def has_trap(self):
         return self.grf.has(ITEM_ART + TRAP_ART)
 
+    def has_item(self, art):
+        return bool(art) and self.grf.has(ITEM_ART + art + ".bmp")
+
+    def item(self, art):
+        """A ilustração de um item (pelo nome do arquivo dela), sem o fundo branco: (w, h, pixels) ou None."""
+        key = ("item", art)
+        if key not in self.cache:
+            img = None
+            data = self.grf.read(ITEM_ART + art + ".bmp") if art else None
+            if data:
+                try:
+                    img = crop(*clear_background(*bmp_rgba(data)))
+                except Exception:  # noqa: BLE001 - imagem estranha: fica sem desenho
+                    img = None
+            self.cache[key] = img
+        return self.cache[key]
+
     def idle(self, mob):
         """Primeiro quadro do monstro parado e de frente, sem bordas: (w, h, pixels) ou None."""
         if mob in self.cache:
@@ -851,8 +868,8 @@ class Bestiary:
 
 class MonsterLoader:
     """Abre o bestiário numa thread e faz cada desenho pedido numa thread também (o widget não trava).
-    Pedidos: ("mob", id do monstro), ("trap",) ou ("char", visual, itens vestidos) para o personagem caído
-    (este usa o guarda-roupa da aba Equipamento, LOADER)."""
+    Pedidos: ("mob", id do monstro), ("trap",), ("item", id, arquivo da ilustração) ou ("char", visual, itens
+    vestidos) para o personagem caído (este usa o guarda-roupa da aba Equipamento, LOADER)."""
 
     def __init__(self):
         self.path = None
@@ -885,6 +902,8 @@ class MonsterLoader:
             return LOADER.error is None and (LOADER.wardrobe is not None or LOADER.loading)
         if self.book is None:
             return self._thread is not None
+        if spec[0] == "item":
+            return self.book.has_item(spec[2])
         return self.book.has_trap() if spec[0] == "trap" else self.book.has(spec[1])
 
     def image(self, spec):
@@ -909,6 +928,9 @@ class MonsterLoader:
                 return None
             if spec[0] == "trap":
                 make = b.trap
+            elif spec[0] == "item":
+                def make():
+                    return b.item(spec[2])
             else:
                 def make():
                     return b.idle(spec[1])

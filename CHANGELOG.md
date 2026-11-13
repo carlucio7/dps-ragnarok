@@ -2,6 +2,21 @@
 
 Português · [English](#english) · [Español](#español)
 
+## 1.6.0
+
+Aviso de item com som e lugar, sessões longas sem ficar pesado e a vida do Aquila refeita.
+
+- Aviso de item: marque um item com o botão direito na aba Drops (no widget ou na análise). Quando ele cair, o widget toca um som curto e mostra um cartão com o mapa e as coordenadas.
+- Um clique no cartão copia o /navi para colar no jogo.
+- Se você sair de perto sem pegar o item (telou sem querer, foi puxado), o cartão volta até o item sumir do chão.
+- Janela "Avisos de item", na aba Drops da análise: busca na lista de itens do próprio jogo, pelo nome ou pelo número, para marcar itens que ainda não caíram.
+- Volume e tom do som à escolha, na mesma janela ou em Sons no menu do widget. Sem item marcado, nada toca.
+- Sessões longas: o widget não fica mais pesado depois de muito tempo gravando. Numa gravação de 2 h e meia ele responde como nos primeiros minutos.
+- A janela de análise aberta durante a gravação não prende mais o widget.
+- Dois clientes gravando ao mesmo tempo não deixam mais o programa lento.
+- Pasta Replay com centenas de gravações pesa menos.
+- Aquila: vida e regeneração refeitas com mais lutas. A curva de vida da Linha do tempo acompanha a luta mesmo com o chefe fora da tela.
+
 ## 1.5.0
 
 Avisos do chefe e resumo da luta no widget, botão de copiar imagem, XP automática e as áreas do Mestre Elemental.
@@ -154,6 +169,21 @@ Primeira versão pública.
 
 ## English
 
+### 1.6.0
+
+Item alert with sound and place, long sessions that stay light and Aquila's HP redone.
+
+- Item alert: mark an item by right-clicking it on the Drops tab (widget or analysis). When it drops, the widget plays a short sound and shows a card with the map and the coordinates.
+- One click on the card copies the /navi to paste in the game.
+- If you leave without picking the item up (a teleport by mistake, a recall), the card comes back until the item leaves the ground.
+- "Item alerts" window, on the analysis Drops tab: search the game's own item list, by name or by number, to mark items that have not dropped yet.
+- Volume and tone of the sound are yours to choose, in the same window or under Sounds in the widget menu. With no item marked, nothing plays.
+- Long sessions: the widget no longer gets heavy after a long time recording. In a 2.5-hour recording it responds as in the first minutes.
+- The analysis window open while recording no longer holds the widget.
+- Two clients recording at the same time no longer make the program slow.
+- A Replay folder with hundreds of recordings weighs less.
+- Aquila: HP and regeneration redone with more fights. The HP curve on the Timeline follows the fight even with the boss off screen.
+
 ### 1.5.0
 
 Boss alerts and a fight summary on the widget, a copy-image button, automatic XP and the Elemental Master ground areas.
@@ -305,6 +335,21 @@ First public version.
 ---
 
 ## Español
+
+### 1.6.0
+
+Aviso de objeto con sonido y lugar, sesiones largas sin ponerse pesado y la vida del Aquila rehecha.
+
+- Aviso de objeto: marca un objeto con clic derecho en la pestaña Drops (en el widget o en el análisis). Cuando caiga, el widget toca un sonido corto y muestra una tarjeta con el mapa y las coordenadas.
+- Un clic en la tarjeta copia el /navi para pegar en el juego.
+- Si te alejas sin recogerlo (un teletransporte sin querer, una llamada), la tarjeta vuelve hasta que el objeto desaparezca del suelo.
+- Ventana "Avisos de objeto", en la pestaña Drops del análisis: busca en la lista de objetos del propio juego, por nombre o por número, para marcar objetos que todavía no cayeron.
+- Volumen y tono del sonido a elección, en la misma ventana o en Sonidos en el menú del widget. Sin objeto marcado, no suena nada.
+- Sesiones largas: el widget ya no se pone pesado después de mucho tiempo grabando. En una grabación de 2 h y media responde como en los primeros minutos.
+- La ventana de análisis abierta durante la grabación ya no traba el widget.
+- Dos clientes grabando al mismo tiempo ya no dejan lento el programa.
+- Una carpeta Replay con cientos de grabaciones pesa menos.
+- Aquila: vida y regeneración rehechas con más peleas. La curva de vida de la Línea de tiempo sigue la pelea incluso con el jefe fuera de la pantalla.
 
 ### 1.5.0
 

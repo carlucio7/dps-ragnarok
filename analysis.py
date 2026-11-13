@@ -143,13 +143,21 @@ BOSS_USUAL = {20994: 1, 21531: 1, 21588: 1}   # o nível que os grupos costumam 
 # Regeneração (fração do HP máx. por segundo). O replay não mostra o HP, mas nos abates o dano além do HP
 # cresce com a duração da luta: ~0,8M/s no Nível 1 (~6% do HP por minuto), mais ~18M de overkill.
 BOSS_REGEN = {20994: 0.001}
-# Chefes com regeneração só numa forma e dano que o replay não mostra (frações do HP máx.). Aquila: os valores mais
-# prováveis, ajustados em 7 lutas (4 abates e 1 luta incompleta na Executiva, 2 sem abate na Primeira Classe):
-# regenera só em sobrecarga, ~0,55% por segundo na Executiva (os 4 abates fecham com erro de até ~11M, 2% do HP)
-# e pelo menos ~1,05% na Primeira Classe (senão a luta de 24 min sem abate teria matado o chefe); cada quebra de
-# defesa (o Tetra Vortex que ele lança em si mesmo) tira ~4,5%. A Econômica não tem lutas: vai como a Executiva.
-# Não é certeza: o replay não mostra o HP dele. `regen` é por dificuldade, na ordem de BOSS_LEVELS.
-BOSS_MODEL = {_mob: dict(regen=(0.0055, 0.0055, 0.011), form=21588, hidden=0.045,
+# Chefes com regeneração só numa forma e dano que o replay não mostra (frações do HP máx.). Aquila, ajustado em
+# 11 lutas (8 abates completos e 1 luta incompleta na Executiva, 2 sem abate na Primeira Classe):
+# - HP de 500M na Executiva: qualquer outro valor piora o ajuste dos 8 abates;
+# - regenera só em sobrecarga, ~0,54% por segundo na Executiva, começando ~2 s depois que ela liga (sobrecargas
+#   de poucos segundos quase não curam), e pelo menos ~1,05% na Primeira Classe (senão a luta de 24 min sem abate
+#   teria matado o chefe);
+# - cada quebra de defesa tira ~4,4% (o chefe lança de 2 a 5 Tetra Vortex em si mesmo).
+# A sobrecarga e as quebras vêm dos anúncios da sala (`room`), que chegam a qualquer distância: a troca de sprite
+# e as skills do chefe só chegam com ele à vista, e numa luta ele ficou 150 s em sobrecarga fora da tela. Sem os
+# anúncios (replay antigo, outro chefe) valem a forma e as skills.
+# Os 8 abates fecham com erro médio de ~10M (2% do HP) e de até ~16M (3%): nenhuma forma de regeneração testada
+# (constante, com atraso, em degraus, diferente no modo defesa, pausada enquanto apanha) fecha melhor, então o
+# que sobra parece variar de luta para luta (a perda em cada quebra, provavelmente). A Econômica não tem lutas:
+# vai como a Executiva. `regen` é por dificuldade, na ordem de BOSS_LEVELS.
+BOSS_MODEL = {_mob: dict(regen=(0.0054, 0.0054, 0.0105), form=21588, hidden=0.044, delay_ms=2000, room=True,
                          hidden_skills=(2218, 2219, 2220, 2221))
               for _mob in AQUILA}
 
@@ -255,6 +263,34 @@ def form_windows(c, aids, form, start, end):
     if on:
         out.append((since, end))
     return out
+
+
+def regen_windows(c, aids, model, start, end):
+    """[(início, fim)] em que o chefe regenera na luta: a sobrecarga pelos anúncios da sala quando a gravação os
+    tem (`room`), senão pela forma dele; cada janela começa `delay_ms` depois de a sobrecarga ligar."""
+    wins = []
+    if model.get("room"):
+        wins = [(s, end if e is None else e) for s, e in getattr(c, "overloads", ())
+                if s <= end and (e is None or e >= start)]
+    if not wins:
+        wins = form_windows(c, aids, model["form"], start, end)
+    delay = model.get("delay_ms", 0)
+    out = []
+    for s, e in wins:
+        s, e = max(start, s + delay), min(end, e)
+        if e > s:
+            out.append((s, e))
+    return out
+
+
+def hidden_losses(c, aids, model, start, end):
+    """Instantes em que o chefe perdeu vida sem pacote de dano (um por quebra de defesa): pelos anúncios da sala
+    quando há, senão pelas skills que ele usa em si mesmo."""
+    if model.get("room"):
+        out = [t for t in getattr(c, "def_breaks", ()) if start <= t <= end]
+        if out:
+            return out
+    return hidden_hits(c, aids, model["hidden_skills"], start, end)
 
 
 def hidden_hits(c, aids, skills, start, end):

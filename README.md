@@ -18,7 +18,7 @@ Um widget que mostra o seu DPS e o ranking do grupo em tempo real, lendo a grava
 - **Dedo Duro:** o que faltou nas lutas contra chefe (buffs, debuffs, Garra Sombria, Oposição, Vulcão e Insígnia, mortes).
 - **XP:** estimativa por minuto e por hora, tempo até o próximo nível, progresso das caças e comparação entre gravações. O modo automático se corrige com a XP exata.
 - **Copiar imagem:** o widget e a análise viram imagem pronta para colar no Discord, com a opção de esconder os nomes.
-- **Drops:** coloridos por tipo, com favoritos e itens ocultos.
+- **Drops:** coloridos por tipo, com favoritos e itens ocultos. Marque um item para ouvir um som quando ele cair e ver onde caiu, com o /navi a um clique.
 
 ### Como usar
 
@@ -49,7 +49,7 @@ A widget that shows your DPS and the party ranking in real time by reading the g
 - **Snitch:** what was missing in boss fights (buffs, debuffs, Dark Claw, Opposition, Volcano and Insignia, deaths).
 - **XP:** estimate per minute and per hour, time to the next level, hunt progress and comparison between recordings. The automatic mode corrects itself with the exact XP.
 - **Copy image:** the widget and the analysis become an image ready to paste on Discord, with the option to hide names.
-- **Drops:** colored by type, with favorites and hidden items.
+- **Drops:** colored by type, with favorites and hidden items. Mark an item to hear a sound when it drops and see where it fell, with the /navi one click away.
 
 **How to use:** download the `.zip`, extract it and open `ReplayMaster.exe`. Start recording a replay in the game. Right-click the widget for options.
 
@@ -67,7 +67,7 @@ Un widget que muestra tu DPS y el ranking del grupo en tiempo real, leyendo la g
 - **Soplón:** qué faltó en las peleas contra jefes (buffs, debuffs, Garra Tenebrosa, Oposición, Volcán e Insignia, muertes).
 - **XP:** estimación por minuto y por hora, tiempo hasta el próximo nivel, progreso de las cazas y comparación entre grabaciones. El modo automático se corrige con la XP exacta.
 - **Copiar imagen:** el widget y el análisis se convierten en una imagen lista para pegar en Discord, con la opción de ocultar los nombres.
-- **Drops:** con colores por tipo, favoritos y objetos ocultos.
+- **Drops:** con colores por tipo, favoritos y objetos ocultos. Marca un objeto para oír un sonido cuando caiga y ver dónde cayó, con el /navi a un clic.
 
 **Cómo usar:** descarga el `.zip`, extráelo y abre `ReplayMaster.exe`. Empieza a grabar un replay en el juego. Clic derecho en el widget para las opciones.
 

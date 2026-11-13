@@ -956,13 +956,32 @@ wins = an.form_windows(ca, xa.boss_aids, 21588, xa.start, xa.end)
 hid = an.hidden_hits(ca, xa.boss_aids, (2218, 2219, 2220, 2221), xa.start, xa.end)
 curve = tl.build(ca, AQ)["hp"]
 end = curve[-1][1]
-# 500M - 100M = 80%; +10 s × 0,55% = 85,5%; quebra -4,5% = 81%; -1M = 80,8%
-check(xa.hp == 500000000 and xa.hp_label == "Executiva" and wins == [(2000, 12000)] and hid == [13000]
-      and abs(end - (0.8 + 0.055 - 0.045 - 0.002)) < 1e-6,
-      "Aquila: Executiva pela redução de 50%%; regenera 0,55%%/s só em sobrecarga e a quebra de defesa tira 4,5%% -> %.4f" % end)
 m = an.BOSS_MODEL[21531]
-check([an.boss_regen(m, 21531, hp) for hp in (300000000, 500000000, 600000000, 123)] == [0.0055, 0.0055, 0.011, 0.0055],
-      "Aquila: regeneração por dificuldade (Econômica e Executiva 0,55%/s, Primeira Classe 1,1%/s)")
+# 500M - 100M = 80%; 10 s de sobrecarga, os 2 primeiros sem curar: +8 s × 0,54% = 84,32%; quebra -4,4%; -1M
+check(xa.hp == 500000000 and xa.hp_label == "Executiva" and wins == [(2000, 12000)] and hid == [13000]
+      and an.regen_windows(ca, xa.boss_aids, m, xa.start, xa.end) == [(4000, 12000)]
+      and abs(end - (0.8 + 0.0432 - 0.044 - 0.002)) < 1e-6,
+      "Aquila: Executiva pela redução de 50%%; regenera 0,54%%/s em sobrecarga depois de 2 s e a quebra de defesa "
+      "tira 4,4%% -> %.4f" % end)
+check([an.boss_regen(m, 21531, hp) for hp in (300000000, 500000000, 600000000, 123)] == [0.0054, 0.0054, 0.0105, 0.0054],
+      "Aquila: regeneração por dificuldade (Econômica e Executiva 0,54%/s, Primeira Classe 1,05%/s)")
+# o chefe fora da tela: nem a troca de sprite nem o Tetra Vortex chegam, mas os anúncios da sala sim
+ev_room = [(0, fr.spawn(AQ, "mob", 21531, "Aquila", boss=True)), (50, fr.status(AQ, 1166, True, 0, 0, 50)),
+           (1000, fr.skill_damage(ME, AQ, 100000000)),
+           (2000, fr.broadcast("ni0XDg")), (12000, fr.broadcast("nS0XDg")),         # sobrecarga liga e desliga
+           (13000, fr.broadcast("my0XDg")), (13400, fr.broadcast("my0XDg")),        # quebra de defesa (repetido)
+           (14000, fr.skill_damage(ME, AQ, 1000000))]
+cr = combat_of(fr.build(ME, ev_room)[0])
+xr = dd.Ctx(cr, AQ, None)
+end_r = tl.build(cr, AQ)["hp"][-1][1]
+check(cr.overloads == [[2000, 12000]] and cr.def_breaks == [13000]
+      and an.regen_windows(cr, xr.boss_aids, m, xr.start, xr.end) == [(4000, 12000)]
+      and an.hidden_losses(cr, xr.boss_aids, m, xr.start, xr.end) == [13000] and abs(end_r - end) < 1e-9,
+      "Aquila: sobrecarga e quebra de defesa pelos anúncios da sala, com o chefe fora da tela -> %.4f" % end_r)
+cm = combat_of(fr.build(ME, [(0, fr.spawn(AQ, "mob", 21531, "Aquila", boss=True)), (500, fr.skill_damage(ME, AQ, 1000)),
+                             (3000, fr.broadcast("nS0XDg"))])[0])
+check(cm.overloads == [[0, 3000]], "Aquila: gravação que começa com a sobrecarga ligada conta desde o começo -> %s"
+      % cm.overloads)
 ba = sorted(ca.boss_alerts.values(), key=lambda b: b["t"])
 BAPHO = 52403
 ev4 = [(0, fr.spawn(BAPHO, "mob", 1039, "Baphomet", boss=True)), (500, fr.skill_damage(ME, BAPHO, 1000)),
@@ -1485,6 +1504,163 @@ check(got == [4, 2, 3, 1], "drops: favoritos na ordem em que foram marcados, o r
 cols = itemkind.colors({"drop_colors": {"card": "#123456", "equip": "", "alch": "azul"}})
 check(cols["card"] == "#123456" and cols["equip"] is None and cols["alch"] == itemkind.DEFAULT_COLORS["alch"],
       "drops: cor escolhida, sem cor e cor inválida volta à padrão -> %s" % cols)
+
+# --- aviso de item: busca na lista do jogo, som e os itens marcados que caíram -------------
+import itemping  # noqa: E402
+
+cat = [(i, n, itemping.norm(n)) for i, n in ((501, "Poção Vermelha"), (502, "Poção Laranja"), (4001, "Carta Poring"),
+                                             (545, "Poção Vermelha Compacta"), (12184, "Kit de Poção Vermelha"))]
+check(itemping.search("pocao verm", rows=cat) == [(501, "Poção Vermelha"), (545, "Poção Vermelha Compacta"),
+                                                 (12184, "Kit de Poção Vermelha")]
+      and itemping.search("4001", rows=cat) == [(4001, "Carta Poring")]
+      and itemping.search("PORING carta", rows=cat) == [(4001, "Carta Poring")]
+      and itemping.search("  ", rows=cat) == [] and itemping.search("xyz", rows=cat) == [],
+      "aviso de item: busca sem acento e sem maiúsculas, por palavras ou pelo número; os que começam com o texto "
+      "vêm primeiro -> %s" % itemping.search("pocao verm", rows=cat))
+w1, w2 = itemping.wav(40, "grave"), itemping.wav(40, "bem agudo")
+check(w1[:4] == b"RIFF" and len(w1) == len(w2) and w1 != w2 and itemping.wav(40, "tom que não existe")
+      == itemping.wav(40, itemping.DEFAULT_TONE) and len(w1) < 20000,
+      "aviso de item: um toque curto (%d bytes), diferente em cada tom" % len(w1))
+
+
+def live_combat(events):
+    """Combat alimentado aos poucos, como numa gravação em curso: devolve (c, até(t))."""
+    data = fr.build(ME, sorted(events, key=lambda e: e[0]))[0]
+    h = rrf.Header(data)
+    c = meter.Combat(rrf.Session(h, data))
+    for e in rrf.initial_entities(h, data):
+        c.add_entity(e)
+    recs = list(rrf.StreamReader(h.keys, rrf.WANTED).feed(data[h.stream_offset:]))
+    at = [0]
+
+    def upto(t):
+        batch = []
+        while at[0] < len(recs) and recs[at[0]][0] <= t:
+            batch.append(recs[at[0]])
+            at[0] += 1
+        c.feed(batch, t)
+    return c, upto
+
+
+gone = lambda map_id: struct.pack("<HI", rrf.P_ITEM_GONE, map_id)                       # noqa: E731
+ev = [(0, fr.spawn(50101, "mob", 1002, "Poring")), (0, fr.spawn(OTHER, "pc", 4252, "Outro")),
+      (500, fr.skill_damage(ME, 50101, 100)), (900, fr.vanish(50101, 1)),
+      (1200, item_fall(900001, 607, 100, 100)), (1200, item_fall(900002, 909, 100, 101, 3)),
+      (1200, item_fall(900003, 4001, 102, 100)), (1250, struct.pack("<HI", rrf.P_MVP_ITEM, 607)),
+      (3000, pick_action(ME, 900001)), (3010, gone(900001)), (3050, pickup_ack(607)),
+      (4000, pick_action(OTHER, 900003)), (4010, gone(900003)),
+      (5000, gone(900002)),                                   # saiu da vista sem ninguém pegar
+      (70000, fr.skill_damage(ME, OTHER, 1))]
+c, upto = live_combat(ev)
+tr = itemping.Tracker()
+upto(600)
+first = tr.poll(c, {607, 909, 4001})
+upto(1300)
+fell = tr.poll(c, {607, 909, 4001})
+upto(3100)
+got = tr.poll(c, {607, 909, 4001})
+upto(4100)
+taken = tr.poll(c, {607, 909, 4001})
+upto(5200)
+soon = tr.poll(c, {607, 909, 4001})
+upto(6600)
+left = tr.poll(c, {607, 909, 4001})
+upto(70000)
+late = tr.poll(c, {607, 909, 4001})
+info = fell[0][1] if fell else {}
+check(first == [] and [(k, d["item"]) for k, d in fell] == [("drop", 607), ("drop", 909), ("drop", 4001), ("mvp", 607)]
+      and (info.get("map"), info.get("x"), info.get("y"), info.get("mob")) == ("prt_fild08", 100, 100, "Poring")
+      and itemping.navi(info) == "/navi prt_fild08 100/100" and itemping.navi(fell[3][1]) is None
+      and [(k, d["item"]) for k, d in got] == [("got", 607)] and [(k, d["item"]) for k, d in taken] == [("taken", 4001)]
+      and soon == [] and [(k, d["item"], d["count"]) for k, d in left] == [("left", 909, 3)]
+      and [(k, d["item"]) for k, d in late] == [("expired", 909)] and tr.watch == [],
+      "aviso de item: caiu (com o lugar e o /navi), prêmio de MVP, pego por você, pego por outro, ficou para trás "
+      "1,5 s depois de sair da vista e sumiu do chão depois de 1 min -> %s" % [
+          [(k, d["item"]) for k, d in x] for x in (fell, got, taken, soon, left, late)])
+# telou para outro mapa sem pegar: avisa na hora; item não marcado e replay já encerrado não avisam nada
+c, upto = live_combat([(1200, item_fall(900001, 607, 100, 100)), (1200, item_fall(900002, 909, 100, 101)),
+                       (2000, fr.map_move("prontera", 150, 150)), (2500, fr.stop(ME, 150, 150))])
+tr = itemping.Tracker()
+upto(1300)
+a = tr.poll(c, {607})
+upto(2600)
+b = tr.poll(c, {607})
+tr2 = itemping.Tracker()
+check([(k, d["item"]) for k, d in a] == [("drop", 607)] and [(k, d["item"], d["map"]) for k, d in b]
+      == [("left", 607, "prt_fild08")] and tr2.poll(c, {607}, live=False) == [] and tr2.poll(c, set()) == []
+      and tr2.n_drops == 2,
+      "aviso de item: trocar de mapa sem pegar avisa que ficou para trás (com o mapa de onde caiu); só itens "
+      "marcados e só ao vivo -> %s %s" % (a, b))
+# abrir o programa com a gravação em curso: o que caiu há mais de 5 s não avisa
+c, upto = live_combat([(1200, item_fall(900001, 607, 100, 100)), (19000, item_fall(900002, 607, 110, 100)),
+                       (20000, fr.skill_damage(ME, OTHER, 1))])
+upto(20000)
+tr = itemping.Tracker()
+old = tr.poll(c, {607})
+check([(k, d["x"]) for k, d in old] == [("drop", 110)],
+      "aviso de item: ao pegar uma gravação em curso, só avisa do que caiu nos últimos segundos -> %s" % old)
+
+# --- sessões longas: a XP guardada entre desenhos dá o mesmo que a conta feita do zero -------------
+import xp as xpl  # noqa: E402
+
+kills_ev = []
+for i in range(60):
+    aid = 53000 + i % 7                                       # o jogo reaproveita o id do monstro que renasce
+    t = 1000 + i * 2000
+    kills_ev += [(t, fr.spawn(aid, "mob", 1002 if i % 3 else 1113, "Poring")), (t + 300, fr.skill_damage(ME, aid, 500 + i)),
+                 (t + 400, fr.skill_damage(OTHER, aid, 100)), (t + 600, fr.vanish(aid, 1))]
+kills_ev += [(30000, fr.status(ME, 984, True, 600000, 600000)), (50000, fr.status(ME, 250, True, 1800000, 1800000, 100)),
+             (90000, fr.status(ME, 250, False))]
+c, upto = live_combat([(0, fr.spawn(OTHER, "pc", 4252, "Outro"))] + kills_ev)
+same = True
+for t in range(5000, 125001, 5000):
+    upto(t)
+    for cfg in ({}, {"xp_mode": "lista", "xp_bonuses": {"server": {"on": True, "pct": 100}}}):
+        rows, unknown = xpl.kills(c)
+        ref_rows, ref_unknown = xpl._all_kills(c)
+        strip = lambda rs: [{k: v for k, v in r.items() if k != "total"} for r in rs]      # noqa: E731
+        est = xpl.estimate(c, cfg, None)
+        wins, sets, marks = xpl.windows(c, cfg), xpl.settings(cfg, c), xpl.marks_of(c)
+        slow = sum(r["xp"] * xpl.factor_at(r["t"], wins, sets, r["mob"], marks) for r in ref_rows if r["xp"] is not None)
+        part = xpl.kills(c, (t - 20000, t - 3000))[0]
+        same = same and strip(rows) == strip(ref_rows) and unknown == ref_unknown and abs(est["kill_xp"] - slow) < 1e-6 \
+            and [r["t"] for r in part] == [r["t"] for r in ref_rows if t - 20000 <= r["t"] <= t - 3000]
+check(same and len(xpl.kills(c)[0]) == 60 and xpl.estimate(c, {}, None)["kill_xp"] > 0,
+      "sessão longa: os abates somados aos poucos, as janelas guardadas e o fator por trecho dão a mesma XP que a "
+      "conta inteira, a cada leitura (%d abates)" % len(xpl.kills(c)[0]))
+c.reset()
+upto(130000)
+check(xpl.kills(c) == ([], 0), "sessão longa: zerar esvazia os abates guardados")
+
+# --- duas gravações ao mesmo tempo (dois clientes): o medidor não pula de uma para a outra ---------
+tmp = tempfile.mkdtemp()
+try:
+    w = meter.Watcher(tmp, auto=False)
+    a_path, b_path = os.path.join(tmp, "a.rrf"), os.path.join(tmp, "b.rrf")
+    now = time.time()
+    with open(a_path, "wb") as fh:
+        fh.write(b"x")
+    first = w.scan(now)
+    w.file = meter.ReplayFile(a_path)
+    with open(b_path, "wb") as fh:                            # outra gravação começa: passa a seguir a nova
+        fh.write(b"x")
+    second = w.scan(now + 0.2)
+    w.file = meter.ReplayFile(b_path)
+    picks = []
+    for i in range(6):                                        # as duas continuam sendo escritas, uma de cada vez
+        path = a_path if i % 2 == 0 else b_path
+        with open(path, "ab") as fh:
+            fh.write(b"y")
+        os.utime(path, (now + 1 + i, now + 1 + i))
+        picks.append(os.path.basename(w.scan(now + 1 + i)))
+    os.utime(b_path, (now - 60, now - 60))                    # a nova parou: volta para a que continua
+    os.utime(a_path, (now + 8, now + 8))
+    back = w.scan(now + 8.5)
+    check(first == a_path and second == b_path and picks == ["b.rrf"] * 6 and back == a_path,
+          "duas gravações em curso: segue a que começou por último sem pular entre elas, e volta para a outra "
+          "quando ela para -> %s" % picks)
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
 
 # --- todo texto da interface tem tradução -------------------------------------
 import ast  # noqa: E402

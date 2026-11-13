@@ -236,7 +236,8 @@ def fight(c, key, rng=None, player=None):
                          where="boss" if AREAS[akey][0] == "dst" else "me",
                          rule=area_rule(akey, max(a["level"] for a in areas)), uptime=up, affected=affected[akey],
                          contrib=contrib[akey], hits=n[akey], share=contrib[akey] / float(total) if total else 0.0))
-    # Prisão de Teia: só o reconhecimento (ainda não apareceu em nenhuma gravação para medir o efeito)
+    # Prisão de Teia: só o reconhecimento. A skill não pode ser usada em várias instâncias; lá o efeito só aparece
+    # pelo autocast do Arco de Trepadeira. A leitura fica para esse caso, sem medir quanto ela rende.
     web_on = [(s, e_) for p in x.phases for s, e_, _v in _spans(c, p["aid"], WEB)]
     web_used = sum(1 for u in c.uses if u[4] == WEB_SKILL and x.start - 5000 <= u[0] <= x.end)
     if web_on or web_used:
