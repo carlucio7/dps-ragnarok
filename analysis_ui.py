@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Janela de análise completa (Resumo, Jogadores, Monstros, Análise de DPS, Linha do tempo, Buffs, Mortes,
-Testes e Dedo Duro), atualizada ao vivo.
+"""Janela de análise completa (Resumo, Jogadores, Equipamento, Monstros, Drops, XP, Linha do tempo, Buffs,
+Mortes, Testes, Dedo Duro e Cartões), atualizada ao vivo.
 
 Ctrl + roda (ou Ctrl + / −) muda o tamanho de tudo; o layout se reorganiza com a largura.
 """
@@ -25,6 +25,7 @@ import meter
 import quests
 import sprites
 import testes
+import ui_parts
 import xp
 from fmt import num, full, dur, dec
 from i18n import _
@@ -41,7 +42,10 @@ BUCKETS = [(1000, "1 s"), (2000, "2 s"), (5000, "5 s"), (10000, "10 s")]
 SESSION, LATEST = _("Sessão inteira"), _("Último encontro (acompanha)")
 ZOOMS = (0.8, 0.9, 1.0, 1.1, 1.25, 1.4, 1.6)
 # abas pelo nome (a configuração antiga guardava a posição, na ordem de OLD_TABS)
-TABS = ["resumo", "jogadores", "equip", "monstros", "drops", "xp", "dps", "linha", "buffs", "mortes", "testes", "dedo"]
+TABS = ["resumo", "jogadores", "equip", "monstros", "drops", "xp", "linha", "buffs", "mortes", "testes", "dedo",
+        "cartoes"]
+KEEP_LABELS = [("all", "em todos os personagens"), ("char", "só neste personagem"),
+               ("session", "só até fechar o programa")]      # para quem valem os itens marcados (aviso de item)
 # ao vivo, a aba à vista é refeita com dados novos no máximo a cada LIVE_MIN_S, ou a cada LIVE_COST × o que levou
 # para refazer (até LIVE_MAX_S): uma aba que leva 0,5 s numa sessão longa passa a ser refeita a cada 6 s
 LIVE_MIN_S, LIVE_COST, LIVE_MAX_S = 1.0, 12, 30.0
@@ -71,6 +75,8 @@ def _fmt(kind, v):
         return dur(v)
     if kind == "f2":
         return dec("%.2f" % v)
+    if kind == "num":
+        return num(v)
     return str(v)
 
 
@@ -248,10 +254,31 @@ class Tiles(tk.Frame):
         self.wrap = 0
         self.cols = 0
         self.width = 0
+        self.hist = []                # as últimas larguras aplicadas, para reconhecer um vai-e-vem
+        self.swing = set()            # as duas larguras de um vai-e-vem reconhecido (ficam sem efeito)
         self.bind("<Configure>", lambda e: self.reflow())
+        win.all_tiles.append(self)
 
     def reflow(self):
         w = self.winfo_width()
+        if w <= 1:
+            return                    # ainda sem tamanho (a janela não apareceu)
+        if w != self.width and self.cols:
+            # Quando ninguém impõe a largura (dentro de uma área de rolagem ainda sem tamanho, por exemplo), o
+            # próprio conteúdo mexe nela: muda o número de colunas, o texto quebra de outro jeito, a largura
+            # pedida muda e a conta recomeça. Largura A, B, A, B é isso: fica na disposição da menor e as duas
+            # deixam de ter efeito, senão a janela ficava presa refazendo a conta para sempre.
+            if w in self.swing:
+                return
+            h = self.hist
+            if len(h) >= 3 and w == h[-2] and h[-1] == h[-3]:
+                self.swing = {w, h[-1]}
+                if w > h[-1]:
+                    return
+            else:
+                self.swing = set()
+            h.append(w)
+            del h[:-4]
         cols = max(1, min(len(self.order), int(w // (self.min_w * self.win.dpi * self.win.zoom))))
         if cols != self.cols:
             self.cols = cols
@@ -329,6 +356,7 @@ class Chart(tk.Canvas):
         self.hline = None
         self.unit = ""
         self.empty = ""
+        self.left_pad = 74                   # margem esquerda (a aba de DPS usa uma maior, para os nomes das faixas)
         self.bind("<Configure>", lambda e: self.redraw())
         self.bind("<Motion>", self._motion)
         self.bind("<Leave>", lambda e: self._set_hover(None))
@@ -357,7 +385,7 @@ class Chart(tk.Canvas):
     def _box(self):
         d = self._z()
         legend = self._legend_rows() * 18 * d
-        return 74 * d, 14 * d, self.winfo_width() - 16 * d, self.winfo_height() - 26 * d - legend
+        return self.left_pad * d, 14 * d, self.winfo_width() - 16 * d, self.winfo_height() - 26 * d - legend
 
     def _legend_items(self):
         if not self.data:
@@ -655,6 +683,7 @@ class AnalysisWindow:
     def __init__(self, app):
         self.app = app
         self.top = tk.Toplevel(app.root)
+        self.top.withdraw()                  # só aparece depois de montada e preenchida (veja o fim do __init__)
         self.top.title(_("Análise — Replay Master   (Ctrl + roda do mouse: tamanho)"))
         self.dpi = app.dpi
         try:
@@ -663,7 +692,6 @@ class AnalysisWindow:
             self.zoom = 1.0
         self.sig = None
         self.scope_items = []
-        self.dps_sel = None
         self.mob_key = None
         self.player_aid = None
         self.dd_key = None
@@ -672,7 +700,10 @@ class AnalysisWindow:
         self.combat_id = None
         self.colors = {}
         self.tables = []
+        self.all_tiles = []                  # todos os grupos de cartões (refeitos quando o tamanho muda)
         self._swatches = {}
+        self.icons = ui_parts.Icons(self)    # ícones dos itens (do data.grf do jogo)
+        self._common = (None, [], 0, 0)      # (chave, jogadores, dano do grupo, eventos) do recorte à vista
         self._last = 0.0
         self._next = 0.0                     # ao vivo, a próxima atualização automática só depois disto
         t = app.theme()
@@ -693,9 +724,9 @@ class AnalysisWindow:
                       big=tkfont.Font(self.top, family=nums), tile=tkfont.Font(self.top, family=nums))
         self.size_fonts()
         self.top.configure(bg=bg)
-        geo = app.cfg.get("an_geometry")
-        self.top.geometry(geo if geo else "%dx%d" % (int(1120 * self.dpi), int(800 * self.dpi)))
-        self.top.minsize(int(900 * self.dpi), int(500 * self.dpi))   # abaixo disso as 13 abas não cabem
+        self.start_geo = self.fit_geometry(app.cfg.get("an_geometry"))
+        self.top.geometry(self.start_geo)
+        self.top.minsize(int(900 * self.dpi), int(500 * self.dpi))   # abaixo disso as abas não cabem
         self.top.protocol("WM_DELETE_WINDOW", self.close)
         self.top.bind("<Escape>", lambda e: self.close())
         self.top.bind("<Control-MouseWheel>", lambda e: self.set_zoom(1 if e.delta > 0 else -1))
@@ -706,6 +737,89 @@ class AnalysisWindow:
         self.style()
         self.build()
         self.refresh(force=True)
+        # sem update_idletasks aqui: com a janela escondida nada tem largura imposta, e forçar o layout nessa hora
+        # deixava os quadros do Resumo trocando de largura sem parar (a janela nunca abria)
+        self.normal_geo = None if self.open_zoomed else self.start_geo
+        self.top.bind("<Configure>", self.note_geometry, add="+")
+        if self.open_zoomed:
+            try:
+                self.top.state("zoomed")
+            except tk.TclError:
+                pass
+        self.bring_to_front()
+
+    def note_geometry(self, e):
+        """Lembra o tamanho e a posição da janela enquanto ela não está maximizada (é o que fica guardado)."""
+        if e.widget is self.top:
+            try:
+                if self.top.state() == "normal":
+                    self.normal_geo = self.top.geometry()
+            except tk.TclError:
+                pass
+
+    def work_area(self, x=None, y=None):
+        """(esquerda, topo, direita, base) da área útil (sem a barra de tarefas) do monitor do ponto dado, ou do
+        monitor onde o widget está."""
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            if x is None:
+                x = self.app.root.winfo_rootx() + self.app.root.winfo_width() // 2
+                y = self.app.root.winfo_rooty() + self.app.root.winfo_height() // 2
+            user32.MonitorFromPoint.restype = ctypes.c_void_p
+            user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+            user32.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            mon = user32.MonitorFromPoint(wintypes.POINT(int(x), int(y)), 2)      # 2 = o monitor mais próximo
+            info = (ctypes.c_long * 10)()
+            info[0] = ctypes.sizeof(info)
+            if mon and user32.GetMonitorInfoW(mon, info):
+                return info[5], info[6], info[7], info[8]
+        except Exception:  # noqa: BLE001 - sem a área do monitor, vale a tela inteira
+            pass
+        return 0, 0, self.top.winfo_screenwidth(), self.top.winfo_screenheight() - int(48 * self.dpi)
+
+    def fit_geometry(self, geo):
+        """A posição e o tamanho guardados, ajustados para a janela caber inteira na área útil do monitor (ela
+        abria cortada quando tinha sido guardada num monitor maior ou com outra escala). Sem nada guardado, o
+        tamanho padrão no monitor onde o widget está."""
+        # "LxA+X+Y"; num monitor à esquerda ou acima do principal o Tk escreve a posição negativa como "+-X"
+        m = re.match(r"^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$", geo or "")
+        frame = int(40 * self.dpi)             # a barra de título e as bordas ficam fora do tamanho pedido
+        self.open_zoomed = bool(self.app.cfg.get("an_zoomed"))
+        area = None
+        if m:
+            w, h, x, y = (int(v) for v in m.groups())
+            area = self.work_area(x + w // 2, y + h // 2)
+            if w >= area[2] - area[0] - frame and h >= area[3] - area[1] - 2 * frame:
+                # o tamanho da tela inteira: foi guardada maximizada (as versões anteriores guardavam assim, com a
+                # posição de antes de maximizar, e a janela abria cortada). Abre maximizada nesse monitor.
+                self.open_zoomed, m = True, None
+        if m:
+            left, top, right, bottom = area
+        else:
+            left, top, right, bottom = area or self.work_area()
+            w, h = int(1120 * self.dpi), int(800 * self.dpi)
+            x, y = left + (right - left - w) // 2, top + (bottom - top - h - frame) // 2
+        w = max(int(600 * self.dpi), min(w, right - left - int(16 * self.dpi)))
+        h = max(int(400 * self.dpi), min(h, bottom - top - frame - int(8 * self.dpi)))
+        x = max(left, min(x, right - w - int(16 * self.dpi)))
+        y = max(top, min(y, bottom - h - frame))
+        return "%dx%d+%d+%d" % (w, h, x, y)
+
+    def bring_to_front(self):
+        """Mostra a janela na frente das outras. O widget não toma o foco do jogo, então para o Windows este
+        programa não é o que está em uso e uma janela nova abriria por trás: passar um instante por "sempre no
+        topo" traz a janela para cima de qualquer jeito; o foco é pedido em seguida."""
+        try:
+            if self.top.state() in ("withdrawn", "iconic"):
+                self.top.deiconify()
+            self.top.lift()
+            self.top.attributes("-topmost", True)
+            self.top.after(250, lambda: self.top.winfo_exists() and self.top.attributes("-topmost", False))
+            self.top.focus_force()
+        except tk.TclError:
+            pass
 
     # ------------------------------------------------------------ aparência
 
@@ -727,7 +841,7 @@ class AnalysisWindow:
         self.style()
         for t in self.tables:
             t.rescale()
-        for tiles in (self.sum_tiles, self.dps_tiles, self.head_tiles):
+        for tiles in self.all_tiles:
             tiles.cols = 0
             tiles.reflow()
         self.tab_pad, self.tab_font = 16, "head"     # a letra mudou: recalcula o que cabe
@@ -849,13 +963,14 @@ class AnalysisWindow:
         self.build_monsters()
         self.build_drops()
         self.build_xp()
-        self.build_dps()
         import timeline_ui
         self.timeline = timeline_ui.TimelineTab(self, self.nb)
         self.build_buffs()
         self.build_deaths()
         self.build_tests()
         self.build_dedo()
+        import ui_cards
+        self.cards_tab = ui_cards.CardsTab(self, self.nb)
         saved = self.app.cfg.get("an_tab", 0)
         if isinstance(saved, int) and 0 <= saved < len(OLD_TABS):
             saved = OLD_TABS[saved]
@@ -877,36 +992,8 @@ class AnalysisWindow:
         return lbl
 
     def build_summary(self):
-        outer = tk.Frame(self.nb, bg=self.c["panel"])
-        self.nb.add(outer, text=_("Resumo"))
-        tab = ScrollFrame(outer, self).inner
-        self.sum_title = self.section(tab, "")
-        self.sum_tiles = Tiles(tab, self, [
-            ("dealt", _("Seu dano")), ("dps", _("Seu DPS (em combate)")), ("adps", _("Seu DPS ativo")),
-            ("eff", _("DPS do 1º ao último golpe")), ("hits", _("Acertos")), ("best", _("Maior golpe")), ("top", _("Skill mais usada")),
-            ("kills", _("Abates (golpe fatal)")), ("taken", _("Dano recebido")), ("deaths", _("Mortes"))], min_w=165,
-            dense=True)
-        self.sum_tiles.pack(fill="x", padx=10)
-        both = tk.Frame(tab, bg=self.c["panel"])
-        both.pack(fill="both", expand=True, padx=4, pady=(4, 8))
-        both.columnconfigure(0, weight=1, uniform="r")
-        both.columnconfigure(1, weight=1, uniform="r")
-        left = tk.Frame(both, bg=self.c["panel"])
-        right = tk.Frame(both, bg=self.c["panel"])
-        left.grid(row=0, column=0, sticky="nsew")
-        right.grid(row=0, column=1, sticky="nsew")
-        self.section(left, _("Seus maiores golpes"))
-        self.t_tophits = Table(left, self, [
-            ("t", _("Tempo"), 55, "e", "dur"), ("name", _("Habilidade"), 140, "w", "text"),
-            ("target", _("Alvo"), 130, "w", "text"), ("dmg", _("Dano"), 105, "e", "big"), ("hits", _("Hits"), 40, "e", "int")],
-            height=10)
-        self.t_tophits.pack(fill="both", expand=True, padx=6)
-        self.section(right, _("Dano recebido"))
-        self.t_taken = Table(right, self, [
-            ("source", _("Fonte"), 130, "w", "text"), ("name", _("Habilidade"), 130, "w", "text"),
-            ("hits", _("Acertos"), 60, "e", "int"), ("total", _("Dano"), 100, "e", "big"), ("share", "%", 55, "e", "pct")],
-            height=10)
-        self.t_taken.pack(fill="both", expand=True, padx=6)
+        import ui_summary
+        self.summary_tab = ui_summary.SummaryTab(self, self.nb)
 
     def build_players(self):
         tab = tk.Frame(self.nb, bg=self.c["panel"])
@@ -917,14 +1004,16 @@ class AnalysisWindow:
         lower = tk.Frame(pw, bg=self.c["panel"])
         pw.add(upper, weight=3)
         pw.add(lower, weight=3)
-        self.section(upper, _("Jogadores — dano de invocações e skills de chão conta para o dono"))
+        self.section(upper, _("Jogadores — o grupo inteiro (quem não deu dano também); dano de invocações e skills "
+                              "de chão conta para o dono"))
         self.t_players = Table(upper, self, [
-            ("name", _("Jogador"), 170, "w", "text"), ("job", _("Classe"), 130, "w", "text"),
-            ("total", _("Dano"), 120, "e", "big"), ("dps", "DPS", 105, "e", "big"),
-            ("adps", _("DPS ativo"), 105, "e", "big"), ("share", "%", 60, "e", "pct"),
-            ("hits", _("Acertos"), 70, "e", "int"), ("misses", _("Erros"), 55, "e", "int"),
-            ("max_hit", _("Maior golpe"), 110, "e", "big"), ("mobs", _("Monstros"), 75, "e", "int"),
-            ("kills", _("Abates"), 60, "e", "int")], height=7, on_select=self.player_selected, swatch=True)
+            ("name", _("Jogador"), 150, "w", "text"), ("job", _("Classe"), 115, "w", "text"),
+            ("total", _("Dano"), 112, "e", "big"), ("dps", "DPS", 95, "e", "big"),
+            ("adps", _("DPS ativo"), 95, "e", "big"), ("share", "%", 55, "e", "pct"),
+            ("crit_pct", _("Crít."), 55, "e", "pct"), ("max_hit", _("Maior golpe"), 100, "e", "big"),
+            ("taken", _("Recebido"), 95, "e", "big"), ("deaths", _("Mortes"), 55, "e", "int"),
+            ("uses", _("Suporte"), 65, "e", "int"), ("items", _("Itens"), 50, "e", "int"),
+            ("kills", _("Abates"), 55, "e", "int")], height=7, on_select=self.player_selected, swatch=True)
         self.t_players.pack(fill="both", expand=True, padx=8, pady=(0, 6))
         self.player_title = self.section(lower, "")
         sub = ttk.Notebook(lower, style="Sub.TNotebook")
@@ -947,6 +1036,32 @@ class AnalysisWindow:
             ("total", _("Dano"), 120, "e", "big"), ("share", "%", 60, "e", "pct"),
             ("max_hit", _("Maior golpe"), 110, "e", "big")], height=6)
         self.t_ptargets.pack(fill="both", expand=True, padx=4, pady=6)
+        # o que mais se sabe de cada um: suporte e itens, dano recebido e buffs
+        fs = tk.Frame(sub, bg=self.c["panel"])
+        sub.add(fs, text=_("Suporte e itens"))
+        fs.columnconfigure(0, weight=3, uniform="s")
+        fs.columnconfigure(1, weight=2, uniform="s")
+        fs.rowconfigure(0, weight=1)
+        self.t_psupport = Table(fs, self, [
+            ("name", _("Skill sem dano (buff, cura, debuff)"), 240, "w", "text"), ("uses", _("Usos"), 60, "e", "int"),
+            ("targets", _("Alvos"), 60, "e", "int")], height=6)
+        self.t_psupport.grid(row=0, column=0, sticky="nsew", padx=(4, 2), pady=6)
+        self.t_pitems = Table(fs, self, [("name", _("Item usado"), 220, "w", "text"), ("n", _("Vezes"), 60, "e", "int")],
+                              height=6)
+        self.t_pitems.grid(row=0, column=1, sticky="nsew", padx=(2, 4), pady=6)
+        ft = tk.Frame(sub, bg=self.c["panel"])
+        sub.add(ft, text=_("Dano recebido"))
+        self.t_ptaken = Table(ft, self, [
+            ("source", _("Fonte"), 200, "w", "text"), ("name", _("Habilidade"), 200, "w", "text"),
+            ("hits", _("Acertos"), 70, "e", "int"), ("total", _("Dano"), 120, "e", "big"),
+            ("max_hit", _("Maior golpe"), 110, "e", "big"), ("share", "%", 60, "e", "pct")], height=6)
+        self.t_ptaken.pack(fill="both", expand=True, padx=4, pady=6)
+        fb = tk.Frame(sub, bg=self.c["panel"])
+        sub.add(fb, text=_("Buffs"))
+        self.t_pbuffs = Table(fb, self, [
+            ("name", _("Buff"), 240, "w", "text"), ("kind_txt", _("Tipo"), 130, "w", "text"),
+            ("uptime", _("Ativo"), 70, "e", "pct")], height=6)
+        self.t_pbuffs.pack(fill="both", expand=True, padx=4, pady=6)
         f3 = tk.Frame(sub, bg=self.c["panel"])
         sub.add(f3, text=_("Dano ao longo do tempo (todos)"))
         bar = tk.Frame(f3, bg=self.c["panel"])
@@ -975,10 +1090,18 @@ class AnalysisWindow:
         self.eq_when_box.pack(side="left", padx=6)
         self.eq_when_box.bind("<<ComboboxSelected>>", lambda e: self.refresh(force=True))
         self.eq_moments = {}
-        body = tk.Frame(tab, bg=c["panel"])
-        body.pack(fill="both", expand=True)
+        self.eq_title = self.label(bar, "", "head", bg="panel", anchor="w")
+        self.eq_title.pack(side="left", padx=(14, 0))
+        body = ScrollFrame(tab, self).inner
+        body.columnconfigure(0, weight=1, uniform="eq")
+        body.columnconfigure(2, weight=1, uniform="eq")
+        # o equipamento de verdade à esquerda, o personagem no meio, sombrios e visuais à direita
+        self.eq_gear = ui_parts.EquipPanel(body, self, groups=ui_parts.GROUPS[:1])
+        self.eq_gear.grid(row=0, column=0, sticky="new", padx=(4, 0), pady=(6, 10))
+        self.eq_special = ui_parts.EquipPanel(body, self, groups=ui_parts.GROUPS[1:])
+        self.eq_special.grid(row=0, column=2, sticky="new", padx=(0, 4), pady=(6, 10))
         left = tk.Frame(body, bg=c["tile"])
-        left.pack(side="left", fill="y", padx=(10, 6), pady=(6, 10))
+        left.grid(row=0, column=1, sticky="n", padx=6, pady=(10, 10))
         self.eq_scale = max(2, int(round(2 * self.dpi)))
         sc = self.eq_scale
         self.eq_canvas = tk.Canvas(left, width=150 * sc, height=150 * sc, bg=c["tile"], highlightthickness=0, bd=0,
@@ -1007,12 +1130,6 @@ class AnalysisWindow:
         self.eq_info = self.label(left, "", "small", "muted", "tile", anchor="w", justify="left",
                                   wraplength=150 * sc)
         self.eq_info.pack(fill="x", padx=10, pady=(6, 10))
-        right = tk.Frame(body, bg=c["panel"])
-        right.pack(side="left", fill="both", expand=True)
-        self.eq_title = self.section(right, _("Equipamento"))
-        self.t_equip = Table(right, self, [("slot_txt", _("Slot"), 150, "w", "text"),
-                                           ("item", _("Item"), 640, "w", "text")], height=16)
-        self.t_equip.pack(fill="both", expand=True, padx=(4, 10), pady=(0, 10))
         self.eq_dir, self.eq_frame, self.eq_after = 0, 0, None
         self.eq_look, self.eq_images, self.eq_loader_v = None, {}, -1
 
@@ -1032,12 +1149,14 @@ class AnalysisWindow:
             self.eq_when.set(next(iter(labels)))
         t = labels[self.eq_when.get()]
         rows = an.equipment(c, t)
-        for r in rows:
-            r["slot_txt"] = _(r["slot"])
-        self.t_equip.set_rows(rows, lambda r: r["slot"])
+        sig = (id(c), t, len(rows), self.zoom, xp.GEAR.table is None)
+        if sig != getattr(self, "eq_sig", None):
+            self.eq_sig = sig
+            self.eq_gear.set(rows)
+            self.eq_special.set(rows)
         self.eq_title.configure(text=_("Equipamento de %s") % (
             (c.name_of(c.me) if meter.HIDE_NAMES else c.session.player) or _("quem gravou")) if rows
-                                else _("Equipamento — o replay não trouxe a lista de itens de quem gravou"))
+                                else _("O replay não trouxe a lista de itens de quem gravou"))
         # visual: o do início da gravação, com chapéus/capa/arma/escudo dos itens vestidos no momento escolhido
         grf = clientdata.NAMES.grf
         sprites.LOADER.start(grf)
@@ -1137,75 +1256,8 @@ class AnalysisWindow:
             self.refresh(force=True)
 
     def build_monsters(self):
-        tab = tk.Frame(self.nb, bg=self.c["panel"])
-        self.nb.add(tab, text=_("Monstros"))
-        pw = ttk.PanedWindow(tab, orient="vertical", style="An.TPanedwindow")
-        pw.pack(fill="both", expand=True)
-        upper = tk.Frame(pw, bg=self.c["panel"])
-        lower = tk.Frame(pw, bg=self.c["panel"])
-        pw.add(upper, weight=2)
-        pw.add(lower, weight=5)
-        self.section(upper, _("Monstros atacados — clique para ver o confronto"))
-        self.t_mobs = Table(upper, self, [
-            ("name", _("Monstro"), 220, "w", "text"), ("mob_id", _("ID do mob"), 80, "e", "int"),
-            ("total", _("Dano"), 120, "e", "big"), ("hits", _("Acertos"), 70, "e", "int"),
-            ("attackers", _("Atacantes"), 80, "e", "int"), ("max_hp", _("HP máx."), 120, "e", "big"),
-            ("ttk", _("Tempo até abate"), 125, "e", "dur"), ("killer", _("Abatido por"), 140, "w", "text")],
-            height=5, on_select=self.mob_selected)
-        self.t_mobs.pack(fill="both", expand=True, padx=8, pady=(0, 6))
-        self.mob_title = self.section(lower, "")
-        sub = ttk.Notebook(lower, style="Sub.TNotebook")
-        sub.pack(fill="both", expand=True, padx=8, pady=(0, 8))
-        self.mob_nb = sub
-        sub.bind("<<NotebookTabChanged>>", lambda e: self.refresh(force=True))
-
-        f1 = tk.Frame(sub, bg=self.c["panel"])
-        sub.add(f1, text=_("Dano por jogador"))
-        self.mob_bars = HBars(f1, self)
-        self.mob_bars.pack(fill="both", expand=True, pady=4)
-
-        f2 = tk.Frame(sub, bg=self.c["panel"])
-        sub.add(f2, text=_("Linha do tempo"))
-        bar = tk.Frame(f2, bg=self.c["panel"])
-        bar.pack(fill="x", padx=8, pady=(6, 0))
-        self.label(bar, _("Dano a cada"), color="muted", bg="panel").pack(side="left")
-        self.mob_bucket = tk.StringVar(self.top, "2 s")
-        cb = ttk.Combobox(bar, textvariable=self.mob_bucket, values=[b[1] for b in BUCKETS], width=6,
-                          state="readonly", style="An.TCombobox", font=self.f["text"])
-        cb.pack(side="left", padx=6)
-        cb.bind("<<ComboboxSelected>>", lambda e: self.refresh(force=True))
-        self.label(bar, _("uma linha por jogador · tracejado = troca de fase"), color="muted", bg="panel").pack(side="left")
-        self.mob_chart = Chart(f2, self, height=300)
-        self.mob_chart.pack(fill="both", expand=True, padx=4, pady=4)
-
-        f3 = tk.Frame(sub, bg=self.c["panel"])
-        sub.add(f3, text=_("Habilidades usadas contra ele"))
-        self.t_against = Table(f3, self, [
-            ("name", _("Habilidade"), 200, "w", "text"), ("player", _("Jogador"), 150, "w", "text"),
-            ("job", _("Classe"), 120, "w", "text"), ("hits", _("Acertos"), 70, "e", "int"),
-            ("total", _("Dano total"), 120, "e", "big"), ("avg", _("Dano médio"), 110, "e", "big"),
-            ("avg_multi", _("Hits médios"), 95, "e", "f2"), ("cast", _("Cast médio"), 85, "e", "ms")], height=10,
-            swatch=True)
-        self.t_against.pack(fill="both", expand=True, padx=4, pady=6)
-
-        f4 = tk.Frame(sub, bg=self.c["panel"])
-        sub.add(f4, text=_("Habilidades do monstro"))
-        bar = tk.Frame(f4, bg=self.c["panel"])
-        bar.pack(fill="x", padx=8, pady=(6, 0))
-        self.label(bar, _("Com dano e de suporte/debuff.   Filtrar por alvo:"), color="muted",
-                   bg="panel").pack(side="left")
-        self.victim_var = tk.StringVar(self.top, _("Todos os alvos"))
-        self.victim_box = ttk.Combobox(bar, textvariable=self.victim_var, width=24, state="readonly",
-                                       style="An.TCombobox", font=self.f["text"])
-        self.victim_box.pack(side="left", padx=6)
-        self.victim_box.bind("<<ComboboxSelected>>", lambda e: self.refresh(force=True))
-        self.victims = {}
-        self.t_mskills = Table(f4, self, [
-            ("name", _("Habilidade"), 220, "w", "text"), ("skill", _("ID"), 60, "e", "int"),
-            ("hits", _("Acertos"), 70, "e", "int"), ("total", _("Dano total"), 120, "e", "big"),
-            ("avg", _("Dano médio"), 110, "e", "big"), ("nodmg", _("Usos sem dano"), 115, "e", "int"),
-            ("targets", _("Alvos"), 60, "e", "int"), ("cast", _("Cast médio"), 85, "e", "ms")], height=10)
-        self.t_mskills.pack(fill="both", expand=True, padx=4, pady=6)
+        import ui_mobs
+        self.mobs_tab = ui_mobs.MobsTab(self, self.nb)
 
     def build_drops(self):
         c = self.c
@@ -1266,7 +1318,7 @@ class AnalysisWindow:
         self.t_drop_ground.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         f, _lbl = box(1, 1, _("Por item"))
         # avisos de item: a coluna ♪ marca os que já caíram; o botão abre a busca na lista de itens do jogo
-        self.drop_ping_btn = ttk.Button(f, text="", style="An.TButton", command=self.open_pings)
+        self.drop_ping_btn = ttk.Button(f, text=_("Avisos de item…"), style="An.TButton", command=self.open_pings)
         self.drop_ping_btn.place(relx=1.0, x=-6, y=2, anchor="ne")
         self.t_drop_items = Table(f, self, [
             ("star", "★", 34, "center", "text"), ("ping", "♪", 30, "center", "text"),
@@ -1504,13 +1556,18 @@ class AnalysisWindow:
         state = dict(found=[], marked=[], job=None)
 
         def fill_marked():
-            ids = [i for i in (app.cfg.get("ping_items") or []) if isinstance(i, int)]
+            ids = [i for i in app.ping_list() if isinstance(i, int)]
             state["marked"] = ids
             marked.delete(0, "end")
             for i in ids:
                 marked.insert("end", "%s  (%d)" % (meter.item_name(i), i))
-            marked_lbl.configure(text=(_("Itens com aviso (%d):") % len(ids)) if ids else
-                                 _("Nenhum item com aviso ainda."))
+            who = app.ping_char() if app.cfg.get("ping_keep") == "char" else None
+            if ids:
+                marked_lbl.configure(text=(_("Itens com aviso de %s (%d):") % (who, len(ids))) if who
+                                     else _("Itens com aviso (%d):") % len(ids))
+            else:
+                marked_lbl.configure(text=(_("Nenhum item com aviso para %s ainda.") % who) if who
+                                     else _("Nenhum item com aviso ainda."))
 
         def run_search():
             state["job"] = None
@@ -1559,6 +1616,20 @@ class AnalysisWindow:
         found.bind("<Return>", add)
         marked.bind("<Double-Button-1>", remove)
         marked.bind("<Delete>", remove)
+        # para quem valem os itens marcados
+        keep_row = tk.Frame(box, bg=c["panel"])
+        keep_row.pack(fill="x", pady=(10, 0))
+        self.label(keep_row, _("Os itens marcados valem:"), bg="panel").pack(side="left")
+        keeps = [(_(lbl), k) for k, lbl in KEEP_LABELS]
+        keep = tk.StringVar(dlg, next((lbl for lbl, k in keeps if k == (app.cfg.get("ping_keep") or "all")), keeps[0][0]))
+        kb = ttk.Combobox(keep_row, textvariable=keep, values=[lbl for lbl, _k in keeps], state="readonly", width=28,
+                          style="An.TCombobox", font=self.f["text"])
+        kb.pack(side="left", padx=(8, 0))
+
+        def save_keep(_e=None):
+            app.set_ping_keep(dict(keeps).get(keep.get(), "all"))
+            fill_marked()
+        kb.bind("<<ComboboxSelected>>", save_keep)
         # som: liga/desliga, volume e tom, com um botão para ouvir
         snd = tk.Frame(box, bg=c["panel"])
         snd.pack(fill="x", pady=(12, 0))
@@ -1710,7 +1781,7 @@ class AnalysisWindow:
         box.bind("<<ComboboxSelected>>", lambda e: self.xp_pick_manual())
         self.xp_compare = self.label(left, "", "small", "muted", "tile", anchor="w", justify="left", wraplength=440)
         self.xp_compare.pack(fill="x", padx=10, pady=(6, 10))
-        self.section(right, _("XP ao longo do tempo"))
+        self.xp_chart_title = self.section(right, _("XP ao longo do tempo"))
         self.xp_chart = tk.Canvas(right, height=int(210 * self.dpi * self.zoom), bg=c["panel"], highlightthickness=0,
                                   bd=0)
         self.xp_chart.pack(fill="x", padx=10)
@@ -1755,11 +1826,33 @@ class AnalysisWindow:
         self.t_xp_cmp.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         self.label(cmp_tab, _("As duas usam a mesma lista de bônus. A outra gravação é sempre inteira."), "small",
                    "muted", "tile", anchor="w").pack(fill="x", padx=8, pady=(0, 6))
+        import ui_xpsim
+        self.xp_sim = ui_xpsim.XpSim(self, sub)
+        sub.add(self.xp_sim.frame, text=_("Simulador"))
+        self.xp_sub = sub
+        self.xp_sim_open = False
+        sub.bind("<<NotebookTabChanged>>", lambda e: self.xp_sub_changed())
         self.xp_cmp_files = []             # [{"path", "when"}] das gravações anteriores do personagem
         self.xp_cmp_cache = {}             # caminho -> "lendo" | "erro" | Combat
         self.xp_cmp_for = None
         self.xp_calibrated = set()
         self.xp_loaded = False
+
+    def xp_sub_changed(self):
+        """Com o Simulador aberto, o gráfico da XP sai da frente (o simulador precisa da altura toda)."""
+        try:
+            sim = self.xp_sub.index(self.xp_sub.select()) == self.xp_sub.index("end") - 1
+        except tk.TclError:
+            return
+        if sim != self.xp_sim_open:
+            self.xp_sim_open = sim
+            if sim:
+                self.xp_chart_title.pack_forget()
+                self.xp_chart.pack_forget()
+            else:
+                self.xp_chart_title.pack(fill="x", padx=10, pady=(10, 4), before=self.xp_sub)
+                self.xp_chart.pack(fill="x", padx=10, before=self.xp_sub)
+        self.refresh(force=True)
 
     def xp_load(self):
         """Põe na tela o que está salvo (uma vez)."""
@@ -1981,6 +2074,7 @@ class AnalysisWindow:
                               if h["goal"] else ""))
         self.t_xp_quests.set_rows(qrows, lambda r: r["key"], lambda r: [] if r["known"] else ["warn"])
         self.refresh_xp_compare(c)
+        self.xp_sim.refresh(c, est)
 
     def xp_event_menu(self):
         """Menu com cada item de bônus "[Durante o Evento]": marcado = o evento daquele item ainda vale."""
@@ -2179,65 +2273,6 @@ class AnalysisWindow:
         cv.create_text(bx + 7 * d, top + 7 * d, anchor="w", text=text, font=self.f["small"], fill=self.c["fg"],
                        tags="hover")
 
-    def build_dps(self):
-        tab = tk.Frame(self.nb, bg=self.c["panel"])
-        self.nb.add(tab, text=_("Análise de DPS"))
-        bar = tk.Frame(tab, bg=self.c["panel"])
-        bar.pack(fill="x", padx=10, pady=(10, 0))
-        self.label(bar, _("Jogador:"), color="muted", bg="panel").pack(side="left")
-        self.dps_player = tk.StringVar(self.top, "")
-        self.dps_player_box = ttk.Combobox(bar, textvariable=self.dps_player, width=26, state="readonly",
-                                           style="An.TCombobox", font=self.f["text"])
-        self.dps_player_box.pack(side="left", padx=6)
-        self.dps_player_box.bind("<<ComboboxSelected>>", lambda e: self.refresh(force=True))
-        self.dps_players = {}
-        self.label(bar, _("  Barras a cada"), color="muted", bg="panel").pack(side="left")
-        self.dps_bucket = tk.StringVar(self.top, "1 s")
-        cb = ttk.Combobox(bar, textvariable=self.dps_bucket, values=[b[1] for b in BUCKETS], width=6,
-                          state="readonly", style="An.TCombobox", font=self.f["text"])
-        cb.pack(side="left", padx=6)
-        cb.bind("<<ComboboxSelected>>", lambda e: self.refresh(force=True))
-        ttk.Button(bar, text=_("Limpar seleção"), style="An.TButton", command=self.clear_dps_sel).pack(side="right")
-        pw = ttk.PanedWindow(tab, orient="vertical", style="An.TPanedwindow")
-        pw.pack(fill="both", expand=True, pady=(6, 0))
-        top = tk.Frame(pw, bg=self.c["panel"])
-        bottom = tk.Frame(pw, bg=self.c["panel"])
-        pw.add(top, weight=2)
-        pw.add(bottom, weight=3)
-        self.dps_chart = Chart(top, self, height=220, on_select=self.dps_selected)
-        self.dps_chart.pack(fill="both", expand=True, padx=4)
-        self.dps_window_lbl = self.section(bottom, _("Estatísticas da janela"))
-        split = tk.Frame(bottom, bg=self.c["panel"])
-        split.pack(fill="both", expand=True)
-        split.columnconfigure(0, weight=3, uniform="d")
-        split.columnconfigure(1, weight=2, uniform="d")
-        split.rowconfigure(0, weight=1)
-        left = tk.Frame(split, bg=self.c["panel"])
-        right = tk.Frame(split, bg=self.c["panel"])
-        left.grid(row=0, column=0, sticky="nsew")
-        right.grid(row=0, column=1, sticky="nsew")
-        self.dps_tiles = Tiles(left, self, [
-            ("window", _("Janela")), ("events", _("Eventos de dano")), ("total", _("Dano total")),
-            ("span", _("Em combate")), ("dps", _("DPS médio")), ("mean_gap", _("Intervalo médio")),
-            ("max_hit", _("Maior golpe")), ("avg_hit", _("Dano por golpe")), ("longest", _("Maior intervalo")),
-            ("distinct", _("Skills distintas")), ("top", _("Skill com mais dano"))], min_w=135, dense=True)
-        self.dps_tiles.pack(fill="both", expand=True, padx=(10, 4))
-        self.label(right, _("Habilidades no trecho"), "head", bg="panel", anchor="w").pack(fill="x", padx=6, pady=(0, 4))
-        self.t_wskills = Table(right, self, [
-            ("name", _("Habilidade"), 120, "w", "text"), ("hits", _("Acertos"), 64, "e", "int"),
-            ("total", _("Dano"), 100, "e", "big"), ("share", "%", 52, "e", "pct"),
-            ("dps", "DPS", 90, "e", "big")], height=5)
-        self.t_wskills.pack(fill="both", expand=True, padx=(4, 8), pady=(0, 8))
-        # dano por fase das lutas contra chefe do recorte: grupo e o jogador escolhido
-        self.dps_phase_lbl = self.section(bottom, _("Por fase (lutas contra chefe no recorte)"))
-        self.t_dps_phase = Table(bottom, self, [
-            ("fight", _("Luta"), 190, "w", "text"), ("phase", _("Fase"), 80, "w", "text"),
-            ("ms", _("Em combate"), 90, "e", "dur"), ("total", _("Dano do grupo"), 120, "e", "big"),
-            ("dps", _("DPS do grupo"), 110, "e", "big"), ("mine", _("Dano do jogador"), 120, "e", "big"),
-            ("share", _("% do jogador"), 95, "e", "pct"), ("my_dps", _("DPS do jogador"), 110, "e", "big")], height=4)
-        self.t_dps_phase.pack(fill="both", expand=True, padx=(10, 8), pady=(0, 8))
-        self.dps_phase_cache = (None, [])
-
     # ------------------------------------------------------------ dados
 
     def combat(self):
@@ -2277,7 +2312,6 @@ class AnalysisWindow:
                 self.scope_var.set(next((v for v in values if v.split(" · ")[0] == prefix), SESSION))
 
     def scope_changed(self):
-        self.dps_sel = None
         self.refresh(force=True)
 
     def fit_tabs(self):
@@ -2348,7 +2382,6 @@ class AnalysisWindow:
         c = self.combat()
         if c is not None and id(c) != self.combat_id:
             self.combat_id = id(c)
-            self.dps_sel = None
             self.player_aid = c.me
             self.mob_key = None
             self.colors = {}
@@ -2360,6 +2393,8 @@ class AnalysisWindow:
         tab = self.tab_name()
         if tab == "testes":
             self.refresh_tests()              # o histórico não depende do replay aberto
+        elif tab == "cartoes":
+            self.cards_tab.refresh()          # nem o gerenciador de cartões
         if c is None:
             self.title_lbl.configure(text=_("Análise"))
             self.status_lbl.configure(text=_("sem replay aberto — comece a gravar no jogo ou abra um replay salvo"))
@@ -2374,18 +2409,22 @@ class AnalysisWindow:
         state = _("● ao vivo") if live else (_("gravando") if not c.finished else _("replay encerrado"))
         self.status_lbl.configure(text=_("%s · gravado %02d/%02d às %02d:%02d") % (state, d, mo, hh, mm),
                                   fg=self.c["live"] if live else self.c["muted"])
-        self.players_rows = an.players(c, rng, dur_ms)
+        # jogadores e totais do recorte: toda aba usa, e num replay grande cada conta varre dezenas de milhares
+        # de golpes; ficam guardados enquanto o replay e o recorte não mudam (mudar de aba não refaz nada disso)
+        key = (id(c), c.version, rng, dur_ms, meter.HIDE_NAMES)
+        if self._common[0] != key:
+            hs = an.out_hits(c, rng)
+            self._common = (key, an.players(c, rng, dur_ms), sum(h.dmg for h in hs), len(hs))
+        _key, self.players_rows, total, events = self._common
         for p in self.players_rows:          # cor fixa por jogador, na ordem do ranking
             self.color_of(p["aid"])
-        hs = an.out_hits(c, rng)
-        total = sum(h.dmg for h in hs)
         ht = self.head_tiles
         gdps = total * 1000.0 / max(1, dur_ms)
         ht.put("group", full(total), short=num(total))
         ht.put("gdps", full(round(gdps)), short=num(gdps))
         ht.put("combat", dur(dur_ms))
         ht.put("players", "%d" % len(self.players_rows))
-        ht.put("events", "%d" % len(hs))
+        ht.put("events", "%d" % events)
         ht.put("recorded", dur(c.now))
         if tab == "resumo":
             self.refresh_summary(c)
@@ -2399,8 +2438,6 @@ class AnalysisWindow:
             self.refresh_drops(c)
         elif tab == "xp":
             self.refresh_xp(c)
-        elif tab == "dps":
-            self.refresh_dps(c)
         elif tab == "linha":
             self.timeline.refresh(c)
         elif tab == "buffs":
@@ -2411,27 +2448,7 @@ class AnalysisWindow:
             self.refresh_dedo(c)
 
     def refresh_summary(self, c):
-        sm = an.summary(c, self.rng, self.dur_ms)
-        me = c.session
-        self.sum_title.configure(text=_("%s · %s · nível %d") % (
-            c.name_of(c.me) if meter.HIDE_NAMES else me.player, an.job_of(c, c.me), me.base_level))
-        t = self.sum_tiles
-        t.put("dealt", full(sm["dealt"]), _("%s do grupo") % _fmt("pct", sm["share"]), self.c["accent"])
-        t.put("dps", full(round(sm["dps"])), _("tempo em combate %s") % dur(sm["combat_ms"]))
-        t.put("adps", full(round(sm["active_dps"])) if sm["active_dps"] else "—",
-              _("só o tempo batendo: %s") % dur(sm["active_ms"]) if sm["active_ms"] else "")
-        t.put("eff", full(round(sm["effective_dps"])) if sm["effective_dps"] else "—", _("como no Ragna Recap"))
-        t.put("hits", "%d" % sm["hits"], _("%d erros · %d críticos") % (sm["misses"], sm["crits"]))
-        if sm["best"]:
-            t.put("best", full(sm["best"]["dmg"]), "%s · %s" % (sm["best"]["skill"], sm["best"]["target"]))
-        else:
-            t.put("best", "—")
-        t.put("top", sm["top_skill"] or "—", _("%d usos") % sm["top_count"] if sm["top_count"] else "")
-        t.put("kills", "%d" % sm["kills"], _("%d chefes") % sm["boss_kills"] if sm["boss_kills"] else "")
-        t.put("taken", full(sm["taken"]), _("%d acertos") % sm["taken_hits"])
-        t.put("deaths", "%d" % sm["deaths"], "", self.c["live"] if sm["deaths"] else None)
-        self.t_tophits.set_rows(an.top_hits(c, self.rng, c.me, 15), lambda r: "%d|%d" % (r["t"], r["dmg"]))
-        self.t_taken.set_rows(an.damage_taken(c, self.rng, c.me), lambda r: "%s|%s" % (r["source"], r["name"]))
+        self.summary_tab.refresh(c)
 
     def refresh_players(self, c):
         rows = self.players_rows
@@ -2458,13 +2475,27 @@ class AnalysisWindow:
         row = next((r for r in self.players_rows if r["aid"] == aid), None)
         bits = [c.name_of(aid)]
         if row:
-            bits += [row["job"], _("dano %s") % full(row["total"]), "DPS %s" % full(round(row["dps"]))]
+            bits += [row["job"], _("do grupo") if row["party"] else _("fora do grupo"),
+                     _("dano %s") % full(row["total"]), "DPS %s" % full(round(row["dps"]))]
+            if row["deaths"]:
+                bits.append(_("%d morte(s)") % row["deaths"])
         self.player_title.configure(text="  ·  ".join(b for b in bits if b))
         sub = self.player_nb.index(self.player_nb.select())
         if sub == 0:
             self.t_pskills.set_rows(an.player_skills(c, self.rng, aid, self.dur_ms), lambda r: r["name"])
         elif sub == 1:
             self.t_ptargets.set_rows(an.player_targets(c, self.rng, aid, self.group_var.get()), lambda r: r["key"])
+        elif sub == 2:
+            import stats
+            self.t_psupport.set_rows(an.support_uses(c, self.rng, aid), lambda r: r["skill"])
+            self.t_pitems.set_rows(stats.items_used(c, self.rng, aid), lambda r: r["item"])
+        elif sub == 3:
+            self.t_ptaken.set_rows(an.damage_taken(c, self.rng, aid), lambda r: "%s|%s" % (r["source"], r["name"]))
+        elif sub == 4:
+            brows, _total = an.buff_uptime(c, aid, self.rng)
+            for r in brows:
+                r["kind_txt"] = _(r["kind"])
+            self.t_pbuffs.set_rows([r for r in brows if r["kind"] != "Serviço"], lambda r: r["name"])
         else:
             bucket = dict((b[1], b[0]) for b in BUCKETS)[self.pl_bucket.get()]
             ts, series = an.timeline(c, self.rng, bucket, top=10)
@@ -2482,137 +2513,7 @@ class AnalysisWindow:
         return out
 
     def refresh_monsters(self, c):
-        group = self.group_var.get()
-        rows = an.monsters(c, self.rng, group)
-        self.t_mobs.set_rows(rows, lambda r: r["key"])
-        keys = [r["key"] for r in rows]
-        if self.mob_key not in keys:
-            self.mob_key = keys[0] if keys else None
-        if self.mob_key is not None:
-            self.t_mobs.select(self.mob_key)
-        self.refresh_mob_detail(c, rows)
-
-    def mob_selected(self, row):
-        if row is not None and row["key"] != self.mob_key:
-            self.mob_key = row["key"]
-            self.victim_var.set(_("Todos os alvos"))
-            self.refresh(force=True)
-
-    def refresh_mob_detail(self, c, rows):
-        key = self.mob_key
-        group = self.group_var.get()
-        row = next((r for r in rows if r["key"] == key), None)
-        if row is None:
-            self.mob_title.configure(text=_("Nenhum monstro atacado neste recorte."))
-            self.mob_bars.set([])
-            self.mob_chart.set([], 1000, [])
-            self.t_against.set_rows([], lambda r: 0)
-            self.t_mskills.set_rows([], lambda r: 0)
-            return
-        bits = [row["name"], _("dano %s") % full(row["total"]), _("%d acertos") % row["hits"]]
-        if row["max_hp"]:
-            bits.append(_("HP máx. %s") % full(row["max_hp"]))
-        if row["ttk"] is not None:
-            bits.append(_("abatido em %s por %s") % (dur(row["ttk"]), row["killer"]))
-        self.mob_title.configure(text="  ·  ".join(bits))
-        sub = self.mob_nb.index(self.mob_nb.select())
-        if sub == 0:
-            self.mob_bars.set(an.monster_players(c, self.rng, key, group)[:14])
-        elif sub == 1:
-            bucket = dict((b[1], b[0]) for b in BUCKETS)[self.mob_bucket.get()]
-            ts, series = an.timeline(c, self.rng, bucket, key=key, group=group, top=10)
-            self.mob_chart.set(ts, bucket, series, "line", self.phase_markers(c, key))
-        elif sub == 2:
-            self.t_against.set_rows(an.skills_against(c, self.rng, key, group),
-                                    lambda r: "%s|%s" % (r["player"], r["name"]),
-                                    color_fn=lambda r: self.color_of(r["src"]))
-        else:
-            victims = an.monster_victims(c, self.rng, key)
-            self.victims = {"Todos os alvos": None}
-            self.victims.update({name: aid for aid, name in victims})
-            vals = list(self.victims)
-            if list(self.victim_box["values"]) != vals:
-                self.victim_box["values"] = vals
-            target = self.victims.get(self.victim_var.get())
-            self.t_mskills.set_rows(an.monster_skills(c, self.rng, key, target), lambda r: r["skill"])
-
-    def dps_selected(self, sel):
-        self.dps_sel = sel
-        self.refresh(force=True)
-
-    def clear_dps_sel(self):
-        self.dps_sel = None
-        self.refresh(force=True)
-
-    def refresh_dps(self, c):
-        players = self.players_rows
-        self.dps_players = {(_("%s (você)") % p["name"]) if p["me"] else p["name"]: p["aid"] for p in players}
-        vals = list(self.dps_players)
-        if list(self.dps_player_box["values"]) != vals:
-            self.dps_player_box["values"] = vals
-        aid = self.dps_players.get(self.dps_player.get())
-        if aid is None:
-            aid = c.me if c.me in self.dps_players.values() else (players[0]["aid"] if players else c.me)
-            self.dps_player.set(next((k for k, v in self.dps_players.items() if v == aid), ""))
-        bucket = dict((b[1], b[0]) for b in BUCKETS)[self.dps_bucket.get()]
-        ts, series = an.timeline(c, self.rng, bucket, src=aid)
-        if self.dps_sel:
-            t0, t1 = self.dps_sel
-        elif self.rng:
-            t0, t1 = self.rng
-        else:
-            t0, t1 = (ts[0], ts[-1] + bucket) if ts else (0, 0)
-        w = an.window_stats(c, aid, t0, t1)
-        overlays, hline, bars = [], None, series[:1]
-        if bars:
-            # barras em DPS (dano do intervalo / duração), com média móvel de 5 s e a média da janela
-            a, name, v = bars[0]
-            per_s = [x * 1000.0 / bucket for x in v]
-            bars = [(a, name, per_s)]
-            if len(v) > 2:
-                overlays.append((_("DPS móvel (5 s)"), self.c["fg"], an.rolling_dps(v, bucket)))
-            if w["dps"]:
-                hline = (w["dps"], _("média da janela: %s") % full(round(w["dps"])))
-        self.dps_chart.set(ts, bucket, bars, "bar", self.phase_markers(c), self.dps_sel,
-                           empty=_("Nenhum dano deste jogador no recorte."), overlays=overlays, hline=hline, unit="/s")
-        self.dps_window_lbl.configure(text=_("Estatísticas da janela — %s") % (
-            "%s a %s" % (dur(t0), dur(t1)) if self.dps_sel else _("recorte inteiro (arraste no gráfico para escolher)")))
-        put = self.dps_tiles.put
-        put("window", dur(w["window_ms"]) if self.dps_sel else _("tudo"),
-            "%s – %s" % (dur(t0), dur(t1)) if self.dps_sel else "")
-        put("events", "%d" % w["events"])
-        put("total", full(w["total"]))
-        put("span", dec("%.1f s" % (w["span_ms"] / 1000.0)) if w["events"] else "—",
-            _("do 1º ao último golpe"))
-        put("dps", full(round(w["dps"])) if w["dps"] else "—", "", self.c["accent"])
-        put("mean_gap", "%d ms" % round(w["mean_gap"]) if w["mean_gap"] is not None else "—")
-        put("max_hit", full(w["max_hit"]) if w["events"] else "—")
-        put("avg_hit", full(round(w["avg_hit"])) if w["events"] else "—")
-        put("longest", "%d ms" % w["longest_gap"] if w["events"] > 1 else "—")
-        put("distinct", "%d" % w["distinct"])
-        put("top", w["top_skill"] or "—", full(w["top_skill_dmg"]) if w["top_skill"] else "")
-        self.t_wskills.set_rows(w["skills"], lambda r: r["name"])
-        sig = (id(c), c.version, self.rng)
-        if self.dps_phase_cache[0] != sig:
-            fights = []
-            for f in dd.boss_fights(c, self.rng):
-                if f["dummy"]:
-                    continue
-                x = dd.Ctx(c, f["key"], self.rng)
-                fights.append((f, dd.phase_damage(x)))
-            self.dps_phase_cache = (sig, fights)
-        rows = []
-        for f, (phases, prow) in self.dps_phase_cache[1]:
-            me = next((r for r in prow if r["aid"] == aid), {})
-            for p in phases:
-                mine = me.get("d%d" % p["i"], 0)
-                rows.append(dict(key="%d|%d" % (f["key"], p["i"]), fight="%s · %s" % (
-                    c.target_name(f["key"]).replace(" ★", ""), dur(f["first"])), phase=p["name"], ms=p["ms"],
-                    total=p["total"], dps=p["dps"], mine=mine, share=(mine / float(p["total"])) if p["total"] else None,
-                    my_dps=(mine * 1000.0 / p["ms"]) if p["ms"] else None))
-        self.dps_phase_lbl.configure(text=_("Por fase (lutas contra chefe no recorte)") if rows
-                                     else _("Por fase: nenhuma luta contra chefe no recorte"))
-        self.t_dps_phase.set_rows(rows, lambda r: r["key"])
+        self.mobs_tab.refresh(c)
 
     # ------------------------------------------------------------ buffs
 
@@ -2646,8 +2547,8 @@ class AnalysisWindow:
         modes = tk.Frame(tab, bg=c["panel"])
         modes.pack(fill="x", padx=10, pady=(6, 0))
         self.label(modes, _("Gráfico:"), color="muted", bg="panel").pack(side="left")
-        self.bf_mode = tk.StringVar(self.top, "efeito")
-        for value, text in (("efeito", _("Quanto cada efeito rendeu")), ("jogador", _("Dano creditado a cada jogador"))):
+        self.bf_mode = tk.StringVar(self.top, "jogador")
+        for value, text in (("jogador", _("Dano creditado a cada jogador")), ("efeito", _("Quanto cada efeito rendeu"))):
             tk.Radiobutton(modes, text=text, variable=self.bf_mode, value=value, command=self.bf_mode_changed,
                            bg=c["panel"], fg=c["fg"], selectcolor=c["btn"], activebackground=c["panel"],
                            activeforeground=c["fg"], font=self.f["text"], highlightthickness=0).pack(side="left", padx=(8, 0))
@@ -2899,24 +2800,39 @@ class AnalysisWindow:
         self.section(upper, _("Mortes de jogadores — HP só é conhecido para você e para quem está no seu grupo"))
         self.t_deaths = Table(upper, self, [
             ("t", _("Tempo"), 60, "e", "dur"), ("name", _("Jogador"), 150, "w", "text"), ("job", _("Classe"), 120, "w", "text"),
-            ("cause", _("Causa"), 260, "w", "text"), ("hit", _("Golpe"), 105, "e", "big"),
+            ("cause", _("Causa"), 250, "w", "text"), ("el_txt", _("Propriedade"), 85, "w", "text"),
+            ("hit", _("Golpe"), 105, "e", "big"),
             ("hp_before", _("HP antes"), 95, "e", "big"), ("overkill", _("Overkill"), 105, "e", "big"),
             ("taken_5s", _("Dano em 5 s"), 110, "e", "big")], height=6, on_select=self.death_selected, swatch=True)
         self.t_deaths.pack(fill="both", expand=True, padx=8, pady=(0, 6))
-        self.death_title = self.label(lower, "", "head", bg="panel", anchor="w", justify="left")
-        self.death_title.pack(fill="x", padx=10, pady=(10, 2))
-        self.death_text = self.label(lower, "", "text", "muted", "panel", anchor="w", justify="left")
-        self.death_text.pack(fill="x", padx=10, pady=(0, 6))
+        # a morte escolhida: o desenho de quem matou, o golpe com a propriedade dele e o que aconteceu
+        info = tk.Frame(lower, bg=self.c["panel"])
+        info.pack(fill="x", padx=10, pady=(8, 4))
+        art = tk.Frame(info, bg=self.c["tile"])
+        art.pack(side="left", anchor="n", padx=(0, 12))
+        self.death_sprite = ui_parts.SpriteView(art, self, w=124, h=108)
+        self.death_sprite.pack(padx=3, pady=3)
+        txt = tk.Frame(info, bg=self.c["panel"])
+        txt.pack(side="left", fill="both", expand=True)
+        self.death_title = self.label(txt, "", "head", bg="panel", anchor="w", justify="left")
+        self.death_title.pack(fill="x")
+        chips = tk.Frame(txt, bg=self.c["panel"])
+        chips.pack(fill="x", pady=(3, 3))
+        self.death_skill = self.label(chips, "", "text", bg="panel", anchor="w")
+        self.death_skill.pack(side="left")
+        self.death_el = tk.Label(chips, text="", font=self.f["small"], bg=self.c["panel"], fg="#111318", padx=6)
+        self.death_el.pack(side="left", padx=(8, 0))
+        self.death_text = self.label(txt, "", "text", "muted", "panel", anchor="w", justify="left")
+        self.death_text.pack(fill="x")
         self.t_recap = Table(lower, self, [
             ("rel_txt", _("Antes da morte"), 110, "e", "text"), ("source", _("Fonte"), 200, "w", "text"),
-            ("name", _("Habilidade / evento"), 200, "w", "text"), ("dmg", _("Dano"), 110, "e", "big"),
-            ("hp", _("HP"), 100, "e", "big")], height=8)
+            ("name", _("Habilidade / evento"), 200, "w", "text"), ("el_txt", _("Propriedade"), 95, "w", "text"),
+            ("dmg", _("Dano"), 110, "e", "big"), ("hp", _("HP"), 100, "e", "big")], height=8)
         self.t_recap.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         self.death_key = None
         self.death_rows = []
         self.death_wrap = False
-        lower.bind("<Configure>", lambda e: (self.death_title.configure(wraplength=e.width - 30),
-                                             self.death_text.configure(wraplength=e.width - 30)))
+        ui_parts.follow_wrap(txt, [self.death_title, self.death_text], 16)
 
     def refresh_deaths(self, c):
         rows = an.deaths(c, self.rng)
@@ -2939,6 +2855,7 @@ class AnalysisWindow:
                 d["cause"] = _("último golpe: %s · %s (não bastava sozinho)") % (d["skill"], d["killer"])
             else:
                 d["cause"] = "%s · %s" % (d["skill"], d["killer"])
+            d["el_txt"] = an.element_name(d.get("kill_element"))
             if d["unclear"] or d["fusion"] or not d["overkill"]:
                 d["overkill"] = None
             if d["special"]:
@@ -2964,8 +2881,18 @@ class AnalysisWindow:
         if d is None:
             self.death_title.configure(text=_("Nenhuma morte de jogador neste recorte."))
             self.death_text.configure(text="")
+            self.death_skill.configure(text="")
+            self.death_el.configure(text="", bg=self.c["panel"])
+            self.death_sprite.set(None)
             self.t_recap.set_rows([], lambda r: 0)
             return
+        self.death_sprite.set(d.get("killer_job"), d.get("killer") or "", sprites.MOB_ATTACK)
+        el = d.get("kill_element")
+        named = bool(d.get("skill")) and not d["no_hit"]
+        self.death_skill.configure(text=("%s · %s" % (d["skill"], d["killer"])) if named and d.get("killer")
+                                   else (d["skill"] if named else ""))
+        self.death_el.configure(text=an.element_name(el) if el else "",
+                                bg=an.ELEMENT_COLORS.get(el, self.c["panel"]) if el else self.c["panel"])
         title = _("%s morreu em %s") % (d["name"], dur(d["t"]))
         if d["trap"]:
             title += _(" — armadilha do mapa")
@@ -3024,7 +2951,8 @@ class AnalysisWindow:
         self.death_text.configure(text="  ·  ".join(bits))
         rows = []
         for i, r in enumerate(d["rows"]):
-            rows.append(dict(r, key=i, rel_txt=dec("%.1f s" % (r["rel"] / 1000.0))))
+            rows.append(dict(r, key=i, rel_txt=dec("%.1f s" % (r["rel"] / 1000.0)),
+                             el_txt=an.element_name(r.get("element"))))
         self.t_recap.set_rows(rows, lambda r: r["key"], lambda r: ["warn"] if r["kind"] == "dano" and r["dmg"] else [])
 
     # ------------------------------------------------------------ dedo duro
@@ -3060,7 +2988,7 @@ class AnalysisWindow:
         self.dd_sub = tk.Label(self.dd_banner, text="", font=self.f["small"], fg=c["muted"], bg=band, anchor="w",
                                justify="left")
         self.dd_sub.pack(fill="x")
-        self.dd_banner.bind("<Configure>", lambda e: self.dd_sub.configure(wraplength=e.width - 30))
+        ui_parts.follow_wrap(self.dd_banner, self.dd_sub, 30)
         # grupo e fora do grupo: listas separadas
         self.dd_nb = ttk.Notebook(tab, style="Sub.TNotebook")
         self.dd_nb.pack(fill="both", expand=True, padx=8, pady=(0, 8))
@@ -3072,29 +3000,31 @@ class AnalysisWindow:
         c = self.c
         frame = tk.Frame(nb, bg=c["panel"])
         nb.add(frame, text=_("Grupo") if party else _("Fora do grupo"))
-        side = dict(frame=frame)
-        hint = self.label(frame, "", "small", "muted", "panel", anchor="w", justify="left")
-        hint.pack(fill="x", padx=10, pady=(8, 0))
-        frame.bind("<Configure>", lambda e: hint.configure(wraplength=e.width - 30))
-        side["hint"] = hint
+        side = dict(frame=frame, hint_text="")
         pw = ttk.PanedWindow(frame, orient="vertical", style="An.TPanedwindow")
         pw.pack(fill="both", expand=True)
         upper = tk.Frame(pw, bg=c["panel"])
         lower = tk.Frame(pw, bg=c["panel"])
-        pw.add(upper, weight=1)
-        pw.add(lower, weight=1)
-        side["title"] = self.label(upper, "", "head", bg="panel", anchor="w")
-        side["title"].pack(fill="x", padx=10, pady=(6, 2))
-        # o texto inteiro do alerta escolhido (a coluna Detalhe corta os longos)
-        side["detail"] = self.label(upper, "", "text", "fg", "panel", anchor="w", justify="left")
-        side["detail"].pack(side="bottom", fill="x", padx=10, pady=(2, 4))
-        upper.bind("<Configure>", lambda e, lbl=side["detail"]: lbl.configure(wraplength=e.width - 30))
-        side["alerts"] = Table(upper, self, [
-            ("sev_txt", _("Gravidade"), 95, "w", "text"), ("phase", _("Fase"), 95, "w", "text"),
-            ("what", _("O quê"), 270, "w", "text"), ("who", _("Quem"), 250, "w", "text"),
-            ("detail", _("Detalhe"), 420, "w", "text")], height=8,
-            on_select=lambda r, sd=side: self.dd_detail(sd, r))
-        side["alerts"].pack(fill="both", expand=True, padx=8, pady=(0, 2))
+        pw.add(upper, weight=3)
+        pw.add(lower, weight=2)
+        row = tk.Frame(upper, bg=c["panel"])
+        row.pack(fill="x", padx=10, pady=(8, 4))
+        side["title"] = self.label(row, "", "head", bg="panel", anchor="w")
+        side["title"].pack(side="left")
+        # como o Dedo Duro avalia: numa dica, para a lista de alertas ficar com o espaço
+        how = self.label(row, _("ⓘ como é avaliado"), "small", "muted", "panel", cursor="question_arrow")
+        how.pack(side="right")
+        tip = ui_parts.Tip(self)
+
+        def show_how(e, sd=side):
+            tip.show(id(sd), e.x_root, e.y_root, lambda fr: tk.Label(
+                fr, text=sd["hint_text"], font=self.f["small"], fg=self.c["fg"], bg=self.c["tip"], justify="left",
+                wraplength=int(520 * self.dpi)).pack())
+        how.bind("<Enter>", show_how)
+        how.bind("<Leave>", lambda e: tip.hide())
+        # cada alerta num cartão, com o detalhe inteiro
+        side["alerts"] = ui_parts.AlertList(upper, self)
+        side["alerts"].pack(fill="both", expand=True, padx=6, pady=(0, 2))
         sub = ttk.Notebook(lower, style="Sub.TNotebook")
         sub.pack(fill="both", expand=True, padx=8, pady=(4, 8))
         side["sub"] = sub
@@ -3159,7 +3089,7 @@ class AnalysisWindow:
                                        "arena). Atenção para quem passou 40% do tempo ou mais (e 2 s ou mais) fora "
                                        "dela."), "small", "muted", "panel", anchor="w", justify="left")
                 note.pack(fill="x", padx=6, pady=(6, 0))
-                f.bind("<Configure>", lambda e, lbl=note: lbl.configure(wraplength=e.width - 20))
+                ui_parts.follow_wrap(f, note, 20)
             t = Table(f, self, cols, height=4, swatch=key in ("deaths", "players", "element", "buffs", "poison"))
             t.pack(fill="both", expand=True, padx=4, pady=6)
             side["tables"][key] = t
@@ -3168,14 +3098,6 @@ class AnalysisWindow:
     def dd_pick(self):
         self.dd_key = self.dd_fights.get(self.dd_var.get())
         self.refresh(force=True)
-
-    def dd_detail(self, side, row):
-        if row is None:
-            side["detail"].configure(text="")
-            return
-        side["detail"].configure(text="%s · %s · %s%s" % (row["phase"], row["what"], row["who"],
-                                                         (" — " + row["detail"]) if row["detail"] else ""),
-                                 fg=self.c[{2: "bad", 1: "mid"}.get(row["sev"], "fg")])
 
     def refresh_dedo(self, c):
         fights = dd.boss_fights(c, self.rng)
@@ -3196,10 +3118,9 @@ class AnalysisWindow:
             self.dd_sub.configure(text=_("O Dedo Duro olha as lutas contra MVPs, chefes de instância e bonecos de treino."))
             self.dd_counts.configure(text="")
             for side in (self.dd_group, self.dd_other):
-                side["alerts"].set_rows([], lambda r: 0)
+                side["alerts"].set([])
                 side["title"].configure(text="")
-                side["hint"].configure(text="")
-                side["detail"].configure(text="")
+                side["hint_text"] = ""
                 for t in side["tables"].values():
                     t.set_rows([], lambda r: 0)
             return
@@ -3242,8 +3163,7 @@ class AnalysisWindow:
     def dd_fill(self, side, r, party):
         c = self.c
         alerts = r["alerts"] if party else r["o_alerts"]
-        sev_tag = lambda a: [self.SEV_TAG.get(a["sev"], "")]
-        side["alerts"].set_rows(alerts, lambda a: a["key"], sev_tag)
+        side["alerts"].set(alerts)
         counts = collections.Counter(a["sev"] for a in alerts)
         if party:
             side["title"].configure(text=_("O que faltou e o que deu errado — %d grave(s), %d de atenção, "
@@ -3258,11 +3178,7 @@ class AnalysisWindow:
                                     if r["others"] else _("Ninguém de fora do grupo bateu neste chefe"))
             hint = (_("Buffs e debuffs de quem está fora do grupo não chegam no replay: aqui só aparecem dano, mortes, "
                     "a Garra Sombria e o elemento das skills de elemento fixo."))
-        side["hint"].configure(text=hint)
-        keys = [a["key"] for a in alerts]
-        if side["alerts"].selected() is None and keys:
-            side["alerts"].select(keys[0])
-        self.dd_detail(side, side["alerts"].selected())
+        side["hint_text"] = hint
         multi = r["multi"]
         n = len(r["phases"])
         titles = {"p1": _("Fase 1") if multi else _("Clímax"), "p2": _("Fase 2"), "p3": _("Fase 3")}
@@ -3319,95 +3235,14 @@ class AnalysisWindow:
     # ------------------------------------------------------------ testes
 
     def build_tests(self):
-        tab = tk.Frame(self.nb, bg=self.c["panel"])
-        self.nb.add(tab, text=_("Testes"))
-        bar = tk.Frame(tab, bg=self.c["panel"])
-        bar.pack(fill="x", padx=10, pady=(10, 4))
-        ttk.Button(bar, text=_("Salvar luta como teste…"), style="An.TButton", command=self.save_test).pack(side="left")
-        ttk.Button(bar, text=_("Renomear"), style="An.TButton", command=self.rename_test).pack(side="left", padx=6)
-        ttk.Button(bar, text=_("Excluir"), style="An.TButton", command=self.delete_test).pack(side="left")
-        self.tests_hint = self.label(bar, "", "small", "muted", "panel")
-        self.tests_hint.pack(side="left", padx=12)
-        pw = ttk.PanedWindow(tab, orient="vertical", style="An.TPanedwindow")
-        pw.pack(fill="both", expand=True)
-        upper = tk.Frame(pw, bg=self.c["panel"])
-        lower = tk.Frame(pw, bg=self.c["panel"])
-        pw.add(upper, weight=2)
-        pw.add(lower, weight=3)
-        self.t_tests = Table(upper, self, [
-            ("when", _("Gravado em"), 120, "w", "text"), ("char", _("Personagem"), 140, "w", "text"),
-            ("target", _("Alvo"), 170, "w", "text"), ("combat_ms", _("Em combate"), 85, "e", "dur"),
-            ("damage", _("Dano"), 125, "e", "big"), ("dps", "DPS", 115, "e", "big"), ("label", _("Rótulo"), 200, "w", "text")],
-            height=7, on_select=lambda r: self.refresh_compare(), multi=True)
-        self.t_tests.pack(fill="both", expand=True, padx=8, pady=(0, 6))
-        self.cmp_title = self.label(lower, "", "head", bg="panel", anchor="w", justify="left")
-        self.cmp_title.pack(fill="x", padx=10, pady=(8, 4))
-        sub = ttk.Notebook(lower, style="Sub.TNotebook")
-        sub.pack(fill="both", expand=True, padx=8, pady=(0, 8))
-        specs = [
-            (_("Resumo"), [("name", _("Métrica"), 220, "w", "text"), ("a_txt", "A", 150, "e", "text"),
-                        ("b_txt", "B", 150, "e", "text"), ("diff", "A × B", 100, "e", "pct")]),
-            (_("Skills"), [("name", _("Skill"), 200, "w", "text"), ("a", _("A dano"), 130, "e", "big"),
-                        ("a_share", "A %", 65, "e", "pct"), ("b", _("B dano"), 130, "e", "big"),
-                        ("b_share", "B %", 65, "e", "pct"), ("diff", "A × B", 90, "e", "pct")]),
-            (_("Equipamento"), [("slot_txt", _("Slot"), 120, "w", "text"), ("a", "A", 380, "w", "text"),
-                             ("b", "B", 380, "w", "text")]),
-            (_("Buffs"), [("name", _("Buff"), 220, "w", "text"), ("kind_txt", _("Tipo"), 120, "w", "text"),
-                       ("a", _("A tempo ativo"), 120, "e", "pct"), ("b", _("B tempo ativo"), 120, "e", "pct")]),
-        ]
-        self.cmp_tables = {}
-        for title, cols in specs:
-            f = tk.Frame(sub, bg=self.c["panel"])
-            sub.add(f, text=title)
-            t = Table(f, self, cols, height=8)
-            t.pack(fill="both", expand=True, padx=4, pady=6)
-            self.cmp_tables[title] = t
+        import ui_tests
+        self.tests_tab = ui_tests.TestsTab(self, self.nb)
 
     def store(self):
         return self.app.tests
 
     def refresh_tests(self):
-        st = self.store()
-        rows = []
-        for r in st.records:
-            y, mo, d, hh, mm, _ss = (r.get("recorded_at") or [0] * 6)[:6]
-            rows.append(dict(r, when="%02d/%02d %02d:%02d" % (d, mo, hh, mm)))
-        self.t_tests.set_rows(rows, lambda r: r["id"])
-        self.tests_hint.configure(text=_("%d teste(s). Os encontros contra bonecos de treino são salvos sozinhos; "
-                                       "qualquer outra luta (inclusive de replays de outras pessoas) dá para salvar "
-                                       "no botão. Ctrl + clique escolhe dois para comparar.") % len(rows))
-        self.refresh_compare()
-
-    def refresh_compare(self):
-        sel = self.t_tests.selected_all()
-        st = self.store()
-        if not sel:
-            self.cmp_title.configure(text=_("Escolha um teste (compara com o anterior do mesmo personagem) ou dois."))
-            for t in self.cmp_tables.values():
-                t.set_rows([], lambda r: 0)
-            return
-        a = sel[0]
-        b = sel[1] if len(sel) > 1 else st.previous(a)
-        if len(sel) > 1 and (a.get("recorded_at"), a.get("start", 0)) < (b.get("recorded_at"), b.get("start", 0)):
-            a, b = b, a                       # A = o mais recente
-        name = lambda r: "%s · %s · %s" % (r.get("label") or r["target"], r["char"], dur(r["combat_ms"]))
-        self.cmp_title.configure(text=_("A: %s     B: %s") % (name(a), name(b) if b else "—"))
-        cmp = testes.compare(a, b)
-        for r in cmp["summary"]:
-            fmtv = (lambda v: dur(v)) if r["key"] == "combat_ms" else (lambda v: full(round(v)))
-            r["a_txt"] = fmtv(r["a"])
-            r["b_txt"] = fmtv(r["b"]) if r["b"] is not None else "—"
-        updown = lambda r: (["good"] if (r.get("diff") or 0) > 0.005 else ["warn"] if (r.get("diff") or 0) < -0.005
-                            else [])
-        for r in cmp["equip"]:
-            r["slot_txt"] = _(r["slot"])
-        for r in cmp["buffs"]:
-            r["kind_txt"] = _(r.get("kind") or "")
-        self.cmp_tables[_("Resumo")].set_rows(cmp["summary"], lambda r: r["key"], updown)
-        self.cmp_tables[_("Skills")].set_rows(cmp["skills"], lambda r: r["name"], updown)
-        self.cmp_tables[_("Equipamento")].set_rows(cmp["equip"], lambda r: r["slot"],
-                                                   lambda r: ["warn"] if r["changed"] else [])
-        self.cmp_tables[_("Buffs")].set_rows(cmp["buffs"], lambda r: r["name"])
+        self.tests_tab.refresh()
 
     def save_test(self):
         """Salva como teste qualquer luta do replay aberto (de chefe, boneco ou a sessão inteira), inclusive de
@@ -3457,19 +3292,19 @@ class AnalysisWindow:
         entry.focus_set()
 
     def rename_test(self):
-        sel = self.t_tests.selected_all()
-        if not sel:
+        rec = self.tests_tab.focused()
+        if rec is None:
             return
-        label = simpledialog.askstring(_("Renomear teste"), _("Rótulo:"), initialvalue=sel[0].get("label", ""),
+        label = simpledialog.askstring(_("Renomear teste"), _("Rótulo:"), initialvalue=rec.get("label", ""),
                                        parent=self.top)
         if label is not None:
-            self.store().rename(sel[0]["id"], label.strip())
+            self.store().rename(rec["id"], label.strip())
             self.refresh(force=True)
 
     def delete_test(self):
-        sel = self.t_tests.selected_all()
-        if sel:
-            self.store().delete([r["id"] for r in sel])
+        rec = self.tests_tab.focused()
+        if rec is not None:
+            self.store().delete([rec["id"]])
             self.refresh(force=True)
 
     def copy_ranking(self):
@@ -3529,7 +3364,12 @@ class AnalysisWindow:
 
     def close(self):
         try:
-            self.app.cfg["an_geometry"] = self.top.geometry()
+            zoomed = self.top.state() == "zoomed"
+            self.app.cfg["an_zoomed"] = zoomed
+            if not zoomed:
+                self.app.cfg["an_geometry"] = self.top.geometry()
+            elif self.normal_geo:
+                self.app.cfg["an_geometry"] = self.normal_geo      # o tamanho de antes de maximizar
             self.app.save()
         except tk.TclError:
             pass

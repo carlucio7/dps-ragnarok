@@ -84,14 +84,63 @@ def players(c, rng, dur_ms):
         a["mobs"].add(h.dst)
     kills = collections.Counter(k for k, _t in killing_blows(c, rng).values())
     total = sum(a["total"] for a in agg.values()) or 1
+    extra = players_extra(c, rng)
     rows = []
     for a in agg.values():
+        x = extra.get(a["aid"]) or {}
         rows.append(dict(aid=a["aid"], name=c.name_of(a["aid"]), job=job_of(c, a["aid"]), me=a["aid"] == c.me,
                          total=a["total"], dps=a["total"] * 1000.0 / max(1, dur_ms), share=a["total"] / total,
                          adps=a["total"] * 1000.0 / meter.active_ms(sorted(a["times"])),
                          hits=a["hits"], crits=a["crits"], misses=a["misses"], max_hit=a["max_hit"],
-                         mobs=len(a["mobs"]), kills=kills.get(a["aid"], 0)))
-    rows.sort(key=lambda r: -r["total"])
+                         crit_pct=(a["crits"] / float(a["hits"])) if a["hits"] else None,
+                         mobs=len(a["mobs"]), kills=kills.get(a["aid"], 0), party=c.in_party(a["aid"]),
+                         taken=x.get("taken", 0), deaths=x.get("deaths", 0), uses=x.get("uses", 0),
+                         items=x.get("items", 0)))
+    # quem é do grupo e não deu dano (suportes) também aparece: com o que usou, o que recebeu e as mortes
+    for aid in sorted(set(c.party) - set(agg)):
+        x = extra.get(aid) or {}
+        e = c.entities.get(aid)
+        if e is None or e.kind != "pc" or not (x.get("uses") or x.get("taken") or x.get("deaths") or x.get("items")):
+            continue
+        rows.append(dict(aid=aid, name=c.name_of(aid), job=job_of(c, aid), me=False, total=0, dps=0.0, share=0.0,
+                         adps=None, hits=0, crits=0, misses=0, max_hit=None, crit_pct=None, mobs=0, kills=0,
+                         party=True, taken=x.get("taken", 0), deaths=x.get("deaths", 0), uses=x.get("uses", 0),
+                         items=x.get("items", 0)))
+    rows.sort(key=lambda r: (-r["total"], -r["uses"]))
+    return rows
+
+
+def players_extra(c, rng):
+    """{aid: dict(deaths, taken, uses (skills sem dano), items (itens usados))} de cada jogador no recorte."""
+    out = collections.defaultdict(lambda: dict(deaths=0, taken=0, uses=0, items=0))
+    for t, aid in c.death_log:
+        if _in(rng, t):
+            out[aid]["deaths"] += 1
+    for h in in_hits(c, rng):
+        out[h.dst]["taken"] += h.dmg
+    for t, src, _raw, _dst, _skill in c.uses:
+        if _in(rng, t):
+            out[src]["uses"] += 1
+    for t, aid, _item in getattr(c, "item_uses", ()):
+        if _in(rng, t):
+            out[aid]["items"] += 1
+    return out
+
+
+def support_uses(c, rng, aid):
+    """Skills sem dano (buffs, curas, debuffs) que o jogador usou no recorte: [dict(skill, name, uses, targets)]."""
+    agg = {}
+    for t, src, _raw, dst, skill in c.uses:
+        if src != aid or not _in(rng, t):
+            continue
+        a = agg.get(skill)
+        if a is None:
+            a = agg[skill] = dict(skill=skill, name=meter.skill_name(skill), uses=0, who=set())
+        a["uses"] += 1
+        if dst:
+            a["who"].add(c.resolve(dst))
+    rows = [dict(skill=a["skill"], name=a["name"], uses=a["uses"], targets=len(a["who"])) for a in agg.values()]
+    rows.sort(key=lambda r: -r["uses"])
     return rows
 
 
@@ -476,6 +525,43 @@ def monster_skills(c, rng, key, target=None):
     return rows
 
 
+def monster_report(c, rng, key):
+    """O que o monstro fez no recorte: dano causado, em quantos golpes e jogadores, quem ele matou (golpe final),
+    o maior golpe (com a skill e em quem), quem mais apanhou (com a skill que mais doeu) e o maior golpe de cada
+    skill."""
+    total = hits = 0
+    by_victim = {}
+    best = None
+    skill_max = {}
+    for h in in_hits(c, rng):
+        if h.src != key or h.dmg <= 0 or h.miss:
+            continue
+        total += h.dmg
+        hits += 1
+        v = by_victim.setdefault(h.dst, [0, collections.Counter()])
+        v[0] += h.dmg
+        v[1][h.skill] += h.dmg
+        if best is None or h.dmg > best.dmg:
+            best = h
+        if h.dmg > skill_max.get(h.skill, 0):
+            skill_max[h.skill] = h.dmg
+    dead = collections.Counter()
+    for t, aid in c.death_log:
+        if not _in(rng, t):
+            continue
+        e = c.entities.get(aid)
+        if (aid == c.me or (e is not None and e.kind == "pc")) and _killer_aid(c, aid, t) == key:
+            dead[aid] += 1
+    kills = [c.name_of(a) + (" ×%d" % n if n > 1 else "") for a, n in dead.most_common()]
+    top = None
+    if by_victim:
+        aid, (dmg, skills) = max(by_victim.items(), key=lambda kv: kv[1][0])
+        top = dict(name=c.name_of(aid), dmg=dmg, skill=meter.skill_name(skills.most_common(1)[0][0]))
+    return dict(total=total, hits=hits, victims=len(by_victim), kills=kills, deaths=sum(dead.values()),
+                best=dict(dmg=best.dmg, skill=meter.skill_name(best.skill), victim=c.name_of(best.dst)) if best else None,
+                top=top, skill_max=skill_max)
+
+
 def monster_victims(c, rng, key):
     """Jogadores que o monstro atingiu (para o filtro das habilidades do monstro)."""
     agg = collections.Counter()
@@ -634,7 +720,7 @@ def rolling_dps(values, bucket_ms, window_ms=5000):
 
 def share_text(c, rng, dur_ms, title):
     """Texto para colar no Discord/WhatsApp com o ranking do recorte."""
-    rows = players(c, rng, dur_ms)
+    rows = [r for r in players(c, rng, dur_ms) if r["total"]]
     lines = [_("%s — %s em combate") % (title, _dur(dur_ms))]
     for i, r in enumerate(rows[:10], 1):
         lines.append("%2d. %s (%s) — %s · %.1f%% · DPS %s" % (
@@ -667,6 +753,10 @@ FUSION_KILL_PCT = 0.25    # a União mata quem ataca com 20% de HP ou menos: aci
 
 
 TRAP_NAME = _("Armadilha do mapa")
+# cor de cada propriedade de ataque (resumo da morte no widget e na análise)
+ELEMENT_COLORS = {"Neutral": "#a1a1aa", "Water": "#38bdf8", "Earth": "#d9a05b", "Fire": "#f97316", "Wind": "#4ade80",
+                  "Poison": "#a3e635", "Holy": "#fde047", "Dark": "#a78bfa", "Ghost": "#f0abfc", "Undead": "#94a3b8",
+                  "Mixed": "#e5e7eb"}
 
 
 def trap_hits(c, aid=None, t0=None, t1=None):
@@ -814,7 +904,8 @@ def death_recap(c, aid, t):
     for h in recent:
         rows.append(dict(rel=h.t - t, kind="dano", source=c.target_name(h.src),
                          name=meter.skill_name(h.skill) + (_(" (errou)") if h.miss else ""),
-                         dmg=None if h.miss else h.dmg, hp=None, miss=h.miss))
+                         dmg=None if h.miss else h.dmg, hp=None, miss=h.miss,
+                         element=attack_element(c, h.src, h.skill)))
     last_hp = None
     for st, hpv, _mx in hp:
         if hpv == last_hp:
@@ -864,7 +955,14 @@ def death_recap(c, aid, t):
         killer = c.target_name(killing.src) if killing else ""
         skill = meter.skill_name(killing.skill) if killing else ""
         hit = killing.dmg if killing else 0
+    # o monstro que matou (para o desenho) e a propriedade do golpe final
+    kill_src = special_src if special is not None else (killing.src if killing is not None and lethal is None else None)
+    ke = c.entities.get(kill_src) if kill_src is not None else None
+    killer_job = ke.job if ke is not None and ke.kind != "pc" and kill_src != c.me else None
+    kill_element = (attack_element(c, killing.src, killing.skill)
+                    if killing is not None and lethal is None and special is None and not unclear else None)
     return dict(
+        killer_job=killer_job, kill_element=kill_element,
         t=t, aid=aid, name=c.name_of(aid), job=job_of(c, aid), me=aid == c.me,
         killer=killer, skill=skill, hit=hit, hp_before=hp_before, max_hp=max_hp, overkill=overkill,
         overkill_x=(hit / hp_before) if hit and hp_before else None,
@@ -1246,8 +1344,26 @@ def area_end_cause(c, area, t):
     return text
 
 
+def item_opts(it):
+    """Os textos das opções aleatórias de um item ("ATQ +5%")."""
+    out = []
+    for oid, val, _param in it.options:
+        fmt_ = meter.game_name("option", oid, meter.RANDOM_OPTIONS.get(str(oid)))
+        if fmt_:
+            try:
+                out.append(fmt_ % val if "%d" in fmt_ else fmt_.replace("%%", "%"))
+            except (TypeError, ValueError):
+                out.append(fmt_.replace("%%", "%"))
+    return out
+
+
 def equipment(c, t):
-    return [dict(slot=label, item=meter.item_text(it), item_id=it.item_id) for label, it in c.equipment_at(t)]
+    """O que estava vestido no instante t: uma linha por slot, com o texto inteiro do item e os pedaços dele
+    (refino, grau, cartas e encantamentos, opções) para o painel com os ícones."""
+    return [dict(slot=label, item=meter.item_text(it), item_id=it.item_id, name=meter.item_name(it.item_id),
+                 refine=it.refine, grade=meter.GRADES.get(it.grade, ""),
+                 cards=[cid for cid in it.cards if cid > 0 and str(cid) in meter.ITEMS], opts=item_opts(it))
+            for label, it in c.equipment_at(t)]
 
 
 EQUIP_MERGE_MS = 3000         # trocas seguidas (um conjunto inteiro) contam como uma

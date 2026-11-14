@@ -226,6 +226,12 @@ def entity_name(raw):
 LOOK_CHUNKS = (("hair", 1060), ("weapon", 1061), ("shield", 1062), ("cloth_color", 1063), ("hair_color", 1064),
                ("low", 1065), ("top", 1066), ("mid", 1067), ("robe", 1071))
 RD_SEX = 963                  # REPLAY_DATA: 1 = masculino, 0 = feminino
+# atributos de quem grava no começo da gravação (sessão): os mesmos números da janela de atributos do jogo
+SESSION_STATS = {"str": 1024, "agi": 1025, "vit": 1026, "int": 1027, "dex": 1028, "luk": 1029, "aspd": 1036,
+                 "atk": 1037, "mdef": 1038, "def": 1040, "def2": 1041, "atk2": 1042, "matk": 1043, "matk2": 1044,
+                 "mdef2": 1045, "hit": 1046, "flee": 1047, "crit": 1048, "flee2": 1049, "speed": 1052}
+CT_SESSION2 = 4               # segunda parte da sessão: HP e SP (os atributos de 4ª classe chegam pelo 0x0141)
+SESSION2_STATS = {"maxhp": 2030, "maxsp": 2032}
 
 
 class Session:
@@ -269,6 +275,12 @@ class Session:
         sex = dict(rd).get(RD_SEX, b"")
         if len(sex) >= 4:
             self.look["sex"] = 1 if struct.unpack_from("<i", sex)[0] else 0
+        self.stats = {}               # atributo -> valor no começo da gravação (ASPD, ATQ, precisão...)
+        sess2 = dict(header.container_chunks(buf, CT_SESSION2))
+        for chunks, table in ((sess, SESSION_STATS), (sess2, SESSION2_STATS)):
+            for key, cid in table.items():
+                if len(chunks.get(cid, b"")) >= 4:
+                    self.stats[key] = struct.unpack_from("<i", chunks[cid])[0]
 
 
 def read_session(path, limit=1 << 16):
@@ -380,8 +392,23 @@ P_SLIDE = {0x01FF, 0x08D2}  # ZC_HIGHJUMP / ZC_FASTMOVE: aid, x, y (empurrão, s
 POSITION_PACKETS = {P_MOVE_SELF, P_STOP} | P_SLIDE
 # no LATAM o andar dos outros chega como 0x09fd (aparecer andando) a cada passo, com MoveData de-para
 
+P_COOLDOWN = 0x043D        # ZC_SKILL_POSTDELAY: recarga de uma skill de quem grava (skill, ms)
+P_ITEM_USE = 0x01C8        # ZC_USE_ITEM_ACK2: alguém à vista usou um item (poção, comida, pergaminho)
+P_CAST_STOP = 0x01B9       # ZC_DISPEL: a conjuração de alguém foi interrompida
+P_SKILL_FAIL = 0x0110      # ZC_ACK_TOUSESKILL: a skill de quem grava não saiu (causa 4 = ainda em recarga)
+P_STATS = 0x00BD           # ZC_STATUS: a janela de atributos inteira de quem grava
+P_STAT_PAIR = 0x0141       # ZC_COUPLESTATUS: um atributo de quem grava (base, bônus)
+FAIL_DELAY = 4             # causa do 0x0110: a skill ainda não pode ser usada (recarga ou pós-conjuração)
+# atributos de quem grava que chegam pelo 0x00b0 quando mudam (os nomes são os de Combat.stat_log)
+STAT_PARAMS = {0: "speed", 6: "maxhp", 8: "maxsp", 41: "atk", 42: "atk2", 43: "matk", 44: "matk2", 45: "def",
+               46: "def2", 47: "mdef", 48: "mdef2", 49: "hit", 50: "flee", 51: "flee2", 52: "crit", 53: "aspd",
+               225: "patk", 226: "smatk", 227: "res", 228: "mres", 229: "hplus", 230: "crate"}
+STAT_PAIRS = {13: "str", 14: "agi", 15: "vit", 16: "int", 17: "dex", 18: "luk",
+              219: "pow", 220: "sta", 221: "wis", 222: "spl", 223: "con", 224: "crt"}
+STAT_PACKETS = {P_COOLDOWN, P_ITEM_USE, P_CAST_STOP, P_SKILL_FAIL, P_STATS, P_STAT_PAIR}
+
 STATUS_PACKETS = {P_STATUS, P_STATUS2, P_STATUS3}
-WANTED = DAMAGE_PACKETS | SPAWN_PACKETS | SKILL_USE_PACKETS | CAST_PACKETS | STATUS_PACKETS | POSITION_PACKETS | ITEM_PACKETS | {
+WANTED = STAT_PACKETS | DAMAGE_PACKETS | SPAWN_PACKETS | SKILL_USE_PACKETS | CAST_PACKETS | STATUS_PACKETS | POSITION_PACKETS | ITEM_PACKETS | {
     P_VANISH, P_MAPMOVE, P_GROUND_UNIT, P_HP_INFO, 0x010F, P_PARAM, P_PARTY_HP, P_WEAR, P_TAKEOFF, P_ITEM_ADD,
     P_OPTION, P_EFFECT, P_RESURRECT, P_SPRITE, P_STARSKILL, P_QUEST_DONE, P_QUEST_HUNT, P_GROUND_GONE,
     P_GROUND_SKILL, P_BROADCAST}
@@ -575,6 +602,56 @@ def parse_param(d):
         return struct.unpack_from("<Hi", d, 2)
     except struct.error:
         return None
+
+
+def parse_cooldown(d):
+    """0x043d: (skill, recarga em ms)."""
+    try:
+        return struct.unpack_from("<HI", d, 2)
+    except struct.error:
+        return None
+
+
+def parse_item_use(d):
+    """0x01c8: (quem usou, item, quantos sobraram, deu certo)."""
+    try:
+        _index, item, aid, left, ok = struct.unpack_from("<HIIHB", d, 2)
+        return aid, item, left, bool(ok)
+    except struct.error:
+        return None
+
+
+def parse_skill_fail(d):
+    """0x0110: (skill, causa)."""
+    try:
+        skill, _btype, _item, _flag, cause = struct.unpack_from("<HiIBB", d, 2)
+        return skill, cause
+    except struct.error:
+        return None
+
+
+def parse_stats(d):
+    """0x00bd: {atributo: valor} da janela de atributos de quem grava. Chance de crítico e esquiva perfeita vêm
+    aqui em outra escala: ficam com o que o 0x00b0 e a sessão dizem."""
+    try:
+        v = struct.unpack_from("<12B11H", d, 4)
+        aspd = struct.unpack_from("<H", d, 40)[0]
+    except struct.error:
+        return None
+    out = dict(zip(("str", "agi", "vit", "int", "dex", "luk"), v[0:12:2]))
+    out.update(zip(("atk", "atk2", "matk", "matk2", "def", "def2", "mdef", "mdef2", "hit", "flee"), v[12:22]))
+    out["aspd"] = aspd
+    return out
+
+
+def parse_stat_pair(d):
+    """0x0141: (atributo, base, bônus) ou None se não for um dos que interessam."""
+    try:
+        kind, base, plus = struct.unpack_from("<Iii", d, 2)
+    except struct.error:
+        return None
+    name = STAT_PAIRS.get(kind)
+    return (name, base, plus) if name else None
 
 
 def parse_party_hp(d):

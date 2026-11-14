@@ -68,18 +68,15 @@ for i, name in enumerate(["habilidades", "monstros", "linha_do_tempo"]):
     an_win.player_nb.select(i)
     an_win.refresh(force=True)
     s.shot_window(an_win.top, "12_analise_jogadores_%d_%s" % (i, name))
+for i, name in enumerate(["suporte_e_itens", "dano_recebido", "buffs"], start=3):
+    an_win.player_nb.select(i - 1)
+    an_win.refresh(force=True)
+    s.shot_window(an_win.top, "12_analise_jogadores_%d_%s" % (i, name))
 an_win.select_tab("monstros")
-for i, name in enumerate(["dano_por_jogador", "linha_do_tempo", "skills_contra", "skills_do_monstro"]):
-    an_win.mob_nb.select(i)
+for i, name in enumerate(["skills_do_monstro", "dano_por_jogador", "linha_do_tempo", "skills_contra"]):
+    an_win.mobs_tab.nb.select(i)
     an_win.refresh(force=True)
     s.shot_window(an_win.top, "13_analise_monstro_%d_%s" % (i, name))
-an_win.select_tab("dps")
-an_win.refresh(force=True)
-s.shot_window(an_win.top, "14_analise_dps")
-ts = an_win.dps_chart.data[0]
-if ts:
-    an_win.dps_selected((ts[len(ts) // 3], ts[len(ts) // 2]))
-s.shot_window(an_win.top, "15_analise_dps_trecho")
 an_win.top.geometry("760x560+60+40")
 an_win.refresh(force=True)
 s.shot_window(an_win.top, "16_analise_pequena")
@@ -88,15 +85,23 @@ an_win.refresh(force=True)
 s.shot_window(an_win.top, "17_analise_pequena_resumo")
 an_win.top.geometry("1400x900+60+40")
 an_win.set_zoom(2)
-an_win.select_tab("dps")
+an_win.select_tab("jogadores")
 an_win.refresh(force=True)
 s.shot_window(an_win.top, "18_analise_zoom")
 an_win.set_zoom(0)
 an_win.top.geometry("1180x860+60+40")
-for name in ("equip", "buffs", "mortes", "testes"):
+for name in ("equip", "drops", "xp", "buffs", "mortes", "testes", "cartoes"):
     an_win.select_tab(name)
     an_win.refresh(force=True)
     s.shot_window(an_win.top, "18_analise_%s" % name)
+an_win.select_tab("xp")
+an_win.xp_sub.select(3)                 # o simulador de XP
+an_win.refresh(force=True)
+s.shot_window(an_win.top, "18_analise_xp_simulador")
+an_win.xp_sub.select(0)
+an_win.open_pings()                     # a janela Avisos de item (abre mesmo sem replay)
+s.shot_window(an_win.ping_dlg, "18_avisos_de_item")
+an_win.ping_dlg.destroy()
 # linha do tempo: a luta toda, um trecho aproximado e com tudo ligado
 an_win.select_tab("linha")
 an_win.refresh(force=True)

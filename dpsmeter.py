@@ -10,6 +10,7 @@ botão para ver o que ele faz no rodapé; o botão direito abre todas as opçõe
 """
 
 import ctypes
+import faulthandler
 import json
 import os
 import random
@@ -23,6 +24,7 @@ import tkinter.font as tkfont
 from tkinter import filedialog, messagebox
 
 import analysis
+import cards
 import clientdata
 import itemkind
 import itemping
@@ -64,6 +66,11 @@ MIRACLE_FLASH_S = 9.0  # o widget brilha por esse tempo quando o Milagre ativa
 MIRACLE_BANNER_S = 6.0
 MIRACLE_COLORS = ("#fbbf24", "#fde68a", "#c084fc", "#f9a8d4", "#ffffff", "#a5b4fc")
 POLL_MS = 150         # ler o pedaço novo do arquivo custa < 1 ms
+# Com uma thread de leitura ocupada (desenhos do jogo, lista de itens), o Python só devolve a vez à tela a cada
+# "intervalo de troca" (5 ms por padrão), e isso a cada chamada do Tk: um desenho do widget faz uma centena delas
+# e montar uma aba da análise, milhares, então a tela parava por segundos. Com 0,5 ms ela continua andando.
+SWITCH_S = 0.0005
+STALL_S = 8.0          # laço parado por mais que isso: o erros.log ganha onde o programa estava (vigia)
 XP_ROWS_S = 1.0       # as linhas da XP (aba e faixa fixa) são refeitas no máximo a cada tanto...
 XP_ROWS_COST = 20     # ...ou a cada 20× o que a conta levou, se ela ficar cara (sessão de muitas horas)
 DEATH_CARD_S = 10.0   # o resumo da morte fica no widget por esse tempo
@@ -97,9 +104,7 @@ DEATH_TITLES = [_("VOCÊ MORREU"), _("MORREU DE NOVO"), _("DE NOVO?!"), _("MELHO
                 _("O CHÃO TE CONHECE"), _("SALVOU NA KAFRA?"), _("MODO TAPETE ATIVADO"), _("%d MORTES. RESPEITO.")]
 DEATH_DIM = 0.55            # o widget escurece (nas cores do tema) enquanto o resumo da morte aparece
 # cor de cada propriedade de ataque no resumo da morte
-ELEMENT_COLORS = {"Neutral": "#a1a1aa", "Water": "#38bdf8", "Earth": "#d9a05b", "Fire": "#f97316", "Wind": "#4ade80",
-                  "Poison": "#a3e635", "Holy": "#fde047", "Dark": "#a78bfa", "Ghost": "#f0abfc", "Undead": "#94a3b8",
-                  "Mixed": "#e5e7eb"}
+ELEMENT_COLORS = analysis.ELEMENT_COLORS
 
 THEMES = {
     "Grafite":    dict(bg="#1e1f24", btn="#2d2f37", fg="#f2f3f5", muted="#8b8f99", accent="#5b9cff", live="#ff5c5c"),
@@ -134,6 +139,8 @@ HINTS = {
     "row": _("Botão direito: fixar no widget, ocultar..."),
     "death": _("Clique: fechar · botão direito: desligar o resumo da morte"),
     "bosscard": _("Clique: fechar · botão direito: desligar o aviso do chefe"),
+    "tracker": _("Efeito acompanhado · botão direito: como mostrar ou parar de acompanhar"),
+    "fxcard": _("Clique: fechar até o efeito acabar · botão direito: como mostrar"),
 }
 # o que dá para fixar na faixa abaixo das abas (além dos itens da aba Drops)
 PIN_STATS = [("xp_min", _("XP por minuto")), ("xp_hour", _("XP por hora")), ("xp_total", _("XP estimada")),
@@ -159,7 +166,7 @@ DEFAULTS = {
     "rows": 6, "gap_s": 15, "tab": "group", "session": True, "show_pct": False,
     "rate": "combat",      # DPS: "combat" = dano / tempo da luta; "active" = dano / tempo em que cada um bateu
     "folder": None, "x": None, "y": None, "v": CONFIG_VERSION, "width": BASE_W,
-    "an_geometry": None, "an_tab": 0, "an_zoom": 1.0,
+    "an_geometry": None, "an_zoomed": False, "an_tab": 0, "an_zoom": 1.0,
     "auto_tests": True, "alert_buffs": True, "alert_death": True, "alert_fusion": True, "alert_miracle": True, "miracle_sound": True,
     "miracle_volume": 40,  # volume do som do Milagre (%)
     "targets": "all",
@@ -188,6 +195,15 @@ DEFAULTS = {
     "ping_sound": True,     # ...com o som (sem item marcado, nada toca)
     "ping_volume": 40,
     "ping_tone": itemping.DEFAULT_TONE,   # tom do som: "grave", "medio", "agudo" ou "bem agudo"
+    "ping_keep": "all",     # itens marcados valem: "all" (todos os personagens), "char" (cada um a sua lista) ou
+                            # "session" (só até fechar o programa)
+    "ping_chars": {},       # {personagem: [itens]} quando cada personagem tem a sua lista
+    "cards_off": [],        # cartões do programa desligados no gerenciador de cartões (cards.SYSTEM)
+    "trackers": [],         # efeitos acompanhados no widget: [{"kind": "status" | "area", "id", "where"}]
+    "tracker_rows": cards.DEFAULT_ROWS,   # quantos contadores aparecem ao mesmo tempo
+    "tracker_flash": True,  # o contador pisca "acabou" por alguns segundos
+    "tracker_sound": False,  # ...com um som curto
+    "tracker_volume": 40,
 }
 
 
@@ -427,6 +443,15 @@ class DpsApp:
         self.pings = itemping.Tracker()   # itens marcados para aviso: os que caíram e ainda estão no chão
         self.ping_card = None         # (item marcado que caiu e onde, quando apareceu)
         self.ping_played = 0.0
+        self.ping_session = None      # itens marcados só até fechar o programa (ping_keep "session")
+        self.watch = cards.Watch()    # efeitos acompanhados: o que estava ativo na leitura anterior
+        self.watch_for = None
+        self.tracker_rows = []        # contadores a desenhar no pé das linhas
+        self.pinned_fx = {}           # contadores dos efeitos fixados na faixa fixa: chave -> linha
+        self.fx_cards = []            # efeitos ativos que a pessoa escolheu ver como cartão
+        self.fx_closed = set()        # ...os que ela fechou com um clique (voltam quando o efeito for aplicado de novo)
+        self.fx_now = []              # ...os que o cartão mostra neste desenho
+        self.tracker_n = 0            # quantos couberam no último desenho
 
         root.title(_("Replay Master"))
         root.report_callback_exception = self.log_error
@@ -603,9 +628,38 @@ class DpsApp:
 
     # ------------------------------------------------------------ dados
 
+    def watch_stalls(self):
+        """Vigia numa thread: se o laço do widget ficar mais de STALL_S sem rodar (janela "não respondendo"),
+        escreve no erros.log o que cada thread estava fazendo. Uma vez por parada; não mexe em mais nada."""
+        self.beat = time.monotonic()
+
+        def run():
+            told = None
+            while True:
+                time.sleep(2.0)
+                beat = self.beat
+                late = time.monotonic() - beat
+                if late < STALL_S or told == beat:
+                    continue
+                told = beat
+                if late > STALL_S + 60:          # o computador estava dormindo ou hibernando: não é travamento
+                    continue
+                try:
+                    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+                    with open(os.path.join(os.path.dirname(CONFIG_PATH), "erros.log"), "a", encoding="utf-8") as f:
+                        f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + "tela parada há %d s (%s); o que cada thread fazia:\n"
+                                % (late, VERSION))
+                        f.flush()
+                        faulthandler.dump_traceback(file=f, all_threads=True)
+                        f.write("\n")
+                except (OSError, ValueError, RuntimeError):
+                    pass
+        threading.Thread(target=run, daemon=True).start()
+
     def tick(self):
         """Laço do widget: lê o replay, desenha e se reagenda. Um erro em qualquer parte vai para o erros.log, mas
         nunca para o laço (antes, um erro ao desenhar congelava o DPS e os drops)."""
+        self.beat = time.monotonic()
         try:
             self.step()
         except Exception:  # noqa: BLE001
@@ -636,6 +690,7 @@ class DpsApp:
             f.combat.finished = not self.watcher.recording(now)
             self.check_alerts(f, now)
             self.check_pings(f.combat, now)
+            self.check_trackers(f.combat, now)
             if now - self.xp_auto_at >= 3.0:
                 self.xp_auto_at = now
                 self.xp_auto(f.combat)
@@ -746,10 +801,251 @@ class DpsApp:
             self.dirty = True
         self.check_summary(c, now)
 
+    def check_trackers(self, c, now):
+        """Efeitos acompanhados (gerenciador de cartões): o que está ativo agora vira contador no pé das linhas.
+        Só durante a gravação: num replay antigo o que ficou ligado no fim não está mais acontecendo."""
+        try:
+            trackers = cards.tracked(self.cfg)
+            if not trackers or c.finished:
+                if self.tracker_rows or self.pinned_fx or self.fx_cards:
+                    self.tracker_rows, self.pinned_fx, self.fx_cards = [], {}, []
+                    self.dirty = True
+                self.watch.reset()
+                return
+            if c is not self.watch_for:
+                self.watch.reset()
+                self.watch_for = c
+            rows, ended = self.watch.update(cards.live(c, trackers), now, self.cfg.get("tracker_flash", True))
+            if ended and self.cfg.get("tracker_sound"):
+                play_beep(self.cfg.get("tracker_volume", 40))
+            if rows or self.tracker_rows or self.pinned_fx or self.fx_cards:
+                self.dirty = True                 # o contador anda a cada leitura
+            # cada efeito aparece como a pessoa escolheu: fixado na faixa fixa (à vista mesmo com um cartão),
+            # cartão enquanto durar, ou contador no pé das linhas
+            fixed = {p[3:] for p in (self.cfg.get("pins") or []) if p.startswith("fx:")}
+            show = {"%s:%d" % (t["kind"], t["id"]): t["show"] for t in trackers}
+            self.fx_closed &= {r["key"] for r in rows}        # acabou: na próxima vez o cartão volta
+            self.pinned_fx = {r["key"]: r for r in rows if r["key"] in fixed}
+            rest = [r for r in rows if r["key"] not in fixed]
+            self.fx_cards = [r for r in rest if show.get(r["key"]) == "card"]
+            self.tracker_rows = [r for r in rest if show.get(r["key"]) != "card" or r["key"] in self.fx_closed]
+            mob = next((r["mob"] for r in self.fx_cards if r.get("mob")), None)
+            if mob:                               # o desenho do monstro do cartão carrega em outra thread
+                sprites.MONSTERS.start(clientdata.NAMES.grf)
+                sprites.MONSTERS.image(("mob", mob))
+        except Exception:  # noqa: BLE001 - os contadores são um extra
+            self.log_error(*sys.exc_info())
+
+    def tracker_count(self):
+        """Quantos contadores cabem: até o escolhido, deixando pelo menos duas linhas da lista à vista."""
+        limit = min(int(self.cfg.get("tracker_rows") or cards.DEFAULT_ROWS), max(1, self.cfg["rows"] - 2))
+        return min(len(self.tracker_rows), limit)
+
+    def draw_trackers(self):
+        """Contadores dos efeitos acompanhados, no pé das linhas: o nome, em quem está e o tempo que falta, com a
+        barra esvaziando. Sem duração conhecida mostra há quanto tempo está ativo. Quando acaba, pisca "acabou"."""
+        n = self.tracker_n = self.tracker_count()
+        if not n:
+            return
+        c, s, W, t = self.canvas, self.s, self.W, self.t
+        rows = self.tracker_rows[:n]
+        bottom = (self.rows_y0() + self.cfg["rows"] * ROW_H - 2) * s
+        top = bottom - n * ROW_H * s
+        x0, x1 = 8 * s, W - 8 * s
+        c.create_rectangle(0, top - 3 * s, W, bottom + 1 * s, fill=t["bg"], outline="")
+        c.create_line(x0, top - 2 * s, x1, top - 2 * s, fill=mix(t["bg"], t["muted"], 0.35))
+        for i, r in enumerate(rows):
+            y0 = top + i * ROW_H * s
+            y1 = y0 + (ROW_H - 3) * s
+            ended = r.get("ended") is not None
+            left = r.get("left")
+            if ended:
+                col = "#ef4444"
+            elif left is not None and left < 3000:
+                col = "#f59e0b"
+            else:
+                col = t["accent"] if r["where"] == "target" else "#22c55e"
+            frac = 1.0
+            if ended:
+                frac = 1.0 if self.phase < 4 else 0.0          # pisca
+            elif left is not None and r.get("total"):
+                frac = max(0.0, min(1.0, left / float(r["total"])))
+            c.create_polygon(round_rect_pts(x0, y0, x1, y1, 4 * s), smooth=True, fill=mix(t["bg"], col, 0.13),
+                             outline="")
+            if frac > 0.01:
+                c.create_polygon(round_rect_pts(x0, y0, x0 + max(8 * s, (x1 - x0) * frac), y1, 4 * s), smooth=True,
+                                 fill=mix(t["bg"], col, 0.36), outline="")
+            cy = (y0 + y1) / 2
+            tid = c.create_text(x1 - 7 * s, cy, anchor="e", text=cards.time_text(r), font=self.fonts["num"],
+                                fill=self.readable(col) if (ended or (left is not None and left < 3000)) else t["fg"])
+            label = cards.short_name(r["name"]) + ((" · " + r["target"]) if r.get("target") else "")
+            nid = c.create_text(x0 + 7 * s, cy, anchor="w", text=label, font=self.fonts["text"], fill=t["fg"])
+            self.clip_text(nid, label, c.bbox(tid)[0] - 6 * s)
+            self.hits.append((("tracker", r["key"]), (x0, y0, x1, y1)))
+
+    def fx_card_rows(self):
+        """Os efeitos ativos escolhidos para aparecer como cartão, menos os que a pessoa fechou até acabarem."""
+        return [r for r in self.fx_cards if r["key"] not in self.fx_closed]
+
+    def draw_fx_card(self):
+        """Cartão dos efeitos acompanhados (de quem escolheu vê-los como cartão): no modelo dos outros cartões, fica
+        enquanto o efeito durar, com o tempo que falta no lugar da contagem. O que acaba antes vai no título; os
+        outros efeitos ativos (inclusive os contadores, que o cartão cobre) vêm nas linhas. Quando acaba, o cartão
+        fica vermelho por uns segundos."""
+        rows = self.fx_now
+        if not rows:
+            return
+        first = rows[0]
+        ended = first.get("ended") is not None
+        left = first.get("left")
+        name = cards.short_name(first["name"])
+        if ended:
+            sev, title = "grave", _("%s acabou") % name
+        else:
+            sev = "atencao" if left is not None and left < 3000 else ("info" if first["where"] == "target" else "bom")
+            title = name
+        lines = []
+        if first.get("target"):
+            lines.append(((_("em %s") if first["where"] == "target" else _("de %s")) % first["target"], CARD_DIM))
+        if not ended:
+            lines.append(((_("faltam %s") % cards.time_text(first)) if left is not None else cards.time_text(first),
+                          CARD_WHITE))
+        for r in rows[1:] + self.tracker_rows:
+            gone = r.get("ended") is not None
+            soon = r.get("left") is not None and r["left"] < 3000
+            lines.append(("%s · %s" % (cards.short_name(r["name"]), cards.time_text(r)),
+                          "#f87171" if gone else ("#fbbf24" if soon else CARD_WHITE)))
+        frac = 1.0
+        if ended:
+            frac = 1.0 if self.phase < 4 else 0.0              # pisca
+        elif left is not None and first.get("total"):
+            frac = max(0.0, min(1.0, left / float(first["total"])))
+        self.draw_card("fxcard", 0, 1, sev, title, lines, ("mob", first["mob"]) if first.get("mob") else None,
+                       timer=cards.time_text(first), frac=frac)
+
+    def close_fx_card(self):
+        """Clique no cartão dos efeitos: fecha até eles acabarem (enquanto isso aparecem como contadores)."""
+        self.fx_closed |= {r["key"] for r in self.fx_now}
+        self.dirty = True
+
+    def fx_show(self, kind, ident):
+        """Como um efeito acompanhado aparece agora: "pin", "card" ou "counter"."""
+        if self.fx_pin_key(kind, ident) in (self.cfg.get("pins") or []):
+            return "pin"
+        e = cards.entry(kind, ident)
+        ids = set(e["ids"]) if e else {ident}
+        return next((t["show"] for t in cards.tracked(self.cfg) if t["kind"] == kind and t["id"] in ids), "counter")
+
+    def set_fx_show(self, kind, ident, mode):
+        """Escolhe como um efeito acompanhado aparece: "counter" (contador no pé das linhas), "pin" (fixado na
+        faixa fixa) ou "card" (cartão enquanto durar). Um efeito que ainda não era acompanhado entra na lista."""
+        key = self.fx_pin_key(kind, ident)
+        pinned = key in (self.cfg.get("pins") or [])
+        if not cards.is_tracked(self.cfg, kind, ident):
+            cards.track(self.cfg, kind, ident, on=True)
+        if mode == "pin":
+            if not pinned:
+                self.toggle_pin_stat(key)
+        else:
+            if pinned:
+                self.toggle_pin_stat(key)
+            cards.track(self.cfg, kind, ident, on=True, show=mode)
+            self.fx_closed.discard(key[3:])
+        self.save()
+        self.dirty = True
+        if self.analysis is not None:
+            self.analysis.refresh(force=True)
+
+    def tracker_menu(self, key):
+        m = self.new_menu()
+        kind, _sep, ident = key.partition(":")
+        seen = self.tracker_rows + self.fx_cards + list(self.pinned_fx.values())
+        row = next((r for r in seen if r["key"] == key), None)
+        if row is not None:
+            sm = self.new_menu(m)
+            var = self.keep(tk.StringVar(self.root, self.fx_show(kind, int(ident))))
+            for mode, label in (("counter", _("Contador no pé das linhas")),
+                                ("pin", _("Fixado na faixa fixa (à vista com um cartão aberto)")),
+                                ("card", _("Cartão enquanto durar"))):
+                sm.add_radiobutton(label=label, variable=var, value=mode,
+                                   command=lambda mode=mode: self.set_fx_show(kind, int(ident), mode))
+            m.add_cascade(label=_("Mostrar %s como") % cards.short_name(row["name"]), menu=sm)
+            m.add_command(label=_("Parar de acompanhar %s") % row["name"],
+                          command=lambda: self.untrack(kind, int(ident)))
+        m.add_command(label=_("Cartões e efeitos acompanhados…"), command=lambda: self.open_analysis("cartoes"))
+        return m
+
+    def fx_pin_key(self, kind, ident):
+        e = cards.entry(kind, ident)
+        return "fx:%s:%d" % (kind, e["id"] if e else ident)
+
+    def toggle_pin_fx(self, kind, ident):
+        """Fixa (ou desafixa) um efeito acompanhado na faixa fixa: ele sai dos contadores do pé e fica na faixa,
+        à vista mesmo com um cartão aberto. Fixar também põe o efeito na lista dos acompanhados."""
+        key = self.fx_pin_key(kind, ident)
+        if key not in (self.cfg.get("pins") or []) and not cards.is_tracked(self.cfg, kind, ident):
+            cards.track(self.cfg, kind, ident, on=True)
+        self.toggle_pin_stat(key)
+        self.dirty = True
+        if self.analysis is not None:
+            self.analysis.refresh(force=True)
+
+    def untrack(self, kind, ident):
+        changed = cards.track(self.cfg, kind, ident, on=False)
+        key = self.fx_pin_key(kind, ident)
+        if key in (self.cfg.get("pins") or []):          # deixou de acompanhar: sai da faixa fixa também
+            self.cfg["pins"] = [p for p in self.cfg["pins"] if p != key]
+            self.resize_window()
+            changed = True
+        if changed:
+            self.save()
+        self.dirty = True
+        if self.analysis is not None:
+            self.analysis.refresh(force=True)
+
+    def ping_char(self):
+        """O personagem da lista de itens marcados: o do replay aberto, senão o último visto (None = nenhum ainda)."""
+        cb = self.combat()
+        name = cb.session.player if cb is not None else None
+        if name and self.cfg.get("ping_last_char") != name:
+            self.cfg["ping_last_char"] = name
+        return name or self.cfg.get("ping_last_char")
+
+    def ping_list(self):
+        """A lista de itens marcados que vale agora: a de todos os personagens, a deste personagem ou a desta
+        sessão do programa (ping_keep). É a própria lista guardada: mexer nela e salvar basta."""
+        mode = self.cfg.get("ping_keep") or "all"
+        if mode == "session":
+            if self.ping_session is None:
+                self.ping_session = []
+            return self.ping_session
+        who = self.ping_char() if mode == "char" else None
+        if who:
+            chars = self.cfg.setdefault("ping_chars", {})
+            if not isinstance(chars.get(who), list):      # a primeira vez do personagem começa com a lista geral
+                chars[who] = [i for i in (self.cfg.get("ping_items") or []) if isinstance(i, int)]
+            return chars[who]
+        if not isinstance(self.cfg.get("ping_items"), list):
+            self.cfg["ping_items"] = []
+        return self.cfg["ping_items"]
+
+    def set_ping_keep(self, mode):
+        """Troca para quem valem os itens marcados. A lista nova começa com o que valia até aqui."""
+        if mode not in ("all", "char", "session") or mode == (self.cfg.get("ping_keep") or "all"):
+            return
+        cur = [i for i in self.ping_list() if isinstance(i, int)]
+        self.cfg["ping_keep"] = mode
+        if mode == "session":
+            self.ping_session = list(cur)
+        else:
+            self.ping_list()
+        self.save()
+        self.drops_changed()
+
     def ping_items(self):
         """Os itens marcados para aviso."""
         out = set()
-        for i in self.cfg.get("ping_items") or []:
+        for i in self.ping_list():
             try:
                 out.add(int(i))
             except (TypeError, ValueError):
@@ -758,14 +1054,13 @@ class DpsApp:
 
     def toggle_ping(self, item):
         """Marca ou desmarca o aviso de um item (botão direito no item, no widget ou na aba Drops da análise)."""
-        items = [i for i in (self.cfg.get("ping_items") or []) if isinstance(i, int)]
+        items = self.ping_list()
         if item in items:
             items.remove(item)
             if self.ping_card and self.ping_card[0]["item"] == item:
                 self.ping_card = None
         else:
             items.append(item)
-        self.cfg["ping_items"] = items
         self.save()
         self.drops_changed()
 
@@ -801,9 +1096,10 @@ class DpsApp:
                 sprites.MONSTERS.image(spec)
         except Exception:  # noqa: BLE001 - sem o desenho o cartão aparece do mesmo jeito
             spec = None
-        self.ping_card = (dict(kind=kind, ref=info, item=item, name=name, count=info.get("count") or 1,
-                               map=info.get("map"), x=info.get("x"), y=info.get("y"), mob=info.get("mob"), secs=secs,
-                               sprite=spec), now)
+        if cards.enabled(self.cfg, "ping"):       # o cartão dá para desligar no gerenciador (o som é à parte)
+            self.ping_card = (dict(kind=kind, ref=info, item=item, name=name, count=info.get("count") or 1,
+                                   map=info.get("map"), x=info.get("x"), y=info.get("y"), mob=info.get("mob"),
+                                   secs=secs, sprite=spec), now)
         text = {"drop": _("Caiu: %s"), "mvp": _("Prêmio de MVP: %s"), "left": _("Ficou para trás: %s")}[kind] % name
         self.alert = (text, "info", now)
         if self.cfg.get("ping_sound", True) and now - self.ping_played >= PING_SOUND_GAP_S:
@@ -949,7 +1245,7 @@ class DpsApp:
     def show_boss_card(self, c, seq, now):
         """Cartão do chefe que mudou; o que chega do mesmo chefe logo depois entra no mesmo cartão."""
         info = getattr(c, "boss_alerts", {}).get(seq)
-        if info is None:
+        if info is None or not cards.enabled(self.cfg, cards.boss_card_key(info)):
             return
         try:
             info = dict(info)
@@ -1066,6 +1362,9 @@ class DpsApp:
         s = self.s
         self.W, self.H = W, H = self.size_px()
         self.hits = []
+        # o cartão dos efeitos acompanhados só aparece quando nenhum outro cartão está na frente
+        self.fx_now = [] if (self.death_card or self.ping_card or self.boss_card or self.summary_card) \
+            else self.fx_card_rows()
         self.root.configure(bg=t["bg"])
         c.configure(bg=t["bg"])
 
@@ -1120,6 +1419,9 @@ class DpsApp:
                 label = _("em combate") if session else (_("ao vivo") if snap["live"] else _("duração"))
                 lines.append((_("%s %s") % (label, dur(snap["duration_ms"])), t["muted"]))
         lines_w = max([self.fonts["small"].measure(txt) for txt, _c in lines] + [0])
+        side = self.side_pins(cb)                 # com um cartão aberto, o que está fixado vem para cá
+        if side:
+            lines, lines_w = [], self.side_pins_width(side)
         big_text = num(snap["my_adps"] if active else snap["my_dps"]) if snap else "—"
         room = rx - lines_w - 10 * s - 12 * s
         unit_w = self.fonts["unit"].measure("DPS") + 4 * s
@@ -1135,6 +1437,8 @@ class DpsApp:
         y0 = BIG_Y * s - (len(lines) - 1) * 7 * s
         for i, (txt, col) in enumerate(lines):
             c.create_text(rx, y0 + i * 14 * s, anchor="e", text=txt, font=self.fonts["small"], fill=col)
+        if side:
+            self.draw_side_pins(side, rx)
 
         # abas
         x = 10 * s
@@ -1144,11 +1448,16 @@ class DpsApp:
         mw = self.fonts["tab"].measure(mode) + 16 * s
         self.chip(("btn", "view"), max(x + 4 * s, W - 10 * s - mw), mode, False, outline=True)
 
-        # faixa das informações fixadas (sempre visível, em qualquer aba)
-        self.draw_pins(cb)
+        # faixa das informações fixadas (sempre visível, em qualquer aba; com um cartão aberto ela fica acima dele)
+        card_up = self.death_card or self.ping_card or self.boss_card or self.summary_card or self.fx_now
+        if not card_up:
+            self.draw_pins(cb)
 
         # linhas (o resumo da morte fica por cima delas por alguns segundos)
         self.draw_rows(snap)
+        self.tracker_n = 0
+        if not card_up:
+            self.draw_trackers()              # um cartão ocupa a área inteira: os contadores voltam quando ele sai
         if not self.death_card:
             if self.ping_card:                    # o item marcado que caiu passa na frente dos outros avisos
                 self.draw_ping_card()
@@ -1156,7 +1465,10 @@ class DpsApp:
                 self.draw_boss_card()
                 if not self.boss_card:
                     self.draw_summary_card()
+        self.draw_fx_card()
         self.draw_death()
+        if self.death_card and self.cfg.get("pins"):
+            self.draw_pins(cb, top=TOP_Y + 14)    # o resumo da morte cobre o DPS: a faixa fica logo acima dele
 
         # rodapé
         fy = H - FOOT_H * s / 2 - 2 * s
@@ -1309,7 +1621,7 @@ class DpsApp:
         c, s, W, H = self.canvas, self.s, self.W, self.H
         left = 1.0 - k / DEATH_CARD_S
         x0, x1 = 8 * s, W - 8 * s
-        y0, y1 = (TOP_Y + 14) * s, H - (FOOT_H + 2) * s
+        y0, y1 = (TOP_Y + 14 + self.pin_shift()) * s, H - (FOOT_H + 2) * s
         pad = 10 * s
         white, dim = "#ffffff", "#d79a9a"
         fw = max(2, int(3 * s))                # moldura vermelha em volta do widget
@@ -1725,7 +2037,7 @@ class DpsApp:
         """[(chave, rótulo, valor, detalhe, cor)] das informações fixadas, na ordem em que foram fixadas."""
         pins = self.cfg.get("pins") or []
         stats = {}
-        if any(not p.startswith("item:") for p in pins):
+        if any(not p.startswith(("item:", "fx:")) for p in pins):
             stats = {r["pin"]: r for r in self.xp_rows(cb) if r.get("pin")}
         items = None
         out = []
@@ -1737,6 +2049,20 @@ class DpsApp:
                 r = items.get(item)
                 out.append((key, meter.item_name(item), "×%d" % ((r["mine"] + r["mvp"]) if r else 0), "",
                             self.item_color(item)))
+            elif key.startswith("fx:"):          # efeito acompanhado fixado: o contador dele (— = não está ativo)
+                kind, _sep, ident = key[3:].partition(":")
+                try:
+                    name = cards.short_name(cards.name_of(dict(kind=kind, id=int(ident))))
+                except ValueError:
+                    continue
+                r = self.pinned_fx.get(key[3:])
+                if r is None:
+                    out.append((key, name, "—", "", None))
+                else:
+                    left = r.get("left")
+                    col = "#ef4444" if r.get("ended") is not None else (
+                        "#f59e0b" if left is not None and left < 3000 else "#22c55e")
+                    out.append((key, name, cards.time_text(r), "", col))
             elif key.startswith("quest:"):       # caça de missão: some da aba quando é entregue, a faixa avisa
                 r = stats.get(key)
                 out.append((key, quests.title(int(key[6:])), r["value"] if r else _("entregue ou sem progresso"),
@@ -1746,12 +2072,52 @@ class DpsApp:
                 out.append((key, PIN_LABELS.get(key, key), r["value"] if r else "—", r["right"] if r else "", None))
         return out
 
-    def draw_pins(self, cb):
-        """Faixa abaixo das abas com até 2 informações fixadas (botão direito numa linha › Fixar no widget)."""
+    def pin_shift(self):
+        """Quanto o resumo da morte desce para a faixa fixa ficar à vista acima dele (com algo fixado o widget é
+        essa altura mais alto, então o resumo continua do tamanho de sempre)."""
+        return PIN_H if self.cfg.get("pins") else 0
+
+    def side_pins(self, cb):
+        """Com um cartão aberto (menos o da morte), o que está fixado vai para a direita do DPS, no lugar de
+        "agora / total / em combate": o cartão cobre a faixa fixa e fica com a área inteira.
+        [(chave, rótulo, valor, cor)], ou [] quando não é o caso."""
+        if self.death_card or not self.cfg.get("pins") or not (
+                self.ping_card or self.boss_card or self.summary_card or self.fx_now):
+            return []
+        return [(key, label, value, color) for key, label, value, _right, color in self.pin_texts(cb)]
+
+    def side_pins_width(self, parts):
+        """Largura que os fixados pedem à direita do DPS (no máximo metade do widget: o nome é cortado)."""
+        f, v = self.fonts["small"], self.fonts["text"]
+        widest = max([f.measure(label) + 9 * self.s + v.measure(value) for _k, label, value, _c in parts] + [0])
+        return min(self.W * 0.52, widest)
+
+    def draw_side_pins(self, parts, rx):
+        """Os fixados à direita do DPS, um por linha: o valor encostado à direita e o nome antes dele."""
+        c, s, t = self.canvas, self.s, self.t
+        room = self.side_pins_width(parts)
+        y0 = BIG_Y * s - (len(parts) - 1) * 8 * s
+        for i, (key, label, value, color) in enumerate(parts):
+            cy = y0 + i * 16 * s
+            vid = c.create_text(rx, cy, anchor="e", text=value, font=self.fonts["text"], fill=t["fg"])
+            vx = c.bbox(vid)[0]
+            name, f = label, self.fonts["small"]
+            while len(name) > 1 and f.measure(name) > room - (rx - vx) - 5 * s:
+                name = name[:-2].rstrip() + "…"
+            lid = c.create_text(vx - 5 * s, cy, anchor="e", text=name, font=f, fill=self.readable(color) or t["muted"])
+            self.hits.append((("pinbar", key), (c.bbox(lid)[0] - 3 * s, cy - 8 * s, rx + 3 * s, cy + 8 * s)))
+
+    def draw_pins(self, cb, top=None):
+        """Faixa abaixo das abas com até 2 informações fixadas (botão direito numa linha › Fixar no widget).
+        `top`: com um cartão aberto, onde a faixa fica (logo acima dele)."""
         if not self.cfg.get("pins"):
             return
         c, s, t, W = self.canvas, self.s, self.t, self.W
-        y0, y1 = ROWS_Y0 * s, (ROWS_Y0 + PIN_H - 4) * s
+        if top is None:
+            top = ROWS_Y0
+        else:                                 # acima de um cartão: limpa o que havia ali (abas ou o número grande)
+            c.create_rectangle(4 * s, (top - 2) * s, W - 4 * s, (top + PIN_H) * s, fill=t["bg"], outline="")
+        y0, y1 = top * s, (top + PIN_H - 4) * s
         x0, x1 = 10 * s, W - 10 * s
         c.create_polygon(round_rect_pts(x0, y0, x1, y1, 5 * s), smooth=True, fill=mix(t["bg"], t["accent"], 0.16),
                          outline="")
@@ -1867,6 +2233,11 @@ class DpsApp:
             elif key.startswith("quest:"):
                 var = self.keep(tk.BooleanVar(self.root, True))
                 pm.add_checkbutton(label=_("Missão: %s") % quests.title(int(key[6:])), variable=var,
+                                   command=lambda k=key: self.toggle_pin_stat(k))
+            elif key.startswith("fx:"):
+                kind, _sep, ident = key[3:].partition(":")
+                var = self.keep(tk.BooleanVar(self.root, True))
+                pm.add_checkbutton(label=_("Efeito: %s") % cards.name_of(dict(kind=kind, id=int(ident))), variable=var,
                                    command=lambda k=key: self.toggle_pin_stat(k))
         pm.add_separator()
         pm.add_command(label=_("Até %d. Também dá para fixar com o botão direito numa linha das abas XP e Drops.")
@@ -2202,12 +2573,14 @@ class DpsApp:
         m.add_command(label=_("Não mostrar mais o aviso do chefe"), command=lambda: self.toggle_cfg("alert_boss"))
         return m
 
-    def draw_card(self, hit, shown, secs, sev, title, lines, spec=None):
+    def draw_card(self, hit, shown, secs, sev, title, lines, spec=None, timer=None, frac=None):
         """Cartão no padrão único: moldura e título na cor da gravidade, desenho do chefe no alto, linhas centradas e
         a contagem regressiva embaixo. Ocupa sempre a mesma área (das abas até o fim das linhas), então todos têm o
-        mesmo tamanho; num widget com poucas linhas o desenho encolhe ou some, e sobram as linhas que couberem."""
+        mesmo tamanho; num widget com poucas linhas o desenho encolhe ou some, e sobram as linhas que couberem.
+        `timer` e `frac`: para o cartão de um efeito acompanhado, o tempo que falta do efeito (texto e barra) no
+        lugar da contagem do próprio cartão."""
         k = time.time() - shown
-        if not 0 <= k < secs:
+        if timer is None and not 0 <= k < secs:
             return
         c, s, W = self.canvas, self.s, self.W
         col = SEV_COLORS[sev]
@@ -2219,7 +2592,8 @@ class DpsApp:
                          width=max(1, int(2 * s)))
         self.hits.append(((hit, None), (x0, y0, x1, y1)))
         cx = (x0 + x1) / 2
-        cid = c.create_text(x1 - pad, y0 + pad + 4 * s, anchor="e", text="%d s  ✕" % max(1, round(secs - k)),
+        cid = c.create_text(x1 - pad, y0 + pad + 4 * s, anchor="e",
+                            text=(timer + "  ✕") if timer is not None else "%d s  ✕" % max(1, round(secs - k)),
                             font=self.fonts["small"], fill=CARD_DIM)
         count_w = c.bbox(cid)[2] - c.bbox(cid)[0]
         room = (y1 - y0) - 2 * pad
@@ -2250,9 +2624,10 @@ class DpsApp:
         for text, fill in lines[:n]:
             self.center_text(cx, y + 5 * s, text, self.fonts["small"], fill or CARD_DIM, x0 + pad, x1 - pad)
             y += 14 * s
-        left = 1.0 - k / secs
-        c.create_line(x0 + 10 * s, y1 - 3 * s, x0 + 10 * s + (x1 - x0 - 20 * s) * left, y1 - 3 * s, fill=col,
-                      width=max(2, int(2 * s)))
+        left = frac if frac is not None else 1.0 - k / secs
+        if left > 0.005:
+            c.create_line(x0 + 10 * s, y1 - 3 * s, x0 + 10 * s + (x1 - x0 - 20 * s) * left, y1 - 3 * s, fill=col,
+                          width=max(2, int(2 * s)))
 
     def center_text(self, cx, cy, text, font, fill, xl, xr):
         """Texto centrado em cx; se não couber entre xl e xr, encosta na esquerda e corta com reticências."""
@@ -2385,13 +2760,20 @@ class DpsApp:
         else:
             self.root.iconify()
 
-    def open_analysis(self):
+    def open_analysis(self, tab=None):
+        """Abre a análise (ou traz para a frente); `tab`: já na aba pedida."""
         if self.analysis is not None:
-            self.analysis.top.deiconify()
-            self.analysis.top.lift()
-            self.analysis.top.focus_force()
-            return
-        self.analysis = AnalysisWindow(self)
+            self.analysis.bring_to_front()
+        else:
+            self.analysis = AnalysisWindow(self)
+        if tab:
+            self.analysis.select_tab(tab)
+            self.analysis.refresh(force=True)
+
+    def open_pings(self):
+        """A janela Avisos de item, mesmo sem replay aberto."""
+        self.open_analysis()
+        self.analysis.open_pings()
 
     def set_lang(self, code):
         """Troca o idioma: grava e reabre o medidor (os textos são montados ao abrir)."""
@@ -2508,6 +2890,8 @@ class DpsApp:
         m.add_command(label=_("Zerar"), command=self.reset)
         m.add_separator()
         m.add_command(label=_("Análise completa…"), command=self.open_analysis)
+        m.add_command(label=_("Cartões e efeitos acompanhados…"), command=lambda: self.open_analysis("cartoes"))
+        m.add_command(label=_("Avisos de item…"), command=self.open_pings)
         m.add_command(label=_("Copiar a imagem do widget"), command=self.copy_image)
         hide = self.keep(tk.BooleanVar(self.root, cfg["copy_hide_names"]))
         m.add_checkbutton(label=_("Copiar imagem sem os nomes dos jogadores"), variable=hide,
@@ -2670,6 +3054,8 @@ class DpsApp:
                 self.dirty = True
             elif not moved and self.press_target and self.press_target[0] == "summary":
                 self.open_summary()
+            elif not moved and self.press_target and self.press_target[0] == "fxcard":
+                self.close_fx_card()
             elif not moved and self.press_target and self.press_target[0] == "ping":
                 self.copy_ping()
             elif not moved and not self.watcher.folders:
@@ -2692,6 +3078,10 @@ class DpsApp:
             self.popup(self.summary_menu, e.x_root, e.y_root)
         elif tgt and tgt[0] == "ping":
             self.popup(self.ping_menu, e.x_root, e.y_root)
+        elif tgt and tgt[0] == "tracker":
+            self.popup(lambda: self.tracker_menu(tgt[1]), e.x_root, e.y_root)
+        elif tgt and tgt[0] == "fxcard" and self.fx_now:
+            self.popup(lambda: self.tracker_menu(self.fx_now[0]["key"]), e.x_root, e.y_root)
         else:
             self.popup(self.main_menu, e.x_root, e.y_root)
 
@@ -2707,6 +3097,68 @@ class DpsApp:
                 self.dirty = True
 
 
+def selftest(app, report):
+    """Autoteste do pacote (`ReplayMaster.exe replay.rrf --autoteste saida.txt`): espera o replay ser lido, abre a
+    análise, passa por todas as abas, monta o desenho de um monstro do replay e grava em `report` o que deu
+    certo. É para quem monta o pacote conferir o .exe por dentro; o programa fecha sozinho no fim."""
+    lines = ["Replay Master %s" % VERSION]
+    t0 = time.time()
+
+    def finish():
+        try:
+            with open(report, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+        except OSError:
+            pass
+        app.root.destroy()
+
+    def sprite(tries=0):
+        try:
+            import gdip
+            import ui_parts
+            book = sprites.MONSTERS.book
+            if book is None and tries < 60 and sprites.MONSTERS.error is None and clientdata.NAMES.grf:
+                ui_parts.start_loaders()
+                app.root.after(250, lambda: sprite(tries + 1))
+                return
+            c = app.combat()
+            mobs = sorted({e.job for e in c.entities.values() if e.kind == "mob"}) if c is not None else []
+            mob = next((m for m in mobs if book is not None and book.has(m)), None)
+            if mob is None:
+                lines.append("desenho: sem jogo instalado ou sem monstro com sprite neste replay")
+            else:
+                made = ui_parts.mob_frames(app.root, book.part(mob), sprites.MOB_IDLE, 0, 164, 134, {})
+                lines.append("desenho do monstro %d: %d quadros de %dx%d, GDI+ %s" % (
+                    mob, len(made[0]), made[0][0].width(), made[0][0].height(), "ok" if gdip.ready() else "indisponível"))
+        except Exception:  # noqa: BLE001
+            lines.append("ERRO no desenho\n" + traceback.format_exc())
+        lines.append("fim em %.1f s" % (time.time() - t0))
+        finish()
+
+    def tabs():
+        try:
+            import analysis_ui
+            f = app.watcher.file
+            if (f is None or not f.ready or f.pos < f.size) and time.time() - t0 < 60:
+                app.root.after(200, tabs)
+                return
+            c = app.combat()
+            lines.append("replay: %s" % ("%d golpes" % len(c.hits) if c is not None else "NÃO LIDO"))
+            app.open_analysis()
+            for tab in analysis_ui.TABS:
+                t1 = time.time()
+                app.analysis.select_tab(tab)
+                app.analysis.refresh(force=True)
+                app.analysis.top.update()
+                lines.append("aba %s: ok (%.2f s)" % (tab, time.time() - t1))
+        except Exception:  # noqa: BLE001
+            lines.append("ERRO nas abas\n" + traceback.format_exc())
+            finish()
+            return
+        app.root.after(300, sprite)
+    app.root.after(800, tabs)
+
+
 def main():
     if IS_WIN:
         try:
@@ -2720,9 +3172,19 @@ def main():
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("RODpsMeter.ReplayMaster")
         except (OSError, AttributeError):
             pass
+    sys.setswitchinterval(SWITCH_S)
     root = tk.Tk()
-    path = sys.argv[1] if len(sys.argv) > 1 and os.path.isfile(sys.argv[1]) else None
-    DpsApp(root, path)
+    args = sys.argv[1:]
+    report = None
+    if "--autoteste" in args:                    # confere o pacote por dentro e fecha (veja selftest)
+        i = args.index("--autoteste")
+        report = args[i + 1] if i + 1 < len(args) else None
+        del args[i:i + 2]
+    path = args[0] if args and os.path.isfile(args[0]) else None
+    app = DpsApp(root, path)
+    app.watch_stalls()
+    if report:
+        selftest(app, report)
     root.mainloop()
 
 

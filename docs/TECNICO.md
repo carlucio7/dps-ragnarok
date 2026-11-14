@@ -13,17 +13,25 @@ ranking** copia o ranking do recorte em texto (para colar no Discord/WhatsApp).
 
 - **Resumo:** o seu dano e % do grupo, DPS em combate, DPS ativo e do 1º ao último golpe,
   acertos/erros, maior golpe (skill e alvo), skill mais usada, abates, dano
-  recebido, mortes, seus maiores golpes e de onde veio o dano que você levou.
-- **Jogadores:** dano, DPS, DPS ativo, %, acertos, erros, maior golpe, monstros atingidos
-  e abates (golpe fatal). Para o jogador escolhido: habilidades (acertos, dano
-  total e médio, hits médios, cast médio), monstros atingidos e a linha do
-  tempo de todos.
+  recebido, mortes, conjuração, pós-conjuração, tentativas com a skill em
+  recarga, itens usados, XP e drops, os chefes do recorte, seus maiores golpes
+  e de onde veio o dano que você levou.
+- **Jogadores:** dano, DPS, DPS ativo, %, acertos, erros, críticos, maior golpe,
+  dano recebido, mortes e abates (golpe fatal). Para o jogador escolhido:
+  habilidades (acertos, dano total e médio, hits médios, cast médio), monstros
+  atingidos, suporte e itens usados, dano recebido, buffs e a linha do tempo
+  de todos.
 - **Equipamento:** tudo o que quem gravou vestia (refino, cartas, opções, grau,
-  visuais e sombrios) e o personagem desenhado com os sprites do jogo instalado
+  visuais e sombrios), cada item com o ícone do jogo instalado, e o personagem
+  desenhado com os sprites do jogo instalado
   (classe, cabelo e cores, roupa, chapéus, capa, arma e escudo), animado: gire e
   escolha a ação (andando, parado, sentado, atacando...).
 - **Monstros:** dano recebido, acertos, atacantes, HP máx., tempo até abate e
-  quem abateu. Para o monstro escolhido:
+  quem abateu. O monstro escolhido aparece animado (parado, andando ou
+  atacando), com o que o grupo fez nele e o que ele fez (dano causado,
+  jogadores mortos, maior golpe e quem mais apanhou). Os quadros são montados
+  pelo GDI+ do Windows (`gdip.py`), com suavização, a partir do `.spr` e do
+  `.act` do jogo instalado. Para o monstro escolhido:
   - dano por jogador (barras);
   - linha do tempo, uma linha por jogador, com as trocas de fase marcadas;
   - habilidades usadas contra ele (por jogador e classe);
@@ -40,10 +48,10 @@ ranking** copia o ranking do recorte em texto (para colar no Discord/WhatsApp).
   visuais e cartas. Os que aparecem no replay são detectados sozinhos. Também
   dá para usar o fator medido entre duas gravações seguidas ou um valor fixo.
   XP por minuto em % do nível, XP por hora, XP por monstro e gráfico no tempo.
-- **Análise de DPS:** gráfico de DPS de qualquer jogador, com a média móvel de
-  5 s e a média da janela. Arraste para escolher um trecho e veja as
-  estatísticas dele (dano, DPS do 1º ao último golpe, intervalo médio, maior
-  intervalo, maior golpe) e qual habilidade deu mais dano ali.
+  O **simulador** refaz a conta do recorte trocando um bônus de cada vez: cada
+  bônus começa "como foi" (valendo só no tempo em que esteve ativo na gravação)
+  e pode passar a valer o tempo todo, com o % escolhido, ou ficar desligado. Os
+  abates são os mesmos; só o fator de cada um muda.
 - **Linha do tempo:** uma luta contra chefe no tempo, com gráficos e marcações
   sobrepostos (`timeline.py` e `timeline_ui.py`). Em cima, as curvas: DPS do
   grupo, DPS de cada jogador escolhido, HP estimado do chefe (pelo dano visto) e
@@ -102,10 +110,22 @@ ranking** copia o ranking do recorte em texto (para colar no Discord/WhatsApp).
 - **Testes:** histórico de testes de build guardado no PC
   (`%APPDATA%\RODpsMeter\testes.json`). Encontros contra os bonecos de treino
   são salvos sozinhos; qualquer recorte pode ser salvo com um rótulo. Cada teste
-  guarda DPS, skills, buffs e o equipamento vestido (refino, cartas,
-  encantamentos, grau e opções). Escolha um teste para comparar com o anterior
-  do mesmo personagem, ou dois com Ctrl + clique: resumo (A × B em %), skills,
-  equipamento (slots diferentes em destaque) e buffs.
+  guarda DPS, skills, buffs, atributos, conjuração, pós-conjuração, recarga,
+  itens usados e o equipamento vestido (refino, cartas, encantamentos, grau e
+  opções). Escolha o teste A e o teste B: ficam lado a lado, cada um com o
+  equipamento (slots diferentes em destaque) e os números, com a diferença em %.
+- **Cartões** (`cards.py`, `ui_cards.py`): cada cartão do widget tem um
+  interruptor, com a prévia desenhada pelas mesmas funções do widget. Os
+  **efeitos acompanhados** são status (em quem grava, no alvo ou em qualquer
+  um) e áreas no chão; cada um aparece como contador no fim da lista, na faixa
+  fixa ou em um cartão. O tempo que falta vem do próprio pacote de status
+  (Garra Sombria 20 s, Cometa 20 s, Pólen 30 s); quando o jogo não manda a
+  duração, aparece o tempo ativo. Só valem durante a gravação.
+- **O que o replay traz sobre conjuração** (`stats.py`): o tempo total de cada
+  conjuração (sem separar fixa e variável), a recarga de cada skill de quem
+  grava, a pós-conjuração de base e a reduzida, a ASPD e os números da janela
+  de status de quem grava, os itens usados por quem está à vista e as
+  tentativas de usar uma skill ainda em recarga.
 
 - **Cores dos drops** (`itemkind.py`): equipamento e carta vêm da linha "Tipo:" da
   descrição do próprio jogo (`System\iteminfo_new.lub`), então itens novos entram

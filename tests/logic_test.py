@@ -714,20 +714,26 @@ r1 = dd.analyze(*(lambda cc: (cc, next(f["key"] for f in dd.boss_fights(cc) if c
     betel_phases(2, None)[1]))
 check(not r1["risk_phase"] and not r1["risk"], "zona de risco: sem a fase 3 não olha nada")
 
-# --- golpes fortes fora da rajada dos outros DPS ------------------------------
-DA, DB = 2201, 2202
+# --- atacou muito antes dos outros DPS ----------------------------------------
+DA, DB, DC = 2201, 2202, 2203
 ev = [(0, fr.spawn(61000, "mob", BETEL, "Betelgeuse", boss=2)), (0, fr.spawn(DA, "pc", 4302, "Sincronia")),
-      (0, fr.spawn(DB, "pc", 4302, "Parceiro"))]
-ev += [(100, fr.party_hp(a, 50000, 50000)) for a in (DA, DB)]
+      (0, fr.spawn(DB, "pc", 4302, "Parceiro")), (0, fr.spawn(DC, "pc", 4302, "Quase"))]
+ev += [(100, fr.party_hp(a, 50000, 50000)) for a in (DA, DB, DC)]
 ev += [(1000 + i * 1000, fr.skill_damage(DA, 61000, 10000000, hits=1)) for i in range(20)]
 ev += [(1100 + i * 1000, fr.skill_damage(DB, 61000, 10000000, hits=1)) for i in range(20)]
-ev += [(22600, fr.skill_damage(DA, 61000, 10000000, hits=1)),     # 2,5 s depois do último golpe do parceiro
-       (22900, fr.skill_damage(DA, 61000, 10000000, hits=1))]     # mesmo episódio
+ev += [(26000, fr.skill_damage(DA, 61000, 10000000, hits=1)),     # 2,5 s antes da volta do parceiro
+       (26300, fr.skill_damage(DA, 61000, 10000000, hits=1)),     # mesmo episódio
+       (28500, fr.skill_damage(DB, 61000, 10000000, hits=1)), (28600, fr.skill_damage(DA, 61000, 10000000, hits=1)),
+       (33200, fr.skill_damage(DC, 61000, 10000000, hits=1)),     # 0,8 s antes dos outros: só atenção
+       (34000, fr.skill_damage(DB, 61000, 10000000, hits=1)), (34050, fr.skill_damage(DA, 61000, 10000000, hits=1)),
+       (40000, fr.skill_damage(DB, 61000, 10000000, hits=1))]     # sozinho no fim: ninguém bate depois, não conta
 c = combat_of(fr.build(ME, ev)[0])
 r = dd.analyze(c, 61000)
-alert = [a for a in r["alerts"] if a["what"] == "Golpes fortes fora da rajada dos outros DPS"]
-check(len(alert) == 1 and alert[0]["sev"] == 2 and alert[0]["who"] == "Sincronia 1×" and len(r["desync"]) == 1
-      and r["desync"][0]["hits"] == 2, "assincronia: golpe forte sozinho, 2 golpes num episódio -> %s" % alert)
+alert = {a["sev"]: a for a in r["alerts"] if a["what"] == "Atacou muito antes dos outros DPS"}
+check(sorted(alert) == [1, 2] and alert[2]["who"] == "Sincronia 2,5 s antes" and alert[1]["who"] == "Quase 0,8 s antes"
+      and sorted((d["aid"], d["hits"]) for d in r["desync"]) == [(DA, 2), (DC, 1)],
+      "atacou antes: 2,5 s antes é grave (2 golpes num episódio), 0,8 s é atenção, sozinho no fim não conta -> %s"
+      % {k: v["who"] for k, v in alert.items()})
 
 # --- Cinzas Vulcânicas: usadas, mas o status não aparece no chefe -------------
 GEN, DIETER = 2301, 7301
@@ -858,6 +864,33 @@ with tempfile.TemporaryDirectory() as tmp:
     r = wd.render(dict(job=4302, sex=1, hair=22, top=1677), sprites.WALK, 3)
     check(r is not None and r[:2] == (2, 13) and r[7] == ["top"],
           "sprite: guarda-roupa lê corpo e cabeça do .grf; chapéu sem tabela fica como faltando -> %s" % (r and r[7]))
+# desenho suavizado (GDI+ do Windows): os monstros maiores que a caixa ou montados com peças em escala
+import gdip  # noqa: E402
+if gdip.ready():
+    RD, GN, BL, NO = bytes([0, 0, 255, 255]), bytes([0, 255, 0, 255]), bytes([255, 0, 0, 255]), bytes(4)   # BGRA
+    im = gdip.Image(2, 2, RD + GN + BL + NO)
+    check(gdip.render(2, 2, [(im, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, False)]) == RD + GN + BL + NO
+          and gdip.render(2, 2, [(im, -1.0, 0.0, 0.0, 1.0, 1.0, 1.0, False)]) == GN + RD + NO + BL
+          and gdip.render(2, 2, [(im, 0.0, 1.0, -1.0, 0.0, 1.0, 1.0, False)]) == BL + RD + NO + GN
+          and gdip.render(4, 4, [(im, 2.0, 0.0, 0.0, 2.0, 2.0, 2.0, False)])[:16] == RD + RD + GN + GN,
+          "GDI+: escala 1 copia pixel a pixel, o espelho troca as colunas, 90 graus gira no sentido do relógio e "
+          "o dobro repete os pixels")
+    WH, BK = bytes([255] * 4), bytes([0, 0, 0, 255])
+    half = gdip.resize(4, 4, ((WH + BK) * 2 + (BK + WH) * 2) * 2, 2, 2)
+    check(half is not None and all(60 < half[i] < 200 for i in (0, 4, 8, 12)) and half[3] == 255,
+          "GDI+: reduzir à metade mistura os pixels em vez de jogar fora (o xadrez vira cinza) -> %s" % list(half[:8]))
+    got = sprites.smooth_frames(body, body.act.frames(sprites.IDLE)[:1])
+    want = sprites.compose([body], body, sprites.IDLE, 0, 0)
+    check(got is not None and got[:2] == want[:2]
+          and list(struct.iter_unpack("4B", gdip.swap_rb(got[2][0]))) == [tuple(p) for p in want[2]],
+          "sprite: sem escala nem giro, o quadro montado pelo GDI+ é igual ao montado pixel a pixel -> %s" % (got and got[:2],))
+    big = sprites.Part("grande", sprites.Sprite(spr_bytes(4, 4, [1, 0] * 8, {1: RED})), body.act, anchored=False)
+    big.act.frames(0)[0][0][0].sx = big.act.frames(0)[0][0][0].sy = 0.5
+    got = sprites.smooth_frames(big, big.act.frames(0)[:1])
+    big.act.frames(0)[0][0][0].sx = big.act.frames(0)[0][0][0].sy = 1.0
+    check(got is not None and got[:2] == (2, 2) and all(40 < got[2][0][i + 3] < 215 for i in (0, 4, 8, 12)),
+          "sprite: a peça em escala 0,5 sai do tamanho certo e suavizada (colunas cheias e vazias viram meio "
+          "transparentes) -> %s" % ((got and (got[:2], list(got[2][0]))),))
 it = rrf.Item
 worn = {1024: it(1, 31368), 256: it(2, 400242), 512: it(2, 400242), 2: it(3, 540045), 4: it(4, 480926)}
 look = sprites.look_at(dict(job=4302, top=5, mid=7, low=9, robe=260), worn, {31368: 1677, 400242: 2220, 540045: 15})
@@ -1661,6 +1694,131 @@ try:
           "quando ela para -> %s" % picks)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
+
+# --- 1.7: atributos, conjuração, recarga, pós-conjuração e itens de quem grava -------------------
+import stats as stmod  # noqa: E402
+import cards as cardmod  # noqa: E402
+SUP = 2401
+ev = [(0, fr.spawn(61000, "mob", BETEL, "Betelgeuse", boss=2)), (0, fr.spawn(SUP, "pc", 4256, "Cura"))]
+ev += [(100, fr.party_hp(SUP, 50000, 50000))]
+# 1 M por golpe até os 11 s; com a Garra Sombria no chefe (dos 11 s em diante), 2 M
+ev += [(1000 + i * 500, fr.skill_damage(ME, 61000, 1000000 if 1000 + i * 500 < 11000 else 2000000, skill=5470, hits=1))
+       for i in range(40)]
+ev += [(500, fr.hp(120, 53)), (10000, fr.hp(100, 53)),                       # ASPD 188 -> 190
+       (2000, struct.pack("<HHI", rrf.P_COOLDOWN, 5470, 300)),
+       (2500, fr.cast(ME, 61000, 5470, 200)),
+       (3000, fr.status(ME, meter.POSTDELAY_EFST, True, 500, 425)),
+       (4000, struct.pack("<HHIIHB", rrf.P_ITEM_USE, 3, 501, ME, 9, 1)),
+       (4100, struct.pack("<HHIIHB", rrf.P_ITEM_USE, 3, 501, SUP, 9, 1)),
+       (5000, struct.pack("<HHiIBB", rrf.P_SKILL_FAIL, 5470, 0, 0, 0, rrf.FAIL_DELAY)),
+       (6000, fr.skill_use(SUP, ME, 34)), (6500, fr.skill_use(SUP, ME, 34)),
+       (11000, fr.status(61000, 730, True, 0, 20000, 150)),
+       (15000, fr.skill_damage(61000, SUP, 30000, skill=83, hits=1))]
+ev.sort(key=lambda e: e[0])
+c17 = combat_of(fr.build(ME, ev)[0])
+vals = stmod.values(c17)
+row = next(r for r in stmod.casts(c17) if r["skill"] == 5470)
+post = stmod.post_delay(c17)
+check(vals["aspd"][1:] == (188.0, 190.0) and 188.0 < vals["aspd"][0] < 190.0 and stmod.stat_text("aspd", 188.04) == "188,0",
+      "atributos: a ASPD de quem grava como o jogo mostra, com média, menor e maior -> %s" % (vals.get("aspd"),))
+check(row["cooldown"] == 300 and row["cast"] == 200 and (post["base"], post["real"], post["n"]) == (500, 425, 1)
+      and abs(post["cut"] - 0.15) < 1e-9,
+      "conjuração de cada uso, recarga da skill e pós-conjuração (base e com as reduções) -> %s %s" % (row, post))
+check([(r["item"], r["n"]) for r in stmod.items_used(c17)] == [(501, 1)] and stmod.blocked(c17) == 1
+      and [(r["item"], r["n"]) for r in stmod.items_used(c17, None, SUP)] == [(501, 1)],
+      "itens usados (de cada jogador à vista) e tentativas com a skill em recarga")
+# jogadores: quem é do grupo e não deu dano também aparece, com o que usou e o que recebeu
+prow = {r["aid"]: r for r in an.players(c17, None, 20000)}
+check(SUP in prow and prow[SUP]["total"] == 0 and prow[SUP]["uses"] == 2 and prow[SUP]["items"] == 1
+      and prow[SUP]["taken"] == 30000 and prow[ME]["party"] and "Cura" not in an.share_text(c17, None, 20000, "x")
+      and [(r["skill"], r["uses"], r["targets"]) for r in an.support_uses(c17, None, SUP)] == [(34, 2, 1)],
+      "jogadores: o suporte do grupo sem dano entra na lista (fora do ranking copiado) -> %s" % prow.get(SUP))
+rep = an.monster_report(c17, None, 61000)
+check(rep["total"] == 30000 and rep["hits"] == 1 and rep["victims"] == 1 and rep["best"]["victim"] == "Cura"
+      and rep["top"]["name"] == "Cura" and rep["kills"] == [] and rep["skill_max"] == {83: 30000},
+      "monstro: dano causado, maior golpe e quem mais apanhou -> %s" % rep)
+# cartões: o contador da Garra Sombria no chefe com o tempo que falta, e as chaves dos cartões do programa
+cfg17 = {}
+check(cardmod.track(cfg17, "status", 730) and cardmod.is_tracked(cfg17, "status", 730)
+      and cardmod.tracked(cfg17) == [dict(kind="status", id=730, where="target", show="counter")]
+      and any(r["id"] == 730 and r["group"] == "Debuff no alvo" for r in cardmod.search("garra")),
+      "cartões: a busca acha a Garra Sombria e ela entra na lista olhando o alvo -> %s" % cfg17)
+live = cardmod.live(c17, cardmod.tracked(cfg17))
+check(len(live) == 1 and live[0]["target"] == "Betelgeuse" and live[0]["left"] == 20000 - (c17.now - 11000)
+      and cardmod.time_text(dict(left=4200)) == "4,2 s" and cardmod.time_text(dict(left=75000)) == "1:15"
+      and cardmod.time_text(dict(left=None, since=42000)) == "há 42 s",
+      "cartões: contador com o tempo que falta (o jogo manda a duração do debuff no chefe) -> %s" % live)
+cardmod.track(cfg17, "status", 1142)
+check(cardmod.track(cfg17, "status", 730, show="card") and [t["id"] for t in cardmod.tracked(cfg17)] == [730, 1142]
+      and cardmod.tracked(cfg17)[0]["show"] == "card" and not cardmod.track(cfg17, "status", 730, show="card")
+      and live[0]["mob"] == BETEL,
+      "cartões: o efeito pode aparecer como cartão (a escolha fica guardada, sem mudar a ordem da lista) e a linha "
+      "leva o monstro em que ele está, para o desenho -> %s" % cfg17)
+watch = cardmod.Watch()
+watch.update(live, 100.0)
+shown, ended = watch.update([], 101.0)
+check(len(ended) == 1 and shown[0]["ended"] == 0.0 and cardmod.time_text(shown[0]) == "acabou"
+      and watch.update([], 105.0) == ([], []), "cartões: quando o efeito acaba o contador pisca e some")
+cfg17 = {"alert_boss": True}
+cardmod.set_enabled(cfg17, "maxpain", False)
+one = cardmod.enabled(cfg17, "maxpain"), cardmod.enabled(cfg17, "boss_size")
+for k in cardmod.BOSS_KEYS:
+    cardmod.set_enabled(cfg17, k, False)
+off = cfg17["alert_boss"]
+cardmod.set_enabled(cfg17, "defense", True)
+check(one == (False, True) and off is False and cfg17["alert_boss"] is True and cardmod.enabled(cfg17, "defense")
+      and not cardmod.enabled(cfg17, "relief") and cardmod.boss_card_key(dict(mech="maxpain_off")) == "maxpain"
+      and cardmod.boss_card_key(dict(size="L")) == "boss_size",
+      "cartões: cada aviso do chefe tem a sua chave; todos desligados = avisos do chefe desligados -> %s" % cfg17)
+# testes lado a lado: seções, o lado melhor e o que os testes antigos não guardaram
+ta = dict(dps=200.0, damage=2000, hits=10, combat_ms=10000, active_ms=5000, crits=5, misses=0,
+          stats={"aspd": [190.0, 188.0, 190.0]}, casts=[dict(name="Alvorada", n=5, cast=200, cooldown=300)],
+          skills=[dict(name="Alvorada", total=2000, hits=10, share=1.0)], equip=[dict(slot="Arma", item="+12 A")])
+tb = dict(dps=100.0, damage=1000, hits=10, combat_ms=10000, skills=[dict(name="Alvorada", total=1000, hits=10, share=1.0)],
+          equip=[dict(slot="Arma", item="+11 B")])
+side = testes.sides(ta, tb)
+named = {r["name"]: r for r in side if r.get("kind") != "head"}
+check([r["name"] for r in side if r.get("kind") == "head"][:3] == ["Dano", "Atributos (média na luta)", "Conjuração e recarga"]
+      and named["DPS (em combate)"]["better"] == "high" and named["ASPD"]["a_txt"] == "190,0" and named["ASPD"]["b_txt"] is None
+      and named["Alvorada · recarga"]["a_txt"] == "300 ms" and named["Erros"]["better"] == "low"
+      and testes.equip_diff(ta, tb) == {"Arma"} and testes.sides(ta, None)[1]["b"] is None,
+      "testes lado a lado: seções, atributos e recarga, e teste antigo sem esses dados -> %s" % sorted(named))
+
+# --- 1.7: simulador de XP ------------------------------------------------------------------------
+ev = []
+for i in range(2):
+    ev += [(1000 + i * 40000, fr.spawn(53001 + i, "mob", 1124, "Goblin")), (1100 + i * 40000, fr.skill_damage(ME, 53001 + i, 5000)),
+           (1200 + i * 40000, fr.vanish(53001 + i, 1))]
+ev += [(90000, fr.stop(ME, 1, 1))]
+cs = combat_of(fr.build(ME, ev, xp=(7100, 1000, 10 ** 9))[0])
+base = sum(r["xp"] for r in xpmod.kills(cs)[0])
+none17 = {k: ("off",) for k in xpmod.SIM_KEYS}                    # tudo desligado: só a XP crua dos monstros
+sim = lambda **kw: xpmod.simulate(cs, {}, None, dict(none17, **{k: ("on", v) for k, v in kw.items()}))  # noqa: E731
+check(base > 0 and sim()["xp"] == base and sim(server=100)["xp"] == 2 * base
+      and abs(sim(vip=20, njord=60, manual=100)["xp"] - base * (1.2 * 1.6 + 1.0)) < 1e-6
+      and abs(sim(server=100, miracle=100)["factor"] - 4.0) < 1e-9 and sim(server=100)["per_hour"] == 2 * base * 40,
+      "simulador de XP: [(1 + evento e conta) × (1 + itens e Njord) + manual] × Milagre, com os mesmos abates -> %s"
+      % sim(vip=20, njord=60, manual=100))
+# "como foi": sem trocar nada o simulado é a própria estimativa; trocar só o evento muda só o evento
+ev = [(0, fr.status(ME, 78, True, 60000, 60000, 60))]                # Njord nos primeiros 60 s (só o 1º abate)
+for i in range(2):
+    ev += [(1000 + i * 80000, fr.spawn(54001 + i, "mob", 1124, "Goblin")), (1100 + i * 80000, fr.skill_damage(ME, 54001 + i, 5000)),
+           (1200 + i * 80000, fr.vanish(54001 + i, 1))]
+ev += [(60000, fr.status(ME, 78, False)), (120000, fr.stop(ME, 1, 1))]
+cs = combat_of(fr.build(ME, ev, xp=(7100, 1000, 10 ** 9))[0])
+cfg17 = {"xp_mode": "lista", "xp_bonuses": {"server": {"on": True, "pct": 100}}}
+est17 = xpmod.estimate(cs, cfg17)
+real17 = xpmod.sim_real(cs, cfg17)
+same = xpmod.simulate(cs, cfg17, None, {})
+ev200 = xpmod.simulate(cs, cfg17, None, {"server": ("on", 200)})
+each = est17["base"] / 2.0
+check(abs(same["xp"] - est17["kill_xp"]) < 1e-6 and abs(est17["kill_xp"] - each * (2 * 1.6 + 2)) < 1e-6
+      and abs(ev200["xp"] - each * (3 * 1.6 + 3)) < 1e-6 and real17["server"] == dict(counted=True, cover=None, ms=None, pct=100.0)
+      and abs(real17["njord"]["cover"] - 0.5) < 0.01 and real17["njord"]["ms"] == 60000 and real17["njord"]["pct"] == 60.0 and real17["miracle"]["cover"] == 0.0
+      and abs(xpmod.simulate(cs, cfg17, None, {"njord": ("off",)})["xp"] - each * 4) < 1e-6
+      and abs(xpmod.simulate(cs, cfg17, None, {"njord": ("on", 60)})["xp"] - each * 6.4) < 1e-6,
+      "simulador de XP: sem trocar nada é a própria estimativa (Njord só no trecho em que valeu); o evento de 100%% "
+      "para 200%% rende +50%% -> %s contra %s" % (ev200["xp"], est17["kill_xp"]))
 
 # --- todo texto da interface tem tradução -------------------------------------
 import ast  # noqa: E402

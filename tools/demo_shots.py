@@ -2,7 +2,7 @@
 
 uso: python tools/demo_shots.py PASTA_DE_SAIDA
 Gera PASTA/demo.rrf (luta contra o Betelgeuse em 2 fases, grupo de 7) e, para pt, en e es:
-widget, resumo, análise de DPS, Dedo Duro (alertas, Garra Sombria e elemento).
+widget, resumo, monstros, cartões, linha do tempo, Dedo Duro (alertas, Garra Sombria, elemento e mortes).
 """
 
 import os
@@ -84,9 +84,22 @@ def shots(out, lang, replay):
     w.select_tab("resumo")
     w.refresh(force=True)
     s.shot_window(w.top, "resumo_" + lang)
-    w.select_tab("dps")
+    w.select_tab("monstros")
     w.refresh(force=True)
-    s.shot_window(w.top, "dps_" + lang)
+    s.pump(2.5)                                 # o desenho do monstro vem do data.grf do jogo instalado
+    w.refresh(force=True)
+    s.shot_window(w.top, "monstros_" + lang)
+    import cards                                # a aba Cartões com três efeitos acompanhados e a prévia do cartão
+    for efst, show in ((730, "card"), (1142, "pin"), (1183, "counter")):
+        cards.track(app.cfg, "status", efst, on=True, show=show)
+    w.select_tab("cartoes")
+    w.cards_tab.sig = None
+    w.refresh(force=True)
+    w.cards_tab.t_mine.select("status:730")
+    w.cards_tab.mine_selected(w.cards_tab.t_mine.selected())
+    s.pump(2.5)
+    w.cards_tab.show_preview(("trackers", ("status", 730)))
+    s.shot_window(w.top, "cartoes_" + lang)
     w.select_tab("linha")
     w.refresh(force=True)
     s.shot_window(w.top, "linha_" + lang)

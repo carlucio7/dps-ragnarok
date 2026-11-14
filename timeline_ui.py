@@ -14,6 +14,7 @@ from tkinter import ttk
 
 import analysis as an
 import timeline as tl
+import ui_parts
 from analysis_ui import HpPicker, ScrollFrame, Table, _lum, _mix, _nice
 from fmt import dec, dur, full, num
 from i18n import _
@@ -463,7 +464,7 @@ class TimelineTab:
         # dano por fase: um resumo de cada fase e cada jogador por fase
         self.ph_sum = win.label(ph_tab, "", "text", "fg", "panel", anchor="w", justify="left")
         self.ph_sum.pack(fill="x", padx=6, pady=(8, 4))
-        ph_tab.bind("<Configure>", lambda e: self.ph_sum.configure(wraplength=e.width - 20))
+        ui_parts.follow_wrap(ph_tab, self.ph_sum, 20)
         cols = [("name", _("Jogador"), 150, "w", "text"), ("job", _("Classe"), 120, "w", "text")]
         for i in range(3):
             cols += [("d%d" % i, _("Fase %d") % (i + 1), 110, "e", "big"), ("s%d" % i, "%", 60, "e", "pct"),

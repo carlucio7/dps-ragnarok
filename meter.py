@@ -240,6 +240,8 @@ SYSTEM_EFST = ("POSTDELAY", "REUSE_", "PLAYTIME", "HEAD_EQUIPMENT", "SPECIALZONE
                "ACTIONDELAY", "ENSEMBLEFATIGUE", "ASSISTANT_VENDING", "MONSTER_TRANSFORM", "USE_SKILL_SP_SPA",
                "GET_CNT_UNREAD", "STAR_MONSTER")
 SERVICE_EFST = ("AID_PERIOD_", "PERIOD_PLUSEXP", "PERIOD_RECEIVEITEM", "CASH_PLUS")
+# o ícone da pós-conjuração: o jogo manda a duração de base e quanto falta já com as reduções
+POSTDELAY_EFST = next((int(k) for k, v in EFST.items() if v.get("c") == "POSTDELAY"), 46)
 # códigos (rAthena) de status que vêm de item: poções, comidas, sucos, pergaminhos...
 ITEM_EFST = ("POTION", "FOOD", "STEW", "NOODLE", "JUICE", "BLOOD", "SCROLL", "CANDY", "DRINK", "COCKTAIL", "ELIXIR",
              "PLUSATTACKPOWER", "PLUSMAGICPOWER", "ABYSS_", "C_BUFF", "GM_BATTLE", "EXTRACT_", "ATKER_", "MATKER_",
@@ -547,6 +549,7 @@ class Combat:
             self.add_pos(session.aid, 0, session.pos, session.pos)
         self._last_seen = {}
         self.status_on = {}           # (aid, efst) -> [início, duração total, restante] dos ativos
+        self.status_seen = {}         # (aid, efst) -> quando chegou o último "ligou" (o restante conta a partir dali)
         self.status_log = []          # (aid, efst, início, fim) dos que já acabaram
         self.hp_log = collections.defaultdict(list)   # aid -> [(t, hp, hp máx.)]
         self.alerts = collections.deque(maxlen=50)    # (nº, t, tipo, texto) para o widget mostrar
@@ -588,6 +591,14 @@ class Combat:
         self.sprite_log = collections.defaultdict(list)  # aid -> [(t, forma nova)] (monstros que mudam de forma)
         self.max_hp_seen = {}
         self._fusion_armed = [True, True]
+        # atributos de quem grava ao longo da gravação: nome -> [(t, valor)], só quando muda (ASPD, ATQ, precisão...)
+        self.stat_log = {k: [(0, v)] for k, v in (getattr(session, "stats", None) or {}).items()}
+        self.stat_bonus = {}          # atributo (FOR, AGI...) -> [(t, bônus)]
+        self.cooldowns = []           # (t, skill, ms) de cada recarga que o jogo mandou para quem grava
+        self.post_delays = []         # (t, pós-conjuração de base em ms, depois das reduções em ms) de quem grava
+        self.item_uses = []           # (t, quem usou, item) de cada item usado por alguém à vista
+        self.cast_stops = []          # (t, quem) de cada conjuração interrompida
+        self.skill_fails = []         # (t, skill, causa) de cada vez que a skill de quem grava não saiu
         if session.option:
             self.options[self.me].append((0, session.option))
 
@@ -872,6 +883,8 @@ class Combat:
                 self.version += 1
         elif pid == rrf.P_PARAM:
             r = rrf.parse_param(d)
+            if r is not None and r[0] in rrf.STAT_PARAMS:
+                self.on_stat(t, rrf.STAT_PARAMS[r[0]], r[1])
             if r is not None and r[0] in (rrf.SP_HP, rrf.SP_MAXHP):
                 self.on_hp(t, self.me, r[1] if r[0] == rrf.SP_HP else None, r[1] if r[0] == rrf.SP_MAXHP else None)
             elif r is not None and r[0] == rrf.SP_BASELEVEL:
@@ -925,6 +938,66 @@ class Combat:
                 self.version += 1
         elif pid == 0x010F:
             self.skill_aegis.update(skill_list_names(d))
+        elif pid == rrf.P_COOLDOWN:
+            r = rrf.parse_cooldown(d)
+            if r is not None:
+                self.cooldowns.append((t, r[0], r[1]))
+        elif pid == rrf.P_ITEM_USE:
+            r = rrf.parse_item_use(d)
+            if r is not None and r[3]:
+                self.item_uses.append((t, r[0], r[1]))
+        elif pid == rrf.P_CAST_STOP:
+            if len(d) >= 6:
+                self.cast_stops.append((t, struct.unpack_from("<I", d, 2)[0]))
+        elif pid == rrf.P_SKILL_FAIL:
+            r = rrf.parse_skill_fail(d)
+            if r is not None:
+                self.skill_fails.append((t, r[0], r[1]))
+        elif pid == rrf.P_STATS:
+            for name, value in (rrf.parse_stats(d) or {}).items():
+                self.on_stat(t, name, value)
+        elif pid == rrf.P_STAT_PAIR:
+            r = rrf.parse_stat_pair(d)
+            if r is not None:
+                self.on_stat(t, r[0], r[1])
+                log = self.stat_bonus.setdefault(r[0], [])
+                if not log or log[-1][1] != r[2]:
+                    log.append((t, r[2]))
+
+    def on_stat(self, t, name, value):
+        """Um atributo de quem grava mudou (ou chegou pela primeira vez)."""
+        log = self.stat_log.setdefault(name, [])
+        if not log or log[-1][1] != value:
+            log.append((t, value))
+
+    def stat_at(self, name, t, log=None):
+        """O atributo no instante t (None se o replay ainda não o tinha dito)."""
+        log = self.stat_log.get(name) if log is None else log
+        if not log:
+            return None
+        i = bisect.bisect_right(log, (t, float("inf"))) - 1
+        return log[i][1] if i >= 0 else None
+
+    def stat_span(self, name, t0, t1):
+        """(média no tempo, menor, maior) do atributo entre t0 e t1; None sem valor conhecido no trecho."""
+        log = self.stat_log.get(name)
+        if not log or t1 <= t0:
+            return None
+        i = max(0, bisect.bisect_right(log, (t0, float("inf"))) - 1)
+        total = 0.0
+        seen = 0
+        lo = hi = None
+        while i < len(log) and log[i][0] < t1:
+            start = max(t0, log[i][0])
+            end = min(t1, log[i + 1][0]) if i + 1 < len(log) else t1
+            if end > start:
+                v = log[i][1]
+                total += v * (end - start)
+                seen += end - start
+                lo = v if lo is None else min(lo, v)
+                hi = v if hi is None else max(hi, v)
+            i += 1
+        return (total / seen, lo, hi) if seen else None
 
     # --- buffs, HP, equipamento -----------------------------------------
 
@@ -1161,12 +1234,15 @@ class Combat:
                 self.on_miracle(t, left or total)
             elif not on:
                 self.miracle_off(t)
+        if efst == POSTDELAY_EFST and aid == self.me and on and total:
+            self.post_delays.append((t, total, left or total))
         key = (aid, efst)
         first = key not in self.status_first
         if first:
             self.status_first[key] = (t, bool(on))
         cur = self.status_on.get(key)
         if on:
+            self.status_seen[key] = t
             if total and total > self.status_total.get(efst, 0):
                 self.status_total[efst] = total
             if cur is None:

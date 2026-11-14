@@ -1,3 +1,3 @@
 """Versão do medidor (aparece no menu Sobre, no .exe e no nome do pacote)."""
 
-VERSION = "1.6.0"
+VERSION = "1.7.0"

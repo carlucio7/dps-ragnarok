@@ -1247,13 +1247,16 @@ def _elo(x, alerts, aids):
     return rows
 
 
-SYNC_MS = 500                 # golpe forte de um DPS mais longe que isso de qualquer golpe forte dos outros = fora da rajada
-SYNC_JOIN_MS = 1000           # golpes fora da rajada mais perto que isso um do outro contam como um episódio
+SYNC_MS = 500                 # golpe forte de um DPS mais que isso antes do golpe forte seguinte dos outros = atacou antes
+EARLY_RED_MS = 1000           # até isso antes dos outros é atenção; mais que isso é grave
+SYNC_JOIN_MS = 1000           # golpes adiantados mais perto que isso um do outro contam como um episódio
 
 
 def _desync(x, alerts):
-    """DPS que bateu forte (STRONG_HIT do HP ou mais) fora da rajada dos outros DPS do grupo (alerta grave).
-    Só no clímax e só quando havia outro DPS vivo para bater junto."""
+    """DPS que bateu forte (STRONG_HIT do HP ou mais) antes dos outros DPS do grupo: o golpe dele não tem nenhum
+    golpe forte de outro DPS por perto (SYNC_MS antes ou depois) e o seguinte dos outros só vem depois. Vale quanto
+    tempo antes ele começou: até EARLY_RED_MS é atenção, mais que isso é grave. Só no clímax e só quando havia
+    outro DPS vivo para bater junto; quem continua batendo depois que os outros pararam não entra."""
     c = x.c
     limit = STRONG_HIT * x.hp
     dps = [a for a in x.party if x.role.get(a) in ("W", "M")]
@@ -1265,38 +1268,41 @@ def _desync(x, alerts):
         strong = sorted((h.t, h.src) for h in x.hits if h.src in dps and h.dmg >= limit
                         and h.dst_raw == p["aid"] and any(s <= h.t <= e for s, e in wins))
         times = [t for t, _a in strong]
-        eps = collections.defaultdict(list)          # aid -> [[início, fim, maior distância, nº de golpes]]
-        for t, a in strong:
+        eps = collections.defaultdict(list)          # aid -> [[início, fim, quanto antes dos outros, nº de golpes]]
+        for k0, (t, a) in enumerate(strong):
             others = [b for b in dps if b != a and not any(s <= t < e for s, e in x.dead_at(b))]
             if not others:
                 continue
             i, j = bisect.bisect_left(times, t - SYNC_MS), bisect.bisect_right(times, t + SYNC_MS)
             if any(strong[k][1] != a for k in range(i, j)):
                 continue                              # bateu junto com alguém
-            near = [abs(t2 - t) for t2, b in strong if b != a]
-            gap = min(near) if near else None
+            nxt = next((t2 for t2, b in strong[k0 + 1:] if b != a), None)
+            if nxt is None:
+                continue                              # ninguém bateu depois: não foi "antes dos outros"
             lst = eps[a]
             if lst and t - lst[-1][1] <= SYNC_JOIN_MS:
                 lst[-1][1] = t
                 lst[-1][3] += 1
-                if gap is not None and (lst[-1][2] is None or gap > lst[-1][2]):
-                    lst[-1][2] = gap
             else:
-                lst.append([t, t, gap, 1])
+                lst.append([t, t, nxt - t, 1])        # o primeiro golpe do episódio diz quanto antes ele começou
         if not eps:
             continue
-        who = sorted(eps, key=lambda a: -len(eps[a]))
-        _alert(alerts, 2, x.phase_name(p) if x.multi or p.get("marked") else x.whole,
-               _("Golpes fortes fora da rajada dos outros DPS"),
-               ", ".join(_("%s %d×") % (c.name_of(a), len(eps[a])) for a in who),
-               _("golpe de %s ou mais (%s do HP) mais de %s longe de qualquer golpe forte dos outros DPS vivos") % (
-                   num(limit), dec("%.1f%%" % (STRONG_HIT * 100)), _secs(SYNC_MS)) + "".join(
-                   " · " + _("%s: %s") % (c.name_of(a), ", ".join(
-                       (_("%s (sozinho)") if g is None else _("%s (%s do mais perto)")) % (
-                           (_when(s),) if g is None else (_when(s), dec("%.2f s" % (g / 1000.0))))
-                       for s, _e, g, _n in eps[a][:4]) + (" …" if len(eps[a]) > 4 else ""))
-                   for a in who))
-        for a in who:
+        phase = x.phase_name(p) if x.multi or p.get("marked") else x.whole
+        worst = {a: max(e[2] for e in eps[a]) for a in eps}
+        for sev, who in ((2, [a for a in eps if worst[a] > EARLY_RED_MS]),
+                         (1, [a for a in eps if worst[a] <= EARLY_RED_MS])):
+            if not who:
+                continue
+            who.sort(key=lambda a: -worst[a])
+            _alert(alerts, sev, phase, _("Atacou muito antes dos outros DPS"),
+                   ", ".join(_("%s %s antes") % (c.name_of(a), dec("%.1f s" % (worst[a] / 1000.0))) for a in who),
+                   _("golpe de %s ou mais (%s do HP) mais de %s antes do golpe forte seguinte dos outros DPS vivos; "
+                     "até %s antes é atenção, mais que isso é grave") % (
+                       num(limit), dec("%.1f%%" % (STRONG_HIT * 100)), _secs(SYNC_MS), _secs(EARLY_RED_MS))
+                   + "".join(" · " + _("%s: %s") % (c.name_of(a), ", ".join(
+                       _("%s (%s antes)") % (_when(s), dec("%.1f s" % (g / 1000.0)))
+                       for s, _e, g, _n in eps[a][:4]) + (" …" if len(eps[a]) > 4 else "")) for a in who))
+        for a in eps:
             out += [dict(aid=a, phase=p["n"], start=s, end=e, gap=g, hits=n) for s, e, g, n in eps[a]]
     return out
 

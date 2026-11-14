@@ -787,6 +787,74 @@ def estimate(c, cfg, rng=None):
                 kills_per_min=len(rows) * 60000.0 / span if long_enough else None, span=span, rows=rows)
 
 
+SIM_KEYS = ("server", "vip", "scepter", "kafra", "manual", "njord", "gear", "miracle")
+
+
+def sim_real(c, cfg, rng=None):
+    """Como cada bônus valeu de verdade no recorte, para o simulador mostrar ao lado de cada um:
+    {chave: dict(counted (entra na conta da lista?), cover (fração do recorte em que esteve ativo; None para o que
+    o replay não mostra, como o evento do servidor), ms (por quanto tempo), pct (o % que valeu))}."""
+    sets, wins = settings(cfg, c), windows(c, cfg)
+    t0, t1 = rng if rng else (0, c.now)
+    span = max(1, t1 - t0)
+    out = {}
+    for b in BONUSES:
+        key = b["key"]
+        if key not in SIM_KEYS:
+            continue
+        st = sets[key]
+        if b["status"] is None:
+            out[key] = dict(counted=bool(st["on"]), cover=None, ms=None, pct=float(st["pct"]))
+            continue
+        merged, val = [], 0.0
+        for s, e, v in sorted(wins.get(key, ())):
+            s, e = max(s, t0), min(e, t1)
+            if e <= s:
+                continue
+            val = max(val, v or 0)
+            if merged and s <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], e)
+            else:
+                merged.append([s, e])
+        pct = val if (b.get("val") and val > 0) else (st.get("last") or st["pct"])
+        active = min(span, sum(e - s for s, e in merged))
+        out[key] = dict(counted=bool(st["on"]), cover=active / float(span), ms=active, pct=float(pct))
+    return out
+
+
+def simulate(c, cfg, rng, over):
+    """A XP dos abates do recorte trocando alguns bônus. `over`: {chave: ("on", %) para valer o tempo todo com esse
+    %, ou ("off",) para não valer}; o que não está em `over` vale como valeu na gravação (as mesmas janelas e
+    valores da estimativa). Mesma fórmula e mesma correção medida da estimativa: sem nada em `over` o resultado é
+    o da lista de bônus. Devolve dict(xp, base, factor, per_min, per_hour)."""
+    rows, _unknown = kills(c, rng)
+    _f, _source, corr = factor(c, cfg)
+    wins, sets, marks = dict(windows(c, cfg)), dict(settings(cfg, c)), marks_of(c)
+    for b in BONUSES:
+        o = over.get(b["key"]) if b["key"] in SIM_KEYS else None
+        if not o:
+            continue
+        if o[0] == "off":
+            sets[b["key"]] = dict(sets[b["key"]], on=False)
+            continue
+        st = dict(sets[b["key"]], on=True, pct=float(o[1]))
+        st.pop("last", None)
+        sets[b["key"]] = st
+        if b["status"] is not None:               # ativo o recorte inteiro (o % vai na janela, quando o bônus o traz)
+            wins[b["key"]] = [(-1, 10 ** 15, float(o[1]) if b.get("val") else 0)]
+    parts = _Parts(wins, sets)
+    total = base = 0.0
+    for r in rows:
+        if r["xp"] is None:
+            continue
+        total += r["xp"] * factor_at(r["t"], wins, sets, r["mob"], marks, parts.at(r["t"])) * corr
+        base += r["xp"]
+    span = (rng[1] - rng[0]) if rng else c.now
+    per_min = total * 60000.0 / span if span and span > 60000 else None
+    return dict(xp=total if base else None, base=base, factor=(total / base) if base else None, per_min=per_min,
+                per_hour=per_min * 60 if per_min is not None else None)
+
+
 def timeline(c, cfg, rng=None, bucket_ms=60000):
     """XP estimada por minuto e acumulada (em % do nível quando o jogo mandou quanto falta):
     [(início do minuto, XP no minuto, XP acumulada)]."""
@@ -866,20 +934,12 @@ class _Gear:
 
         def run():
             try:
-                import lub
-                with open(path, "rb") as f:
-                    items = lub.run(f.read()).get("tbl") or {}
-                self.names = {i: _norm(v.get("identifiedDisplayName")) for i, v in items.items()
-                              if isinstance(i, int) and isinstance(v, dict)}
-                self.display = {i: " ".join(v["identifiedDisplayName"].split()) for i, v in items.items()
-                                if isinstance(i, int) and isinstance(v, dict)
-                                and isinstance(v.get("identifiedDisplayName"), str) and v["identifiedDisplayName"].strip()}
-                self.art = {i: v["identifiedResourceName"] for i, v in items.items()
-                            if isinstance(i, int) and isinstance(v, dict)
-                            and isinstance(v.get("identifiedResourceName"), str) and v["identifiedResourceName"]}
-                self.table = parse_gear(items)
-                import itemkind                  # categorias dos itens (cores dos drops), do mesmo arquivo
-                self.kinds = itemkind.parse_kinds(items)
+                # o resumo da lista de itens vem do disco enquanto o arquivo do jogo não mudar (gamecache): rodar
+                # o iteminfo inteiro leva mais de 1 s de processamento, e a janela fica lenta enquanto isso
+                import gamecache
+                d = gamecache.items(path)
+                self.names, self.display, self.art, self.kinds = d["names"], d["display"], d["art"], d["kinds"]
+                self.table = d["table"]
             except (OSError, ValueError, IndexError, KeyError):
                 self.table = {}
             finally:
@@ -1077,16 +1137,22 @@ def warming_up(c, cfg):
     return not (nd and estimate(c, cfg, (0, c.now))["kill_xp"] >= WARMUP_FRAC * nd)
 
 
-def recent_pace(c, cfg):
-    """XP por minuto nos últimos 10 min de farm (contando do começo do farm, não da gravação), ou None enquanto
-    aquece (warming_up)."""
+def recent_range(c, cfg):
+    """O trecho que dá o ritmo recente: os últimos 10 min de farm (contando do começo do farm, não da gravação),
+    ou None enquanto aquece (warming_up)."""
     start = farm_start(c)
     if start is None or warming_up(c, cfg):
         return None
     span = min(PACE_MS, c.now - start)
-    if span <= 0:
+    return (c.now - span, c.now) if span > 0 else None
+
+
+def recent_pace(c, cfg):
+    """XP por minuto no trecho recente (recent_range), ou None enquanto aquece."""
+    rng = recent_range(c, cfg)
+    if rng is None:
         return None
-    rate = estimate(c, cfg, (c.now - span, c.now))["kill_xp"] * 60000.0 / span     # ritmo só dos abates
+    rate = estimate(c, cfg, rng)["kill_xp"] * 60000.0 / (rng[1] - rng[0])     # ritmo só dos abates
     return rate if rate > 0 else None
 
 

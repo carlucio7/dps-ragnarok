@@ -1857,3 +1857,784 @@ CATALOG = {
         "doubles the next hit after each use: %d hits doubled",
         "duplica el próximo golpe después de cada uso: %d golpes duplicados"),
 }
+
+# --- 1.7: gerenciador de cartões, testes lado a lado, monstros, impacto no DPS, simulador de XP, resumo
+CATALOG.update({
+    "Jogadores — o grupo inteiro (quem não deu dano também); dano de invocações e skills de chão conta para o dono": (
+        "Players — the whole party (those who dealt no damage too); damage from summons and ground skills counts for the owner",
+        "Jugadores — el grupo entero (también quien no hizo daño); el daño de invocaciones y skills de suelo cuenta para el dueño"),
+    "ⓘ como é avaliado": (
+        "ⓘ how it is judged",
+        "ⓘ cómo se evalúa"),
+    "Suporte e itens": (
+        "Support and items",
+        "Soporte y objetos"),
+    "Simulador": (
+        "Simulator",
+        "Simulador"),
+    "Crít.": (
+        "Crit.",
+        "Crít."),
+    "Recebido": (
+        "Taken",
+        "Recibido"),
+    "Suporte": (
+        "Support",
+        "Soporte"),
+    "Itens": (
+        "Items",
+        "Objetos"),
+    "Skill sem dano (buff, cura, debuff)": (
+        "Skill with no damage (buff, heal, debuff)",
+        "Skill sin daño (buff, cura, debuff)"),
+    "Usos": (
+        "Uses",
+        "Usos"),
+    "Item usado": (
+        "Item used",
+        "Objeto usado"),
+    "Vezes": (
+        "Times",
+        "Veces"),
+    "O replay não trouxe a lista de itens de quem gravou": (
+        "The replay did not bring the recorder's item list",
+        "El replay no trajo la lista de objetos de quien grabó"),
+    "Os itens marcados valem:": (
+        "Marked items apply:",
+        "Los objetos marcados valen:"),
+    "do grupo": (
+        "in the party",
+        "del grupo"),
+    "fora do grupo": (
+        "outside the party",
+        "fuera del grupo"),
+    "Propriedade": (
+        "Property",
+        "Propiedad"),
+    "%d morte(s)": (
+        "%d death(s)",
+        "%d muerte(s)"),
+    "Itens com aviso de %s (%d):": (
+        "Items with an alert for %s (%d):",
+        "Objetos con aviso de %s (%d):"),
+    "Nenhum item com aviso para %s ainda.": (
+        "No item with an alert for %s yet.",
+        "Ningún objeto con aviso para %s todavía."),
+    "acabou": (
+        "ended",
+        "terminó"),
+    "em mim": (
+        "on me",
+        "en mí"),
+    "no alvo": (
+        "on the target",
+        "en el objetivo"),
+    "de qualquer um": (
+        "from anyone",
+        "de cualquiera"),
+    "há %d s": (
+        "for %d s",
+        "hace %d s"),
+    "há %d:%02d": (
+        "for %d:%02d",
+        "hace %d:%02d"),
+    "Atacou muito antes dos outros DPS": (
+        "Attacked well before the other DPS",
+        "Atacó mucho antes que los otros DPS"),
+    "golpe de %s ou mais (%s do HP) mais de %s antes do golpe forte seguinte dos outros DPS vivos; até %s antes é atenção, mais que isso é grave": (
+        "hit of %s or more (%s of HP) more than %s before the next strong hit from the other living DPS; up to %s before is a warning, more than that is serious",
+        "golpe de %s o más (%s del HP) más de %s antes del siguiente golpe fuerte de los otros DPS vivos; hasta %s antes es atención, más que eso es grave"),
+    "%s %s antes": (
+        "%s %s early",
+        "%s %s antes"),
+    "%s (%s antes)": (
+        "%s (%s early)",
+        "%s (%s antes)"),
+    "Efeito acompanhado · botão direito: parar de acompanhar": (
+        "Tracked effect · right-click: stop tracking",
+        "Efecto seguido · clic derecho: dejar de seguir"),
+    "Cartões e efeitos acompanhados…": (
+        "Cards and tracked effects…",
+        "Tarjetas y efectos seguidos…"),
+    "Parar de acompanhar %s": (
+        "Stop tracking %s",
+        "Dejar de seguir %s"),
+    "conjuração de %s %d → %d ms": (
+        "cast of %s %d → %d ms",
+        "conjuración de %s %d → %d ms"),
+    "ASPD %s → %s": (
+        "ASPD %s → %s",
+        "ASPD %s → %s"),
+    "ganhou %s": (
+        "gained %s",
+        "ganó %s"),
+    "perdeu %s": (
+        "lost %s",
+        "perdió %s"),
+    "instantânea": (
+        "instant",
+        "instantánea"),
+    "Golpes por segundo": (
+        "Hits per second",
+        "Golpes por segundo"),
+    "Críticos": (
+        "Crits",
+        "Críticos"),
+    "Atributos (média na luta)": (
+        "Stats (fight average)",
+        "Atributos (promedio en la pelea)"),
+    "Conjuração e recarga": (
+        "Cast and cooldown",
+        "Conjuración y recarga"),
+    "Skills (dano)": (
+        "Skills (damage)",
+        "Skills (daño)"),
+    "Buffs (tempo ativo)": (
+        "Buffs (uptime)",
+        "Buffs (tiempo activo)"),
+    "Itens usados": (
+        "Items used",
+        "Objetos usados"),
+    "Pós-conjuração": (
+        "After-cast delay",
+        "Post-conjuración"),
+    "Redução da pós-conjuração": (
+        "After-cast delay reduction",
+        "Reducción de la post-conjuración"),
+    "Tentativas com a skill em recarga": (
+        "Attempts while the skill was on cooldown",
+        "Intentos con la skill en recarga"),
+    "%s · conjuração": (
+        "%s · cast",
+        "%s · conjuración"),
+    "%s · recarga": (
+        "%s · cooldown",
+        "%s · recarga"),
+    "Cartões do programa": (
+        "Built-in cards",
+        "Tarjetas del programa"),
+    "O que o widget já mostra sozinho. Tudo vem ligado; desmarque o que não quiser ver. Passe o mouse num cartão para ver a prévia.": (
+        "What the widget already shows by itself. Everything starts on; untick what you don't want to see. Hover a card to see its preview.",
+        "Lo que el widget ya muestra solo. Todo viene activado; desmarca lo que no quieras ver. Pasa el ratón por una tarjeta para ver la vista previa."),
+    "Gravando": (
+        "Recording",
+        "Grabando"),
+    "Prévia: %s": (
+        "Preview: %s",
+        "Vista previa: %s"),
+    "Prévia: contadores (exemplo)": (
+        "Preview: timers (example)",
+        "Vista previa: contadores (ejemplo)"),
+    "Prévia: contadores dos efeitos acompanhados": (
+        "Preview: timers of the tracked effects",
+        "Vista previa: contadores de los efectos seguidos"),
+    "Efeitos acompanhados no widget": (
+        "Effects tracked on the widget",
+        "Efectos seguidos en el widget"),
+    "Enquanto um efeito da lista está ativo, o widget mostra um contador no pé das linhas: o tempo que falta quando o jogo manda a duração (os debuffs no chefe vêm com ela) ou há quanto tempo está ativo. Só durante a gravação.": (
+        "While an effect on the list is active, the widget shows a timer at the bottom of the rows: the time left when the game sends the duration (debuffs on the boss come with it) or how long it has been active. Only while recording.",
+        "Mientras un efecto de la lista está activo, el widget muestra un contador al pie de las líneas: el tiempo que falta cuando el juego envía la duración (los debuffs en el jefe vienen con ella) o hace cuánto está activo. Solo durante la grabación."),
+    "Cartões": (
+        "Cards",
+        "Tarjetas"),
+    "Enquanto um efeito da lista está ativo, o widget mostra um contador no pé das linhas: o tempo que falta quando o jogo manda a duração (os debuffs no chefe vêm com ela) ou há quanto tempo está ativo. Só durante a gravação. Cada efeito aparece como você escolher em \"Aparece como\": contador (um cartão o cobre enquanto aparece), faixa fixa (até 2; com um cartão aberto vai para a direita do DPS) ou cartão (fica enquanto o efeito durar).": (
+        "While an effect on the list is active, the widget shows a timer at the bottom of the rows: the time left when the game sends the duration (debuffs on the boss come with it) or how long it has been active. Only while recording. Each effect shows the way you pick in \"Shows as\": timer (a card covers it while it shows), pinned strip (up to 2; with a card open it moves to the right of the DPS) or card (stays while the effect lasts).",
+        "Mientras un efecto de la lista está activo, el widget muestra un contador al pie de las líneas: el tiempo que falta cuando el juego envía la duración (los debuffs en el jefe vienen con ella) o hace cuánto está activo. Solo durante la grabación. Cada efecto aparece como elijas en \"Aparece como\": contador (una tarjeta lo cubre mientras aparece), franja fija (hasta 2; con una tarjeta abierta pasa a la derecha del DPS) o tarjeta (queda mientras dure el efecto)."),
+    "Aparece como:": (
+        "Shows as:",
+        "Aparece como:"),
+    "cartão": (
+        "card",
+        "tarjeta"),
+    "Prévia: os efeitos acompanhados": (
+        "Preview: the tracked effects",
+        "Vista previa: los efectos seguidos"),
+    "Contador no pé das linhas": (
+        "Timer at the bottom of the rows",
+        "Contador al pie de las líneas"),
+    "Fixado na faixa fixa (à vista com um cartão aberto)": (
+        "Pinned to the pinned strip (visible with a card open)",
+        "Fijado en la franja fija (a la vista con una tarjeta abierta)"),
+    "Cartão enquanto durar": (
+        "Card while it lasts",
+        "Tarjeta mientras dure"),
+    "Mostrar %s como": (
+        "Show %s as",
+        "Mostrar %s como"),
+    "Efeito acompanhado · botão direito: como mostrar ou parar de acompanhar": (
+        "Tracked effect · right-click: how to show it or stop tracking",
+        "Efecto seguido · clic derecho: cómo mostrarlo o dejar de seguir"),
+    "Clique: fechar até o efeito acabar · botão direito: como mostrar": (
+        "Click: close until the effect ends · right-click: how to show it",
+        "Clic: cerrar hasta que el efecto termine · clic derecho: cómo mostrarlo"),
+    "Fixar / desafixar": (
+        "Pin / unpin",
+        "Fijar / desfijar"),
+    "Onde aparece": (
+        "Where it shows",
+        "Dónde aparece"),
+    "faixa fixa": (
+        "pinned strip",
+        "franja fija"),
+    "contador": (
+        "timer",
+        "contador"),
+    "Fixar na faixa fixa (fica à vista com um cartão aberto)": (
+        "Pin to the pinned strip (stays visible with a card open)",
+        "Fijar en la franja fija (queda a la vista con una tarjeta abierta)"),
+    "Efeito: %s": (
+        "Effect: %s",
+        "Efecto: %s"),
+    "Piscar \"acabou\"": (
+        "Flash \"ended\"",
+        "Parpadear \"terminó\""),
+    "Som quando acabar": (
+        "Sound when it ends",
+        "Sonido cuando termine"),
+    "Sugestões:": (
+        "Suggestions:",
+        "Sugerencias:"),
+    "Buscar:": (
+        "Search:",
+        "Buscar:"),
+    "Onde olhar": (
+        "Where to look",
+        "Dónde mirar"),
+    "Mostrar até": (
+        "Show up to",
+        "Mostrar hasta"),
+    "contadores": (
+        "timers",
+        "contadores"),
+    "Acompanhando: nada ainda (escolha acima)": (
+        "Tracking: nothing yet (pick above)",
+        "Siguiendo: nada todavía (elige arriba)"),
+    "Acompanhar": (
+        "Track",
+        "Seguir"),
+    "Remover": (
+        "Remove",
+        "Quitar"),
+    "Trocar onde olhar": (
+        "Change where to look",
+        "Cambiar dónde mirar"),
+    "Acompanhando (%d)": (
+        "Tracking (%d)",
+        "Siguiendo (%d)"),
+    "DPS do jogador com o efeito ativo e sem ele, só no tempo em que estava batendo e só dentro da mesma luta. É o que foi medido, não a prova da causa: um buff que entra junto com outro leva a fama dos dois. \"Pela fórmula\" é a estimativa da aba Buffs e Debuffs, quando existe.": (
+        "The player's DPS with the effect active and without it, only while attacking and only within the same fight. It is what was measured, not proof of the cause: a buff that comes in together with another takes the credit for both. \"By formula\" is the estimate from the Buffs and Debuffs tab, when there is one.",
+        "DPS del jugador con el efecto activo y sin él, solo en el tiempo en que estaba pegando y solo dentro de la misma pelea. Es lo que se midió, no la prueba de la causa: un buff que entra junto con otro se lleva la fama de los dos. \"Por la fórmula\" es la estimación de la pestaña Buffs y Debuffs, cuando existe."),
+    "Impacto dos efeitos": (
+        "Impact of the effects",
+        "Impacto de los efectos"),
+    "Momentos": (
+        "Moments",
+        "Momentos"),
+    "Cada vez que um efeito entrou ou saiu, ou que a ASPD ou a conjuração mudou, com o DPS dos %d s antes e dos %d s depois. Verde: o DPS subiu %d%% ou mais; vermelho: caiu %d%% ou mais.": (
+        "Each time an effect came in or went out, or the ASPD or the cast time changed, with the DPS of the %d s before and the %d s after. Green: DPS went up %d%% or more; red: it dropped %d%% or more.",
+        "Cada vez que un efecto entró o salió, o que la ASPD o la conjuración cambió, con el DPS de los %d s antes y de los %d s después. Verde: el DPS subió %d%% o más; rojo: cayó %d%% o más."),
+    "Trecho e fases": (
+        "Stretch and phases",
+        "Tramo y fases"),
+    "DPS com": (
+        "DPS with",
+        "DPS con"),
+    "DPS sem": (
+        "DPS without",
+        "DPS sin"),
+    "Pela fórmula": (
+        "By formula",
+        "Por la fórmula"),
+    "Entrou / saiu": (
+        "In / out",
+        "Entró / salió"),
+    "O que mudou": (
+        "What changed",
+        "Qué cambió"),
+    "DPS antes": (
+        "DPS before",
+        "DPS antes"),
+    "DPS depois": (
+        "DPS after",
+        "DPS después"),
+    "ASPD %s–%s": (
+        "ASPD %s–%s",
+        "ASPD %s–%s"),
+    "ASPD %s": (
+        "ASPD %s",
+        "ASPD %s"),
+    "sempre ativo": (
+        "always active",
+        "siempre activo"),
+    "Monstros atacados": (
+        "Monsters attacked",
+        "Monstruos atacados"),
+    "Habilidades que ele usou": (
+        "Skills it used",
+        "Habilidades que usó"),
+    "não morreu no recorte": (
+        "did not die in the range",
+        "no murió en el recorte"),
+    "golpe final": (
+        "killing blow",
+        "golpe final"),
+    "não acertou ninguém": (
+        "hit nobody",
+        "no acertó a nadie"),
+    "Abate": (
+        "Kill",
+        "Baja"),
+    "Tempo até o abate": (
+        "Time to kill",
+        "Tiempo hasta la baja"),
+    "Dano causado": (
+        "Damage dealt",
+        "Daño causado"),
+    "Jogadores mortos": (
+        "Players killed",
+        "Jugadores muertos"),
+    "Quem mais apanhou": (
+        "Who took the most",
+        "Quién recibió más"),
+    "Com dano e de suporte/debuff.   Em quem:": (
+        "With damage and support/debuff.   On whom:",
+        "Con daño y de soporte/debuff.   En quién:"),
+    "%d golpes em %d jogadores": (
+        "%d hits on %d players",
+        "%d golpes en %d jugadores"),
+    "%s · mais de %s": (
+        "%s · mostly from %s",
+        "%s · sobre todo de %s"),
+    "O que o grupo fez nele": (
+        "What the party did to it",
+        "Lo que el grupo le hizo"),
+    "O que ele fez": (
+        "What it did",
+        "Lo que hizo"),
+    "Sem itens neste grupo.": (
+        "No items in this group.",
+        "Sin objetos en este grupo."),
+    "carregando…": (
+        "loading…",
+        "cargando…"),
+    "Nada a apontar aqui.": (
+        "Nothing to point out here.",
+        "Nada que señalar aquí."),
+    "%d opções": (
+        "%d options",
+        "%d opciones"),
+    "Cartas e encantamentos": (
+        "Cards and enchants",
+        "Cartas y encantamientos"),
+    "sem desenho": (
+        "no sprite",
+        "sin dibujo"),
+    "Sobrevivência e ritmo": (
+        "Survival and pace",
+        "Supervivencia y ritmo"),
+    "XP e drops": (
+        "XP and drops",
+        "XP y drops"),
+    "Chefes do recorte": (
+        "Bosses in the range",
+        "Jefes del recorte"),
+    "no tempo batendo": (
+        "while attacking",
+        "en el tiempo pegando"),
+    "mapa %s": (
+        "map %s",
+        "mapa %s"),
+    "%s gravados": (
+        "%s recorded",
+        "%s grabados"),
+    "%s em combate": (
+        "%s in combat",
+        "%s en combate"),
+    "%d jogadores": (
+        "%d players",
+        "%d jugadores"),
+    "%s críticos": (
+        "%s crits",
+        "%s críticos"),
+    "a última: %s": (
+        "the last one: %s",
+        "la última: %s"),
+    "nenhum à vista": (
+        "none in sight",
+        "ninguno a la vista"),
+    "nenhuma skill com pós-conjuração": (
+        "no skill with after-cast delay",
+        "ninguna skill con post-conjuración"),
+    "tentativas antes de a skill voltar": (
+        "attempts before the skill was back",
+        "intentos antes de que la skill volviera"),
+    "nenhum no recorte": (
+        "none in the range",
+        "ninguno en el recorte"),
+    "Conjuração": (
+        "Cast time",
+        "Conjuración"),
+    "Skill em recarga": (
+        "Skill on cooldown",
+        "Skill en recarga"),
+    "Abates do grupo": (
+        "Party kills",
+        "Bajas del grupo"),
+    "Itens pegos": (
+        "Items picked up",
+        "Objetos recogidos"),
+    "Chefe": (
+        "Boss",
+        "Jefe"),
+    "Resultado": (
+        "Result",
+        "Resultado"),
+    "Sua parte": (
+        "Your share",
+        "Tu parte"),
+    "Seu DPS": (
+        "Your DPS",
+        "Tu DPS"),
+    "Mortes do grupo": (
+        "Party deaths",
+        "Muertes del grupo"),
+    "%d luta(s) contra chefe": (
+        "%d boss fight(s)",
+        "%d pelea(s) contra jefe"),
+    "armadilha do mapa": (
+        "map trap",
+        "trampa del mapa"),
+    "de %s a %s no recorte": (
+        "from %s to %s in the range",
+        "de %s a %s en el recorte"),
+    "média no recorte": (
+        "average in the range",
+        "promedio en el recorte"),
+    "o replay não trouxe": (
+        "not in the replay",
+        "el replay no lo trajo"),
+    "%s · %d usos": (
+        "%s · %d uses",
+        "%s · %d usos"),
+    "%d ms de base · -%d%%": (
+        "%d ms base · -%d%%",
+        "%d ms de base · -%d%%"),
+    "do nível · %s": (
+        "of the level · %s",
+        "del nivel · %s"),
+    "%d itens diferentes · %s": (
+        "%d different items · %s",
+        "%d objetos distintos · %s"),
+    "Chefes do recorte: nenhuma luta contra chefe": (
+        "Bosses in the range: no boss fight",
+        "Jefes del recorte: ninguna pelea contra jefe"),
+    "sem golpe visível": (
+        "no visible hit",
+        "sin golpe visible"),
+    "%d interrompidas": (
+        "%d interrupted",
+        "%d interrumpidas"),
+    "%d erros": (
+        "%d misses",
+        "%d fallos"),
+    "Teste A": (
+        "Test A",
+        "Prueba A"),
+    "Teste B": (
+        "Test B",
+        "Prueba B"),
+    "%d teste(s). As lutas contra bonecos de treino são salvas sozinhas; qualquer outra (inclusive de replays de outras pessoas) dá para salvar no botão. Escolha um teste de cada lado para comparar.": (
+        "%d test(s). Fights against training dummies are saved by themselves; any other (including from other people's replays) can be saved with the button. Pick one test on each side to compare.",
+        "%d prueba(s). Las peleas contra muñecos de entrenamiento se guardan solas; cualquier otra (incluso de replays de otras personas) se puede guardar con el botón. Elige una prueba de cada lado para comparar."),
+    "Teste": (
+        "Test",
+        "Prueba"),
+    "Nenhum teste escolhido": (
+        "No test picked",
+        "Ninguna prueba elegida"),
+    "Salve ou escolha um teste para comparar": (
+        "Save or pick a test to compare",
+        "Guarda o elige una prueba para comparar"),
+    "Como teria sido a XP deste recorte mudando algum bônus. Tudo começa em \"Como foi\": cada bônus vale como valeu na gravação, e o simulado é igual ao que foi. Mude só o que quiser testar; os abates são os mesmos.": (
+        "What the XP of this range would have been with a bonus changed. Everything starts at \"As it was\": each bonus counts the way it did in the recording, and the simulated result equals the real one. Change only what you want to test; the kills are the same.",
+        "Cómo habría sido la XP de este recorte cambiando algún bono. Todo empieza en \"Como fue\": cada bono vale como valió en la grabación, y lo simulado es igual a lo que fue. Cambia solo lo que quieras probar; las bajas son las mismas."),
+    "Bônus": (
+        "Bonus",
+        "Bono"),
+    "Como foi neste recorte": (
+        "How it was in this range",
+        "Cómo fue en este recorte"),
+    "No simulador": (
+        "In the simulator",
+        "En el simulador"),
+    "O tempo todo": (
+        "The whole time",
+        "Todo el tiempo"),
+    "Desligado": (
+        "Off",
+        "Apagado"),
+    "Milagre": (
+        "Miracle",
+        "Milagro"),
+    "Resetar simulador": (
+        "Reset simulator",
+        "Reiniciar simulador"),
+    "fora da conta (desmarcado na lista de bônus)": (
+        "not counted (unticked in the bonus list)",
+        "fuera de la cuenta (desmarcado en la lista de bonos)"),
+    "marcado: +%g%%": (
+        "ticked: +%g%%",
+        "marcado: +%g%%"),
+    "não esteve ativo": (
+        "was not active",
+        "no estuvo activo"),
+    "ativo por %s (%s do recorte)": (
+        "active for %s (%s of the range)",
+        "activo por %s (%s del recorte)"),
+    "Tudo como foi. Mude algum bônus acima para simular.": (
+        "Everything as it was. Change a bonus above to simulate.",
+        "Todo como fue. Cambia algún bono arriba para simular."),
+    "Com estes bônus a XP seria a mesma.": (
+        "With these bonuses the XP would be the same.",
+        "Con estos bonos la XP sería la misma."),
+    "Com estes bônus: %s de XP (%s a mais no recorte).": (
+        "With these bonuses: %s XP (%s more in the range).",
+        "Con estos bonos: %s de XP (%s más en el recorte)."),
+    "Como foi": (
+        "As it was",
+        "Como fue"),
+    "Simulado": (
+        "Simulated",
+        "Simulado"),
+    "XP no recorte": (
+        "XP in the range",
+        "XP en el recorte"),
+    "Um nível inteiro no ritmo do recorte": (
+        "A whole level at this range's pace",
+        "Un nivel entero al ritmo del recorte"),
+    "Até o próximo nível (ritmo dos últimos 10 min)": (
+        "To the next level (pace of the last 10 min)",
+        "Hasta el próximo nivel (ritmo de los últimos 10 min)"),
+    "Sem abates com XP conhecida neste recorte.": (
+        "No kills with known XP in this range.",
+        "Sin bajas con XP conocida en este recorte."),
+    "Com estes bônus: %s de XP (%s a menos no recorte).": (
+        "With these bonuses: %s XP (%s less in the range).",
+        "Con estos bonos: %s de XP (%s menos en el recorte)."),
+    "Resumo da morte": (
+        "Death recap",
+        "Resumen de la muerte"),
+    "Chefe trocou de propriedade ou ficou imune": (
+        "Boss changed property or became immune",
+        "El jefe cambió de propiedad o se volvió inmune"),
+    "Chefe mudou de tamanho": (
+        "Boss changed size",
+        "El jefe cambió de tamaño"),
+    "Dor Máxima ligou ou acabou": (
+        "Max Pain turned on or ended",
+        "Dolor Máximo se activó o terminó"),
+    "Modo defesa (Aquila)": (
+        "Defense mode (Aquila)",
+        "Modo defensa (Aquila)"),
+    "Aliviar muito alto (Betelgeuse)": (
+        "Relieve very high (Betelgeuse)",
+        "Aliviar muy alto (Betelgeuse)"),
+    "A defesa caiu (Aquila)": (
+        "The defense dropped (Aquila)",
+        "La defensa cayó (Aquila)"),
+    "Resumo da luta contra chefe": (
+        "Boss fight summary",
+        "Resumen de la pelea contra jefe"),
+    "Item marcado caiu": (
+        "Marked item dropped",
+        "Cayó un objeto marcado"),
+    "Buff importante acabou": (
+        "Important buff ended",
+        "Terminó un buff importante"),
+    "Morte com overkill": (
+        "Death with overkill",
+        "Muerte con overkill"),
+    "HP baixo com a União": (
+        "Low HP with the Union",
+        "HP bajo con la Unión"),
+    "Jogo aberto sem gravar": (
+        "Game open and not recording",
+        "Juego abierto sin grabar"),
+    "Quando você morre: o golpe que matou e o que veio antes, por 10 s": (
+        "When you die: the hit that killed you and what came before, for 10 s",
+        "Cuando mueres: el golpe que te mató y lo que vino antes, por 10 s"),
+    "Com o que bater e o que evitar, por 5 s": (
+        "What to hit with and what to avoid, for 5 s",
+        "Con qué pegar y qué evitar, por 5 s"),
+    "O tamanho novo e o de antes, por 5 s": (
+        "The new size and the previous one, for 5 s",
+        "El tamaño nuevo y el de antes, por 5 s"),
+    "Segurar os golpes grandes enquanto ela devolve dano": (
+        "Hold the big hits while it returns damage",
+        "Guardar los golpes grandes mientras devuelve daño"),
+    "O dano quase não entra até a defesa cair": (
+        "Almost no damage gets in until the defense drops",
+        "El daño casi no entra hasta que la defensa cae"),
+    "Almas ativas e a redução de dano do chefe": (
+        "Active souls and the boss's damage reduction",
+        "Almas activas y la reducción de daño del jefe"),
+    "5 s de dano total": (
+        "5 s of full damage",
+        "5 s de daño total"),
+    "No fim da luta: tempo, sua parte do dano e o Dedo Duro": (
+        "At the end of the fight: time, your share of the damage and the Snitch",
+        "Al final de la pelea: tiempo, tu parte del daño y el Soplón"),
+    "O cartão com o mapa e as coordenadas (o som é à parte)": (
+        "The card with the map and coordinates (the sound is separate)",
+        "La tarjeta con el mapa y las coordenadas (el sonido va aparte)"),
+    "A faixa dourada quando o Milagre ativa": (
+        "The golden band when the Miracle triggers",
+        "La franja dorada cuando se activa el Milagro"),
+    "Aviso no rodapé, no meio da luta": (
+        "Footer alert, in the middle of the fight",
+        "Aviso en el pie, en medio de la pelea"),
+    "Aviso no rodapé": (
+        "Footer alert",
+        "Aviso en el pie"),
+    "Aviso no rodapé (Mestre Taekwon)": (
+        "Footer alert (Taekwon Master)",
+        "Aviso en el pie (Maestro Taekwon)"),
+    "Lembrete no rodapé": (
+        "Footer reminder",
+        "Recordatorio en el pie"),
+    "Debuff no alvo": (
+        "Debuff on the target",
+        "Debuff en el objetivo"),
+    "Buff de grupo": (
+        "Party buff",
+        "Buff de grupo"),
+    "Buff de classe e outros": (
+        "Class buff and others",
+        "Buff de clase y otros"),
+    "Efeito de chão": (
+        "Ground effect",
+        "Efecto de suelo"),
+    "ASPD": (
+        "ASPD",
+        "ASPD"),
+    "ATQ": (
+        "ATK",
+        "ATQ"),
+    "ATQM": (
+        "MATK",
+        "ATQM"),
+    "P.ATQ": (
+        "P.ATK",
+        "P.ATQ"),
+    "S.ATQM": (
+        "S.MATK",
+        "S.ATQM"),
+    "Precisão": (
+        "HIT",
+        "Precisión"),
+    "Crítico": (
+        "CRIT",
+        "Crítico"),
+    "C.Rate": (
+        "C.Rate",
+        "C.Rate"),
+    "Esquiva": (
+        "FLEE",
+        "Esquiva"),
+    "DEF": (
+        "DEF",
+        "DEF"),
+    "DEFM": (
+        "MDEF",
+        "DEFM"),
+    "RES": (
+        "RES",
+        "RES"),
+    "RESM": (
+        "MRES",
+        "RESM"),
+    "H.Plus": (
+        "H.Plus",
+        "H.Plus"),
+    "SP máx.": (
+        "Max SP",
+        "SP máx."),
+    "FOR": (
+        "STR",
+        "FUE"),
+    "AGI": (
+        "AGI",
+        "AGI"),
+    "VIT": (
+        "VIT",
+        "VIT"),
+    "INT": (
+        "INT",
+        "INT"),
+    "DES": (
+        "DEX",
+        "DES"),
+    "SOR": (
+        "LUK",
+        "SUE"),
+    "POW": (
+        "POW",
+        "POW"),
+    "STA": (
+        "STA",
+        "STA"),
+    "WIS": (
+        "WIS",
+        "WIS"),
+    "SPL": (
+        "SPL",
+        "SPL"),
+    "CON": (
+        "CON",
+        "CON"),
+    "CRT": (
+        "CRT",
+        "CRT"),
+    "Visual": (
+        "Costume",
+        "Visual"),
+    "VIP": (
+        "VIP",
+        "VIP"),
+    "Cetro do Coração Lunar": (
+        "Lunar Heart Scepter",
+        "Cetro del Corazón Lunar"),
+    "Kafra Buff / Manual Kafra": (
+        "Kafra Buff / Kafra Manual",
+        "Kafra Buff / Manual Kafra"),
+    "Manual de combate": (
+        "Battle manual",
+        "Manual de combate"),
+    "Itens de XP": (
+        "XP items",
+        "Objetos de XP"),
+    "em todos os personagens": (
+        "on every character",
+        "en todos los personajes"),
+    "só neste personagem": (
+        "only on this character",
+        "solo en este personaje"),
+    "só até fechar o programa": (
+        "only until the program closes",
+        "solo hasta cerrar el programa"),
+    "Todos os tipos": (
+        "All types",
+        "Todos los tipos"),
+    "GRAVE": (
+        "SERIOUS",
+        "GRAVE"),
+    "ATENÇÃO": (
+        "WARNING",
+        "ATENCIÓN"),
+    "INFO": (
+        "INFO",
+        "INFO"),
+    "Debuff no chefe": (
+        "Debuff on the boss",
+        "Debuff en el jefe"),
+})

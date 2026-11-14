@@ -2,6 +2,27 @@
 
 Português · [English](#english) · [Español](#español)
 
+## 1.7.0
+
+Gerenciador de cartões, efeitos acompanhados no widget e a análise refeita, com ícones dos equipamentos, monstros animados e simulador de XP.
+
+- Cartões: aba nova na análise, também no menu do widget, para ligar ou desligar cada cartão, com uma prévia de como ele aparece.
+- Efeitos acompanhados: escolha qualquer buff, debuff ou efeito de chão, como Garra Sombria, Cometa ou Pólen, e veja no widget quanto tempo falta.
+- Cada efeito aparece como você preferir: contador no fim da lista, na faixa fixa ou em um cartão.
+- O que está fixado continua à vista com um cartão aberto, ao lado do DPS.
+- Resumo: refeito, com o seu dano, sobrevivência e ritmo, XP e drops e os chefes do recorte.
+- Equipamento: ícones dos itens, com refino, grau, cartas e opções. Passe o mouse para ver os detalhes.
+- Testes: dois testes lado a lado, cada um com o equipamento e os números: dano, críticos, atributos, conjuração, pós-conjuração, recarga e itens usados.
+- Monstros: o monstro animado, o que o grupo fez nele e o que ele fez: habilidades, quem ele matou, o maior golpe e quem mais apanhou.
+- Jogadores: mais sobre o grupo: suporte, itens usados, dano recebido e buffs.
+- XP: simulador. Veja como teria sido a XP do recorte com outros bônus, como o evento do servidor em 200%, um manual ou o Milagre o tempo todo.
+- Mortes: o desenho de quem matou e a propriedade do golpe.
+- Dedo Duro: alertas mais fáceis de ler, e "Atacou muito antes dos outros DPS" no lugar de "Golpes fortes fora da rajada": amarelo até 1 s, vermelho acima disso.
+- Buffs e Debuffs: abre no dano creditado a cada jogador.
+- A aba Análise de DPS saiu. O DPS no tempo continua na Linha do tempo e em Jogadores.
+- Aviso de item: a janela "Avisos de item" abre pelo menu do widget, mesmo sem gravação. Os itens marcados valem para todos os personagens, só para este ou só até fechar o programa.
+- A janela da análise abre mais rápido, na frente das outras e dentro da tela, e lembra se estava maximizada.
+
 ## 1.6.0
 
 Aviso de item com som e lugar, sessões longas sem ficar pesado e a vida do Aquila refeita.
@@ -169,6 +190,27 @@ Primeira versão pública.
 
 ## English
 
+### 1.7.0
+
+Card manager, tracked effects on the widget and a rebuilt analysis, with equipment icons, animated monsters and an XP simulator.
+
+- Cards: a new tab in the analysis, also in the widget menu, to turn each card on or off, with a preview of how it looks.
+- Tracked effects: pick any buff, debuff or ground effect, such as Dark Claw, Magic Poison or All Bloom, and see on the widget how much time is left.
+- Each effect shows the way you prefer: a timer at the end of the list, on the pinned strip or as a card.
+- What you pinned stays in view while a card is open, next to the DPS.
+- Summary: rebuilt, with your damage, survival and pace, XP and drops, and the bosses of the range.
+- Equipment: item icons, with refine, grade, cards and options. Hover an item to see the details.
+- Tests: two tests side by side, each with its equipment and numbers: damage, crits, stats, cast time, after-cast delay, cooldown and items used.
+- Monsters: the animated monster, what the party did to it and what it did: skills, who it killed, the biggest hit and who took the most damage.
+- Players: more about the party: support, items used, damage taken and buffs.
+- XP: simulator. See what the XP of the range would have been with other bonuses, such as the server event at 200%, a manual or Miracle the whole time.
+- Deaths: the sprite of the killer and the property of the hit.
+- Snitch: alerts that are easier to read, and "Attacked well before the other DPS" in place of "Strong hits outside the other DPS's burst": yellow up to 1 s, red above that.
+- Buffs and Debuffs: opens on the damage credited to each player.
+- The DPS analysis tab is gone. DPS over time is still on the Timeline and under Players.
+- Item alert: the "Item alerts" window opens from the widget menu, even with no recording. Marked items count on every character, only on this one or only until the program closes.
+- The analysis window opens faster, in front of the others and inside the screen, and remembers if it was maximized.
+
 ### 1.6.0
 
 Item alert with sound and place, long sessions that stay light and Aquila's HP redone.
@@ -335,6 +377,27 @@ First public version.
 ---
 
 ## Español
+
+### 1.7.0
+
+Gestor de tarjetas, efectos seguidos en el widget y el análisis rehecho, con íconos del equipo, monstruos animados y simulador de XP.
+
+- Tarjetas: pestaña nueva en el análisis, también en el menú del widget, para activar o desactivar cada tarjeta, con una vista previa de cómo aparece.
+- Efectos seguidos: elige cualquier buff, debuff o efecto de suelo, como Garra Tenebrosa, Veneno mágico o Polen, y mira en el widget cuánto tiempo falta.
+- Cada efecto aparece como prefieras: contador al final de la lista, en la franja fija o en una tarjeta.
+- Lo que está fijado sigue a la vista con una tarjeta abierta, al lado del DPS.
+- Resumen: rehecho, con tu daño, supervivencia y ritmo, XP y drops y los jefes del recorte.
+- Equipo: íconos de los objetos, con refinamiento, grado, cartas y opciones. Pasa el mouse para ver los detalles.
+- Pruebas: dos pruebas lado a lado, cada una con el equipo y los números: daño, críticos, atributos, lanzamiento, post-lanzamiento, recarga y objetos usados.
+- Monstruos: el monstruo animado, qué le hizo el grupo y qué hizo él: habilidades, a quién mató, el golpe más fuerte y quién recibió más daño.
+- Jugadores: más sobre el grupo: soporte, objetos usados, daño recibido y buffs.
+- XP: simulador. Mira cómo habría sido la XP del recorte con otros bonos, como el evento del servidor en 200%, un manual o el Milagro todo el tiempo.
+- Muertes: el dibujo de quien mató y la propiedad del golpe.
+- Soplón: alertas más fáciles de leer, y "Atacó mucho antes que los otros DPS" en lugar de "Golpes fuertes fuera de la ráfaga de los otros DPS": amarillo hasta 1 s, rojo por encima.
+- Buffs y Debuffs: abre en el daño acreditado a cada jugador.
+- La pestaña Análisis de DPS se fue. El DPS en el tiempo sigue en la Línea de tiempo y en Jugadores.
+- Aviso de objeto: la ventana "Avisos de objeto" se abre desde el menú del widget, incluso sin grabación. Los objetos marcados valen para todos los personajes, solo para este o solo hasta cerrar el programa.
+- La ventana del análisis abre más rápido, delante de las otras y dentro de la pantalla, y recuerda si estaba maximizada.
 
 ### 1.6.0
 

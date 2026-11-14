@@ -71,7 +71,16 @@ class Shooter:
                     % out.replace("\\", "\\\\"))
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
         import tkinter as tk
+        import analysis_ui
         import dpsmeter
+
+        def quiet(win):                  # nos testes a análise abre atrás das outras janelas (não toma a frente)
+            try:
+                win.top.deiconify()
+                win.top.lower()
+            except tk.TclError:
+                pass
+        analysis_ui.AnalysisWindow.bring_to_front = quiet
         self.root = tk.Tk()
         self.app = dpsmeter.DpsApp(self.root)
         self.pump(0.6)

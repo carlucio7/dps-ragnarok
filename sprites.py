@@ -13,13 +13,19 @@ Os formatos .spr e .act seguem o que a comunidade documentou (roBrowser, ferrame
 """
 
 import base64
+import math
 import os
+import re
 import struct
 import threading
 import zlib
 
+import gamecache
+import gdip
 import lub
 
+WARDROBE_FILE = "sprites_do_personagem.json"      # tabelas do guarda-roupa guardadas em disco (gamecache)
+BESTIARY_FILE = "sprites_dos_monstros.json"       # id do monstro -> nome do arquivo do sprite
 HUMAN = "data\\sprite\\인간족\\"
 DORAM = "data\\sprite\\도람족\\"
 ACC = "data\\sprite\\악세사리\\"
@@ -193,15 +199,14 @@ class Grf:
             f.seek(table)
             packed, _size = struct.unpack("<II", f.read(8))
             raw = zlib.decompress(f.read(packed))
-        pres = tuple(_key(p) for p in prefixes)
-        first = b"data\\"
-        pos, n, size = 0, len(raw), entry.size
-        while pos < n:
-            end = raw.index(b"\0", pos)
-            name = raw[pos:end].lower()
-            if name.startswith(first) and name.startswith(pres):
-                self.index[name] = entry.unpack_from(raw, end + 1)
-            pos = end + 1 + size
+        # só os nomes que começam com as pastas pedidas, achados por expressão regular (em C): a tabela tem
+        # centenas de milhares de arquivos, e passar por todos num laço levava uns 0,3 s com a janela esperando
+        pres = sorted({_key(p) for p in prefixes}, key=len, reverse=True)
+        wanted = re.compile(b"(?:" + b"|".join(re.escape(p) for p in pres) + b")[^\\x00]*\\x00", re.I)
+        limit = len(raw) - entry.size
+        for m in wanted.finditer(raw):
+            if m.end() <= limit:
+                self.index[m.group()[:-1].lower()] = entry.unpack_from(raw, m.end())
 
     def has(self, name):
         return _key(name) in self.index
@@ -227,8 +232,31 @@ class Grf:
 
 # ------------------------------------------------------------------ .spr e .act
 
+_RLE = re.compile(rb"\x00([\x00-\xff])", re.S)       # zeros comprimidos do .spr: (0, n) = n zeros
+_OPAQUE = b"\0" + b"\xff" * 255                       # transparência da paleta: só o índice 0 é vazado
+
+
+def _png(w, h, color_type, rows, extra=b""):
+    """PNG dos bytes já prontos (uma linha por vez, cada uma com o byte de filtro 0 na frente)."""
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, color_type, 0, 0, 0)) + extra
+            + chunk(b"IDAT", zlib.compress(rows, 1)) + chunk(b"IEND", b""))
+
+
+def _scale_table(k):
+    """Tabela de bytes que multiplica por k/255 (para tingir um canal inteiro de uma vez)."""
+    return bytes(i * k // 255 for i in range(256))
+
+
+def png_rgba(w, h, data):
+    """PNG (bytes) dos bytes RGBA de cima para baixo."""
+    return _png(w, h, 6, b"".join(b"\0" + data[y * w * 4:(y + 1) * w * 4] for y in range(h)))
+
+
 class Sprite:
-    """Imagens de um .spr: indexadas (com a paleta do arquivo) e RGBA."""
+    """Imagens de um .spr: indexadas (com a paleta do arquivo) e RGBA. Nada é decodificado antes de ser pedido:
+    um chefe tem dezenas de imagens e cada tela usa só as de uma ação."""
 
     def __init__(self, data):
         if data[:2] != b"SP":
@@ -238,46 +266,117 @@ class Sprite:
         n_rgba = struct.unpack_from("<H", data, 6)[0] if ver >= 0x200 else 0
         pos = 8 if ver >= 0x200 else 6
         self.palette = data[-1024:] if ver >= 0x101 and len(data) >= 1024 else bytes(1024)
-        self.indexed = []                 # (w, h, índices)
+        self._idx_src = []                # (w, h, bytes, comprimido?) de cada imagem indexada
         for _ in range(n_idx):
             w, h = struct.unpack_from("<HH", data, pos)
             pos += 4
             if ver >= 0x201:              # zeros comprimidos (0, n)
                 size = struct.unpack_from("<H", data, pos)[0]
                 pos += 2
-                src, out, i = data[pos:pos + size], bytearray(), 0
-                while i < len(src):
-                    c = src[i]
-                    if c == 0 and i + 1 < len(src):
-                        out += bytes(src[i + 1])
-                        i += 2
-                    else:
-                        out.append(c)
-                        i += 1
+                self._idx_src.append((w, h, data[pos:pos + size], True))
                 pos += size
-                idx = bytes(out[:w * h]).ljust(w * h, b"\0")
             else:
-                idx = bytes(data[pos:pos + w * h])
+                self._idx_src.append((w, h, data[pos:pos + w * h], False))
                 pos += w * h
-            self.indexed.append((w, h, idx))
-        self.rgba = []                    # (w, h, [(r, g, b, a)])
+        self._rgba_src = []               # (w, h, bytes ABGR de baixo para cima) de cada imagem RGBA
         for _ in range(n_rgba):
             w, h = struct.unpack_from("<HH", data, pos)
             pos += 4
-            raw = data[pos:pos + w * h * 4]
+            self._rgba_src.append((w, h, data[pos:pos + w * h * 4]))
             pos += w * h * 4
-            px = []
-            for y in range(h - 1, -1, -1):          # de baixo para cima, ABGR
-                row = raw[y * w * 4:(y + 1) * w * 4]
-                px += [(row[x + 3], row[x + 2], row[x + 1], row[x]) for x in range(0, w * 4, 4)]
-            self.rgba.append((w, h, px))
+        self._idx = {}
+        self._rgba = {}
         self._cache = {}
 
-    def image(self, kind, i, palette=None):
-        """(w, h, [(r, g, b, a)]) da imagem i (kind 0 = indexada, 1 = RGBA); palette troca a do arquivo."""
+    def index(self, i):
+        """(w, h, índices) da imagem indexada i."""
+        got = self._idx.get(i)
+        if got is None:
+            w, h, src, packed = self._idx_src[i]
+            if packed:
+                src = _RLE.sub(lambda m: bytes(m.group(1)[0]), src)
+            got = self._idx[i] = (w, h, bytes(src[:w * h]).ljust(w * h, b"\0"))
+        return got
+
+    def rgba_bytes(self, i):
+        """(w, h, bytes RGBA de cima para baixo) da imagem RGBA i (no arquivo ela vem ABGR, de baixo para cima)."""
+        got = self._rgba.get(i)
+        if got is None:
+            w, h, raw = self._rgba_src[i]
+            raw = bytes(raw).ljust(w * h * 4, b"\0")
+            out = bytearray(len(raw))
+            out[0::4], out[1::4], out[2::4], out[3::4] = raw[3::4], raw[2::4], raw[1::4], raw[0::4]
+            got = self._rgba[i] = (w, h, b"".join(bytes(out[y * w * 4:(y + 1) * w * 4]) for y in range(h - 1, -1, -1)))
+        return got
+
+    def size(self, kind, i):
+        """(w, h) da imagem, ou None se não existir."""
+        src = self._rgba_src if kind == 1 else self._idx_src
+        return src[i][:2] if 0 <= i < len(src) else None
+
+    def png(self, kind, i, palette=None, tint=None):
+        """A imagem como PNG (bytes), feita direto dos bytes do arquivo, sem passar pixel por pixel.
+        `tint`: (r, g, b, a) da camada do .act, quando ela tinge ou deixa a imagem translúcida."""
+        if self.size(kind, i) is None:
+            return None
+        r, g, b, a = tint or (255, 255, 255, 255)
         if kind == 1:
-            return self.rgba[i] if 0 <= i < len(self.rgba) else None
-        if not 0 <= i < len(self.indexed):
+            w, h, data = self.rgba_bytes(i)
+            if (r, g, b, a) != (255, 255, 255, 255):
+                out = bytearray(data)
+                for ch, k in enumerate((r, g, b, a)):
+                    if k != 255:
+                        out[ch::4] = data[ch::4].translate(_scale_table(k))
+                data = bytes(out)
+            return _png(w, h, 6, b"".join(b"\0" + data[y * w * 4:(y + 1) * w * 4] for y in range(h)))
+        w, h, idx = self.index(i)
+        pal = palette or self.palette
+        rgb = bytearray(768)
+        for ch, k in enumerate((r, g, b)):
+            plane = pal[ch:1024:4]
+            rgb[ch::3] = plane.translate(_scale_table(k)) if k != 255 else plane
+        alpha = _OPAQUE if a == 255 else b"\0" + bytes([a]) * 255
+
+        def chunk(kind_, body):
+            return struct.pack(">I", len(body)) + kind_ + body + struct.pack(">I", zlib.crc32(kind_ + body) & 0xFFFFFFFF)
+        return _png(w, h, 3, b"".join(b"\0" + idx[y * w:(y + 1) * w] for y in range(h)),
+                    chunk(b"PLTE", bytes(rgb)) + chunk(b"tRNS", alpha))
+
+    def bgra(self, kind, i, palette=None, tint=None):
+        """(w, h, bytes BGRA de cima para baixo) da imagem, com a paleta (e a cor da camada, `tint`) já aplicadas,
+        ou None se não existir. Canal a canal, sem passar pixel por pixel: é o que o GDI+ desenha (gdip.py)."""
+        if self.size(kind, i) is None:
+            return None
+        r, g, b, a = tint or (255, 255, 255, 255)
+        if kind == 1:
+            w, h, data = self.rgba_bytes(i)
+            out = bytearray(len(data))
+            for dst, src, k in ((0, 2, b), (1, 1, g), (2, 0, r), (3, 3, a)):
+                plane = data[src::4]
+                out[dst::4] = plane.translate(_scale_table(k)) if k != 255 else plane
+            return w, h, bytes(out)
+        w, h, idx = self.index(i)
+        pal = palette or self.palette
+        out = bytearray(w * h * 4)
+        for dst, src, k in ((0, 2, b), (1, 1, g), (2, 0, r)):
+            table = pal[src:1024:4]
+            out[dst::4] = idx.translate(table.translate(_scale_table(k)) if k != 255 else table)
+        out[3::4] = idx.translate(_OPAQUE if a == 255 else b"\0" + bytes([a]) * 255)
+        return w, h, bytes(out)
+
+    def image(self, kind, i, palette=None):
+        """(w, h, [(r, g, b, a)]) da imagem i (kind 0 = indexada, 1 = RGBA); palette troca a do arquivo.
+        É o caminho lento, pixel a pixel: serve o personagem e os desenhos parados."""
+        if kind == 1:
+            if not 0 <= i < len(self._rgba_src):
+                return None
+            key = ("rgba", i)
+            img = self._cache.get(key)
+            if img is None:
+                w, h, data = self.rgba_bytes(i)
+                img = self._cache[key] = (w, h, [tuple(data[k:k + 4]) for k in range(0, len(data), 4)])
+            return img
+        if not 0 <= i < len(self._idx_src):
             return None
         pal = palette or self.palette
         key = (i, id(pal))
@@ -285,17 +384,18 @@ class Sprite:
         if img is None:
             colors = [(pal[k * 4], pal[k * 4 + 1], pal[k * 4 + 2], 255) for k in range(256)]
             colors[0] = (0, 0, 0, 0)
-            w, h, idx = self.indexed[i]
+            w, h, idx = self.index(i)
             img = self._cache[key] = (w, h, [colors[k] for k in idx])
         return img
 
 
 class Layer:
-    __slots__ = ("x", "y", "index", "mirror", "color", "sx", "sy", "kind")
+    __slots__ = ("x", "y", "index", "mirror", "color", "sx", "sy", "kind", "rot")
 
-    def __init__(self, x, y, index, mirror, color=(255, 255, 255, 255), sx=1.0, sy=1.0, kind=0):
+    def __init__(self, x, y, index, mirror, color=(255, 255, 255, 255), sx=1.0, sy=1.0, kind=0, rot=0):
         self.x, self.y, self.index, self.mirror = x, y, index, mirror
         self.color, self.sx, self.sy, self.kind = color, sx, sy, kind
+        self.rot = rot                # giro em graus (os monstros montados em peças usam)
 
 
 class Act:
@@ -320,7 +420,7 @@ class Act:
                 for _l in range(n_lay):
                     x, y, si, mirror = struct.unpack_from("<iiii", data, pos)
                     pos += 16
-                    color, sx, sy, kind = (255, 255, 255, 255), 1.0, 1.0, 0
+                    color, sx, sy, kind, rot = (255, 255, 255, 255), 1.0, 1.0, 0, 0
                     if ver >= 0x200:
                         color = tuple(data[pos:pos + 4])
                         pos += 4
@@ -330,11 +430,11 @@ class Act:
                         else:
                             sx = sy = struct.unpack_from("<f", data, pos)[0]
                             pos += 4
-                        _rot, kind = struct.unpack_from("<ii", data, pos)
+                        rot, kind = struct.unpack_from("<ii", data, pos)
                         pos += 8
                         if ver >= 0x205:
                             pos += 8
-                    layers.append(Layer(x, y, si, mirror, color, sx, sy, kind))
+                    layers.append(Layer(x, y, si, mirror, color, sx, sy, kind, rot))
                 if ver >= 0x200:
                     pos += 4                         # som/evento do quadro
                 anchors = []
@@ -377,6 +477,68 @@ def frame_of(action, count, frame, head_dir=0):
     if count <= 0:
         return 0
     return min(head_dir, count - 1) if action in (IDLE, SIT) else frame % count
+
+
+def smooth_frames(part, frames, cache=None):
+    """Os quadros de um monstro montados pelo GDI+ (gdip.py) no tamanho natural, todos na mesma moldura:
+    (w, h, [bytes BGRA de cima para baixo]) ou None se não der (aí vale `compose`, pixel a pixel).
+    As camadas sem escala nem giro entram pixel a pixel; as outras (peças em escala ou giradas, como as da
+    Betelgeuse) entram suavizadas, na escala e no ângulo exatos. `frames`: [(camadas, âncoras)] do .act;
+    `cache` guarda as imagens do .spr já convertidas, para quem monta várias ações do mesmo monstro."""
+    if not gdip.ready():
+        return None
+    cache = {} if cache is None else cache
+    per_frame, boxes = [], []
+    for frame_layers, _anchors in frames:
+        items = []
+        for ly in frame_layers:
+            size = part.spr.size(ly.kind, ly.index) if ly.index >= 0 else None
+            if size is None:
+                continue
+            sw, sh = size
+            sx, sy = abs(ly.sx) or 1.0, abs(ly.sy) or 1.0
+            rot = getattr(ly, "rot", 0) % 360
+            flip = -1.0 if ly.mirror else 1.0
+            if rot == 0 and abs(sx - 1.0) < 0.005 and abs(sy - 1.0) < 0.005:
+                left, top = int(round(ly.x - sw / 2.0)), int(round(ly.y - sh / 2.0))
+                m = (flip, 0.0, 0.0, 1.0, left + sw / 2.0, top + sh / 2.0, False)
+                box = (left, top, left + sw, top + sh)
+            else:
+                a = math.radians(rot)
+                cos, sin = math.cos(a), math.sin(a)
+                m = (flip * sx * cos, flip * sx * sin, -sy * sin, sy * cos, float(ly.x), float(ly.y), True)
+                xs = [u * m[0] + v * m[2] + m[4] for u in (-sw / 2.0, sw / 2.0) for v in (-sh / 2.0, sh / 2.0)]
+                ys = [u * m[1] + v * m[3] + m[5] for u in (-sw / 2.0, sw / 2.0) for v in (-sh / 2.0, sh / 2.0)]
+                box = (int(math.floor(min(xs))), int(math.floor(min(ys))),
+                       int(math.ceil(max(xs))), int(math.ceil(max(ys))))
+            items.append((ly, m))
+            boxes.append(box)
+        per_frame.append(items)
+    if not boxes:
+        return None
+    x0, y0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
+    w, h = max(b[2] for b in boxes) - x0, max(b[3] for b in boxes) - y0
+    if w <= 0 or h <= 0 or w * h > 4000000:
+        return None
+    out = []
+    try:
+        for items in per_frame:
+            draws = []
+            for ly, m in items:
+                tint = tuple(ly.color) if tuple(ly.color) != (255, 255, 255, 255) else None
+                key = ("gdi", ly.kind, ly.index, tint)
+                src = cache.get(key)
+                if src is None:
+                    src = cache[key] = gdip.Image(*part.spr.bgra(ly.kind, ly.index,
+                                                                 part.palette if ly.kind == 0 else None, tint))
+                draws.append((src, m[0], m[1], m[2], m[3], m[4] - x0, m[5] - y0, m[6]))
+            data = gdip.render(w, h, draws)
+            if data is None:
+                return None
+            out.append(data)
+    except (ValueError, TypeError, OSError):
+        return None
+    return w, h, out
 
 
 def compose(order, body, action, direction, frame, head_dir=0):
@@ -507,25 +669,33 @@ class Wardrobe:
                 return lub.run(data, "cp949").get(glob) or {}
             except (ValueError, struct.error, IndexError, KeyError):
                 return {}
-        ids = table("accessoryid.lub", "ACCESSORY_IDs")
-        names = table("accname.lub", "AccNameTable")
-        self.acc = {ids[k[1]]: v for k, v in names.items()
+        # as tabelas de nomes (acessórios, capas, armas) ficam guardadas enquanto o data.grf não mudar
+        mark = gamecache.stamp(grf_path)
+        saved = gamecache.load(WARDROBE_FILE, mark)
+        if saved is None:
+            ids = table("accessoryid.lub", "ACCESSORY_IDs")
+            names = table("accname.lub", "AccNameTable")
+            acc = {ids[k[1]]: v for k, v in names.items()
+                   if isinstance(k, lub.Symbol) and len(k) > 1 and k[1] in ids and isinstance(v, str)}
+            ids = table("spriterobeid.lub", "SPRITE_ROBE_IDs")
+            names = table("spriterobename.lub", "RobeNameTable")
+            robe = {ids[k[1]]: v for k, v in names.items()
                     if isinstance(k, lub.Symbol) and len(k) > 1 and k[1] in ids and isinstance(v, str)}
-        ids = table("spriterobeid.lub", "SPRITE_ROBE_IDs")
-        names = table("spriterobename.lub", "RobeNameTable")
-        self.robe = {ids[k[1]]: v for k, v in names.items()
-                     if isinstance(k, lub.Symbol) and len(k) > 1 and k[1] in ids and isinstance(v, str)}
-        self.weapon = {k: v for k, v in table("weapontable.lub", "WeaponNameTable").items()
-                       if isinstance(k, int) and isinstance(v, str)}
-        self.weapon_base = {k: v for k, v in table("weapontable.lub", "Expansion_Weapon_IDs").items()
-                            if isinstance(k, int) and isinstance(v, int)}
+            weapon = {k: v for k, v in table("weapontable.lub", "WeaponNameTable").items()
+                      if isinstance(k, int) and isinstance(v, str)}
+            base = {k: v for k, v in table("weapontable.lub", "Expansion_Weapon_IDs").items()
+                    if isinstance(k, int) and isinstance(v, int)}
+            saved = dict(acc={str(k): v for k, v in acc.items()}, robe={str(k): v for k, v in robe.items()},
+                         weapon={str(k): v for k, v in weapon.items()}, weapon_base={str(k): v for k, v in base.items()})
+            if acc or robe or weapon:
+                gamecache.save(WARDROBE_FILE, mark, saved)
+        self.acc = {int(k): v for k, v in saved["acc"].items()}
+        self.robe = {int(k): v for k, v in saved["robe"].items()}
+        self.weapon = {int(k): v for k, v in saved["weapon"].items()}
+        self.weapon_base = {int(k): v for k, v in saved["weapon_base"].items()}
         item_file = os.path.join(os.path.dirname(grf_path), "System", "iteminfo_new.lub")
         try:
-            with open(item_file, "rb") as f:
-                items = lub.run(f.read()).get("tbl") or {}
-            self.classnum = {i: v["ClassNum"] for i, v in items.items()
-                             if isinstance(i, int) and isinstance(v, dict) and isinstance(v.get("ClassNum"), int)
-                             and v["ClassNum"] > 0}
+            self.classnum = gamecache.items(item_file)["classnum"]
         except (OSError, ValueError, struct.error, IndexError, KeyError):
             self.classnum = {}
 
@@ -706,6 +876,9 @@ LOADER = Loader()
 
 ITEM_ART = "data\\texture\\유저인터페이스\\collection\\"   # ilustrações grandes dos itens (fundo branco)
 TRAP_ART = "트랩.bmp"                                       # o item Armadilha: uma armadilha de urso
+ITEM_ICON = "data\\texture\\유저인터페이스\\item\\"         # ícones pequenos (24 × 24) dos itens
+MOB_IDLE, MOB_WALK, MOB_ATTACK, MOB_HURT, MOB_DIE = 0, 1, 2, 3, 4   # ações dos .act dos monstros
+ANIM_FRAMES = 16              # a animação de um monstro usa no máximo estes quadros (pula os do meio)
 
 
 def crop(w, h, px):
@@ -794,7 +967,7 @@ class Bestiary:
     Só lê o que for pedido, e guarda."""
 
     def __init__(self, grf_path):
-        self.grf = Grf(grf_path, prefixes=(MONSTER, LUA, ITEM_ART))
+        self.grf = Grf(grf_path, prefixes=(MONSTER, LUA, ITEM_ART, ITEM_ICON))
 
         def table(name, glob):
             data = self.grf.read(LUA + name)
@@ -804,10 +977,16 @@ class Bestiary:
                 return lub.run(data, "cp949").get(glob) or {}
             except (ValueError, struct.error, IndexError, KeyError):
                 return {}
-        ids = table("npcidentity.lub", "jobtbl")
-        names = table("jobname.lub", "JobNameTable")
-        self.names = {ids[k[1]]: v for k, v in names.items()
-                      if isinstance(k, lub.Symbol) and len(k) > 1 and k[1] in ids and isinstance(v, str)}
+        mark = gamecache.stamp(grf_path)
+        saved = gamecache.load(BESTIARY_FILE, mark)
+        if saved is None:
+            ids = table("npcidentity.lub", "jobtbl")
+            names = table("jobname.lub", "JobNameTable")
+            saved = {str(ids[k[1]]): v for k, v in names.items()
+                     if isinstance(k, lub.Symbol) and len(k) > 1 and k[1] in ids and isinstance(v, str)}
+            if saved:
+                gamecache.save(BESTIARY_FILE, mark, saved)
+        self.names = {int(k): v for k, v in saved.items()}
         self.cache = {}
 
     def has(self, mob):
@@ -834,21 +1013,57 @@ class Bestiary:
             self.cache[key] = img
         return self.cache[key]
 
+    def has_icon(self, art):
+        return bool(art) and self.grf.has(ITEM_ICON + art + ".bmp")
+
+    def icon(self, art):
+        """O ícone pequeno (24 × 24) de um item, pelo nome do arquivo: (w, h, pixels) ou None."""
+        key = ("icon", art)
+        if key not in self.cache:
+            img = None
+            data = self.grf.read(ITEM_ICON + art + ".bmp") if art else None
+            if data:
+                try:
+                    img = bmp_rgba(data)
+                except Exception:  # noqa: BLE001 - imagem estranha: fica sem ícone
+                    img = None
+            self.cache[key] = img
+        return self.cache[key]
+
+    def part(self, mob):
+        """O sprite e as ações do monstro (Part), lidos do data.grf e guardados; None se não houver."""
+        key = ("part", mob)
+        if key not in self.cache:
+            got = None
+            name = self.names.get(mob)
+            spr = self.grf.read(MONSTER + name + ".spr") if name else None
+            act = self.grf.read(MONSTER + name + ".act") if name else None
+            if spr and act:
+                try:
+                    got = Part(name, Sprite(spr), Act(act))
+                except Exception:  # noqa: BLE001 - sprite estranho (GRF modificada): fica sem desenho
+                    got = None
+            self.cache[key] = got
+        return self.cache[key]
+
     def idle(self, mob):
         """Primeiro quadro do monstro parado e de frente, sem bordas: (w, h, pixels) ou None."""
         if mob in self.cache:
             return self.cache[mob]
         img = None
-        name = self.names.get(mob)
-        if name:
-            spr, act = self.grf.read(MONSTER + name + ".spr"), self.grf.read(MONSTER + name + ".act")
-            if spr and act:
-                try:
-                    part = Part(name, Sprite(spr), Act(act))
+        part = self.part(mob)
+        if part is not None:
+            try:
+                frames = part.act.frames(0)
+                got = smooth_frames(part, frames[:1]) if frames else None
+                if got:                    # montado pelo GDI+: peças em escala e giradas saem certas e suaves
+                    w, h, shots = got
+                    img = crop(w, h, list(struct.iter_unpack("4B", gdip.swap_rb(shots[0]))))
+                else:
                     res = compose([part], part, 0, 0, 0)
                     img = crop(*res[:3]) if res else None
-                except Exception:  # noqa: BLE001 - sprite estranho (GRF modificada): fica sem desenho, sem travar
-                    img = None
+            except Exception:  # noqa: BLE001 - sprite estranho (GRF modificada): fica sem desenho, sem travar
+                img = None
         self.cache[mob] = img
         return img
 
@@ -904,6 +1119,8 @@ class MonsterLoader:
             return self._thread is not None
         if spec[0] == "item":
             return self.book.has_item(spec[2])
+        if spec[0] == "icon":
+            return self.book.has_icon(spec[2])
         return self.book.has_trap() if spec[0] == "trap" else self.book.has(spec[1])
 
     def image(self, spec):
@@ -931,6 +1148,9 @@ class MonsterLoader:
             elif spec[0] == "item":
                 def make():
                     return b.item(spec[2])
+            elif spec[0] == "icon":
+                def make():
+                    return b.icon(spec[2])
             else:
                 def make():
                     return b.idle(spec[1])
