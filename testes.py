@@ -146,6 +146,59 @@ def auto_save(store, rf, already):
     return saved
 
 
+def waiting(store, rf, already):
+    """A luta contra o boneco que ainda vai ser salva sozinha (está em andamento, ou esperando a gravação parar).
+    None se não há."""
+    c = rf.combat if rf is not None and rf.ready else None
+    enc = c.current if c is not None else None
+    if enc is None or enc.duration_ms() < MIN_COMBAT_MS:
+        return None
+    key = "%s|%d" % (os.path.basename(rf.path), enc.start)
+    target = main_target(enc)
+    if key in already or target is None or not is_dummy(c, target) or key in store.keys():
+        return None
+    return enc
+
+
+QUIET_S = 15.0                # sem crescer há esse tempo, a gravação parou (o mesmo prazo do Watcher)
+CLOSING_QUIET_S = 1.0         # ao fechar o programa: gravando, o arquivo cresce várias vezes por segundo
+
+
+class Left:
+    """Gravações que o widget deixou de seguir (outra começou, a pessoa abriu um replay, o programa está fechando)
+    antes de a luta contra o boneco ser salva: ela se perdia. Cada uma segue sendo lida até parar de crescer, e
+    então os testes dela são salvos."""
+
+    def __init__(self):
+        self.items = []               # [ReplayFile, quando cresceu pela última vez]
+
+    def add(self, rf, grew_at):
+        if rf is not None and rf.ready and all(x[0] is not rf for x in self.items):
+            self.items.append([rf, grew_at])
+
+    def step(self, store, already, now, closing=False):
+        """Lê o que há de novo em cada gravação e salva os testes das que pararam. closing=True (o programa está
+        fechando) decide na hora: salva as que estão paradas e larga as que ainda crescem, para não guardar uma luta
+        pela metade. Devolve quantos testes salvou."""
+        items, self.items = self.items, []
+        saved, error = 0, None
+        for item in items:
+            rf = item[0]
+            try:
+                if not rf.combat.finished and rf.poll():
+                    item[1] = now
+                if rf.combat.finished or rf.gone or now - item[1] > (CLOSING_QUIET_S if closing else QUIET_S):
+                    rf.combat.finished = True
+                    saved += auto_save(store, rf, already)
+                elif not closing:
+                    self.items.append(item)
+            except Exception as e:  # noqa: BLE001 - uma gravação estranha não segura as outras
+                error = error or e
+        if error is not None:
+            raise error
+        return saved
+
+
 SIDE_SKILLS = 8               # skills, buffs e itens mostrados na comparação lado a lado
 SIDE_BUFFS = 14
 SIDE_ITEMS = 8

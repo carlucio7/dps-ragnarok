@@ -189,6 +189,10 @@ for _mob in AQUILA:
     BOSS_LEVELS[_mob] = [(_("Econômica"), 300000000), (_("Executiva"), 500000000), (_("Primeira Classe"), 600000000)]
 RELIEVE_LEVEL = {_mob: {10: 0, 50: 1, 80: 2} for _mob in AQUILA}
 BOSS_USUAL = {20994: 1, 21531: 1, 21588: 1}   # o nível que os grupos costumam fazer (Betelgeuse: todos os abates)
+# Pontuação da dificuldade anunciada na sala que só fecha com um nível de HP: 925 = tudo no máximo menos o HP,
+# que fica selado (dito por quem joga). As outras pontuações (400, 600...) não dizem o HP.
+POINTS_LEVEL = {20994: {925: 0}}
+POINTS_BEFORE_MS = 60000      # o anúncio vem poucos segundos antes de o chefe aparecer
 # Regeneração (fração do HP máx. por segundo). O replay não mostra o HP, mas nos abates o dano além do HP
 # cresce com a duração da luta: ~0,8M/s no Nível 1 (~6% do HP por minuto), mais ~18M de overkill.
 BOSS_REGEN = {20994: 0.001}
@@ -234,6 +238,19 @@ def caught_midway(c, key):
     return key not in c.spawned
 
 
+def boss_points(c, key):
+    """Pontos da dificuldade anunciados para a luta contra `key` (o último anúncio antes de o chefe aparecer), ou
+    None. O anúncio só existe se a gravação começou antes dele."""
+    points = getattr(c, "boss_points", None)
+    if not points:
+        return None
+    seen = c.spawned.get(key)
+    if seen is None:
+        return points[-1][1]
+    before = [p for t, p in points if seen - POINTS_BEFORE_MS <= t <= seen + 5000]
+    return before[-1] if before else None
+
+
 def boss_hp(c, key, total, killed, dur_ms=0):
     """(HP, rótulo, como) do chefe para as contas (clímax, golpes fortes, curva de HP).
 
@@ -253,6 +270,10 @@ def boss_hp(c, key, total, killed, dur_ms=0):
         if by_relief is not None:
             i, pct = by_relief
             return levels[i][1], levels[i][0], _("pela redução de dano do chefe (%d%%)") % pct
+        points = boss_points(c, key)
+        if points in POINTS_LEVEL.get(mob_id, {}):
+            i = POINTS_LEVEL[mob_id][points]
+            return levels[i][1], levels[i][0], _("pela dificuldade anunciada (%d pontos)") % points
         grow = 1 + BOSS_REGEN.get(mob_id, 0) * dur_ms / 1000.0      # HP + o que regenerou na luta
         when = _dur(dur_ms)
         if killed and not midway:

@@ -124,6 +124,7 @@ ROW_CHOICES = [4, 6, 8, 10, 12]
 WIDTHS = [(260, _("estreita")), (300, _("normal")), (380, _("larga")), (480, _("muito larga"))]
 GAP_CHOICES = [(5, _("5 segundos sem dano")), (10, _("10 segundos sem dano")), (15, _("15 segundos sem dano")),
                (30, _("30 segundos sem dano")), (60, _("1 minuto sem dano"))]
+XP_AGAIN_S = 15.0             # o jogo completa o cabeçalho da gravação ~9 s depois de ela começar
 TARGET_CHOICES = [("all", _("Todos os monstros")), ("mvp", _("Só MVPs e bonecos de treino"))]
 HINTS = {
     "pin": _("Fixar sempre por cima das outras janelas"), "chart": _("Análise completa (abre outra janela)"),
@@ -171,7 +172,10 @@ DEFAULTS = {
     "miracle_volume": 40,  # volume do som do Milagre (%)
     "targets": "all",
     "lang": None,          # None = idioma do Windows
-    "xp_corr": {},         # {personagem: {"samples": [[XP real ÷ lista, XP real, quando, arquivo#trecho]]}}
+    "xp_corr": {},         # {personagem: {"samples": [[XP real ÷ lista, XP real, quando, arquivo#trecho, mapa]]}}
+    "xp_spot": {},         # {mapa: {"pct", "when", "auto"}} mapas em spotlight (XP dos monstros × 1 + pct/100)
+    "looks": {},           # {nome: look} guardados na aba Visuais (classe, sexo, cabelo, cores e os quatro visuais)
+    "vis_ground": "",      # o chão da prévia na aba Visuais ("" = o primeiro terreno do jogo)
     "xp_levels": {},       # {classe: {nível: XP do nível}} visto no começo das gravações
     "xp_bonuses": {},      # {bônus: {"on", "pct"}} da lista de bônus de XP (xp.BONUSES)
     "xp_mode": "auto",     # "auto" (lista + correção medida + evento deduzido), "lista", "medido" ou "fixo"
@@ -408,6 +412,7 @@ class DpsApp:
         clientdata.NAMES.load()
         self.names_v = clientdata.NAMES.version
         self.xp_seen = None
+        self.xp_again = None                # (gravação que ficou para trás, quando medir a XP dela de novo)
         self.xp_auto_at = 0.0                  # última conferência automática da XP (manual lembrado, evento)
         self.xp_lvl_seen = None                # (gravação, nº de subidas de nível) já conferido
         self.miracle_at = -1e9                 # quando o Milagre ativou (o widget brilha por uns segundos)
@@ -426,6 +431,8 @@ class DpsApp:
         self.analysis = None
         self.tests = testes.Store(os.path.join(os.path.dirname(CONFIG_PATH), "testes.json"))
         self.tests_seen = set()       # encontros já avaliados para o salvamento automático
+        self.tests_file = None        # a gravação que estava aberta na última leitura
+        self.tests_left = testes.Left()   # as que ficaram para trás com luta contra o boneco ainda sem salvar
         self.last_autosave = 0.0
         self.alert = None             # (texto, tipo, quando apareceu)
         self.death_card = None        # (resumo da morte, quando apareceu)
@@ -669,6 +676,7 @@ class DpsApp:
 
     def step(self):
         now = time.time()
+        grew_at = self.watcher.last_change       # da gravação que estava aberta até esta leitura
         try:
             if self.watcher.poll(now):
                 self.dirty = True
@@ -681,11 +689,23 @@ class DpsApp:
             if self.analysis is not None:
                 self.analysis.refresh(force=True)
         f = self.watcher.file
+        if f is not self.tests_file:
+            # o widget passou para outra gravação (ou a pessoa abriu um replay): a que ficou para trás segue sendo
+            # lida até parar, para a luta contra o boneco que ainda não tinha sido salva não se perder
+            if self.cfg["auto_tests"]:
+                self.tests_left.add(self.tests_file, grew_at)
+            self.tests_file = f
         cur = f.combat if f is not None and f.ready else None
         if cur is not self.xp_seen:
             prev, self.xp_seen = self.xp_seen, cur
             if prev is not None:
                 self.xp_calibrate(prev)
+                # a gravação nova acabou de começar e o começo dela (com a XP) ainda não dá para ler: mede de novo
+                # daqui a pouco, senão a XP exata "até a gravação seguinte" nunca era guardada ao vivo
+                self.xp_again = (prev, now + XP_AGAIN_S)
+        if self.xp_again is not None and now >= self.xp_again[1]:
+            prev, self.xp_again = self.xp_again[0], None
+            self.xp_calibrate(prev)
         if f is not None and f.ready:
             f.combat.finished = not self.watcher.recording(now)
             self.check_alerts(f, now)
@@ -694,10 +714,15 @@ class DpsApp:
             if now - self.xp_auto_at >= 3.0:
                 self.xp_auto_at = now
                 self.xp_auto(f.combat)
-            if self.cfg["auto_tests"] and now - self.last_autosave >= 2.0:
-                self.last_autosave = now
+        if now - self.last_autosave >= 2.0:
+            self.last_autosave = now
+            if not self.cfg["auto_tests"]:
+                self.tests_left.items = []
+            else:
                 try:
-                    testes.auto_save(self.tests, f, self.tests_seen)
+                    self.tests_left.step(self.tests, self.tests_seen, now)
+                    if f is not None and f.ready:
+                        testes.auto_save(self.tests, f, self.tests_seen)
                 except Exception:  # noqa: BLE001
                     self.log_error(*sys.exc_info())
         self.phase = (self.phase + 1) % 8
@@ -740,7 +765,7 @@ class DpsApp:
         try:
             changed = xp.remember_manual(c, self.cfg)
             sig = (id(c), len(c.level_ups))
-            if sig != self.xp_lvl_seen:
+            if sig != self.xp_lvl_seen and xp.gear_ready():
                 self.xp_lvl_seen = sig
                 if c.level_ups:
                     changed = self.xp_server_found(xp.detect_server(c, self.cfg)) or changed
@@ -1305,6 +1330,25 @@ class DpsApp:
         f = self.watcher.file
         return f.combat if f is not None and f.ready else None
 
+    def tests_waiting(self):
+        """Há luta contra o boneco esperando para ser salva sozinha? (a que está em andamento na gravação aberta, ou
+        a de uma gravação que o widget deixou de seguir)"""
+        if not self.cfg["auto_tests"]:
+            return False
+        files = [self.watcher.file] + [item[0] for item in self.tests_left.items]
+        return any(testes.waiting(self.tests, rf, self.tests_seen) is not None for rf in files)
+
+    def save_waiting_tests(self):
+        """Ao fechar: a luta contra o boneco que ainda esperava para ser salva sozinha não se perde mais (desde que a
+        gravação já tenha parado)."""
+        if not self.cfg["auto_tests"]:
+            return
+        try:
+            self.tests_left.add(self.watcher.file, self.watcher.last_change)
+            self.tests_left.step(self.tests, self.tests_seen, time.time(), closing=True)
+        except Exception:  # noqa: BLE001
+            self.log_error(*sys.exc_info())
+
     def check_recording(self, now):
         """Lembrete de gravação desligada: o jogo está aberto e nenhum replay está sendo escrito há algum tempo."""
         if not self.cfg.get("alert_rec", True):
@@ -1510,6 +1554,9 @@ class DpsApp:
                 1, round(left / 60000.0))
             color = self.readable("#fbbf24")
             live = True
+        elif not self.alert and snap is not None and cb is not None and cb.off_notice() == "now":
+            # a luta contada acabou e quem grava segue batendo em monstros comuns: os números à vista são os dela
+            text, color = _("Monstros comuns: dano não contado (Opções ⋯)"), self.readable("#f59e0b")
         if self.alert:
             # aviso (buff que acabou, morte) no lugar do status, piscando
             text, kind = self.alert[0], self.alert[1]
@@ -1798,9 +1845,14 @@ class DpsApp:
         y = self.rows_y0() * s
         msg = None
         rows = []
-        if snap is None:
+        # Drops e XP não dependem do dano contado: com "Contar dano em: só MVPs e bonecos" num mapa de monstros
+        # comuns não há encontro nenhum, e os itens e a XP continuam valendo
+        if snap is None and not (tab in ("drops", "xp") and self.combat() is not None):
             f = self.watcher.file
-            if f is not None and f.ready and f.combat.was_reset:
+            if f is not None and f.ready and f.combat.off_notice():
+                # batendo em monstros comuns com "Contar dano em: só MVPs e bonecos": diz por que não há números
+                msg = (_("Dano em monstros comuns não é contado."), _("Para contar: Opções ⋯ › Contar dano em"))
+            elif f is not None and f.ready and f.combat.was_reset:
                 msg = (_("Zerado."), _("O próximo dano começa um encontro novo."))
             elif f is not None and f.ready:
                 msg = (_("Nenhum dano ainda."), _("Ataque algo enquanto grava o replay."))
@@ -2027,7 +2079,7 @@ class DpsApp:
         elif prog is not None:
             rows.append(dict(label=_("Nível %d") % cb.session.base_level, value=dec("%.1f%%" % (100 * prog)),
                              right=_("no início da gravação"), frac=prog, me=False, pin="level"))
-        nxt = meter.xp_after(getattr(cb, "path", None), cb.session)
+        nxt = meter.xp_after_soon(getattr(cb, "path", None), cb.session)
         if nxt and nxt["gain"] is not None:
             rows.append(dict(label=_("XP real até a próxima gravação"), value="+" + num(nxt["gain"]), right="",
                              frac=1.0, me=False))
@@ -2798,6 +2850,7 @@ class DpsApp:
               "manda nada para a internet.")), parent=self.root)
 
     def quit(self):
+        self.save_waiting_tests()
         if self.analysis is not None:
             self.analysis.close()
         self.save_position()

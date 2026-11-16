@@ -18,6 +18,7 @@ SIZES = {"Small": "S", "Medium": "M", "Large": "L"}
 # Executiva. O Divine Pride diz pequeno para a 21588, mas é só a aparência.
 EXTRA = {20994: "L",              # Betelgeuse (Torre da Constelação)
          21531: "L", 21588: "L",  # Aquila (Destruição da Aeronave) e a forma de sobrecarga
+         21533: "L",              # Juncea de Simulação
          20573: "L"}              # Fantasma de Amdarais (Glast Heim Sombria, desafio)
 
 

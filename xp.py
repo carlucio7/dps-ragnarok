@@ -42,6 +42,7 @@ CALIBRATE_MIN_KILLS = 3
 CALIBRATE_MIN_MS = 10 * 60000  # trecho curto não calibra (30 s de gravação davam um fator 20% errado)...
 CALIBRATE_MIN_FRAC = 0.01     # ...a não ser que já tenha rendido 1% do nível (o que vier primeiro)
 CALIBRATE_KEEP = 12           # medidas guardadas por personagem (a média pesa cada uma pela XP que cobre)
+CALIBRATE_FRESH_S = 3 * 86400  # a correção usa as medidas de até 3 dias antes da mais nova
 PACE_MS = 10 * 60000          # o tempo até o nível usa o ritmo dos últimos 10 min de farm
 WARMUP_MS, WARMUP_FRAC = 10 * 60000, 0.01   # a previsão só aparece depois de 10 min de farm ou 1% do nível
 FARM_FRAC = 0.4               # o farm começa no 1º minuto que rende 40% do melhor minuto (antes: preparação)
@@ -148,6 +149,12 @@ def _all_kills(c, mine=None, total=None):
                 total[h.dst] = total.get(h.dst, 0) + h.dmg
                 if h.src == c.me:
                     mine[h.dst] = mine.get(h.dst, 0) + h.dmg
+    if c.off_dmg:                        # monstros fora do filtro "Contar dano em": o abate vale XP do mesmo jeito
+        mine, total = dict(mine), dict(total)
+        for aid, (own, everyone) in c.off_dmg.items():
+            total[aid] = total.get(aid, 0) + everyone
+            if own:
+                mine[aid] = mine.get(aid, 0) + own
     rows, unknown = [], 0
     for t, aid in c.death_log:
         e = c.entities.get(aid)
@@ -257,10 +264,22 @@ def stored_correction(c, cfg):
     """(correção média das gravações longas deste personagem, nº de medidas) ou None."""
     entry = ((cfg or {}).get("xp_corr") or {}).get(str(c.session.gid))
     samples = (entry or {}).get("samples") or []
+    # os bônus e os eventos do jogo mudam a cada poucos dias: medida bem mais velha que a mais nova não entra
+    newest = max((_when(x[2]) for x in samples), default=None)
+    if newest is not None:
+        samples = [x for x in samples if _when(x[2]) is None or newest - _when(x[2]) <= CALIBRATE_FRESH_S]
     w = sum(x[1] for x in samples)
     if not w:
         return None
     return sum(x[0] * x[1] for x in samples) / w, len(samples)
+
+
+def _when(text):
+    """Segundos de uma data "AAAA-MM-DD HH:MM" das medidas guardadas (None se não der para ler)."""
+    try:
+        return (datetime.datetime.strptime(text, "%Y-%m-%d %H:%M") - datetime.datetime(2000, 1, 1)).total_seconds()
+    except (TypeError, ValueError):
+        return None
 
 
 def correction(c, cfg):
@@ -281,12 +300,13 @@ def calibrate(c, cfg, xp_after):
     10 min não conta. Também anota a XP do nível que o jogo mandou (cfg["xp_levels"]). Devolve a correção média
     nova ou None."""
     s = c.session
-    if not getattr(c, "path", None) or not s.gid:
+    if not getattr(c, "path", None) or not s.gid or not gear_ready():
         return None
     if s.base_level and s.next_exp and s.next_exp != 999999999:
         cfg.setdefault("xp_levels", {}).setdefault(str(s.job), {})[str(s.base_level)] = s.next_exp
     remember_manual(c, cfg)
     segs = exact_segments(c, cfg, xp_after)
+    detect_spot(c, cfg, segs)                    # o spotlight do mapa primeiro: ele não é evento do servidor
     detect_server(c, cfg, segs)                  # antes de medir: a correção é sobre a lista já acertada
     when = "%04d-%02d-%02d %02d:%02d" % tuple(s.recorded_at[:5])
     name = os.path.basename(c.path)
@@ -296,7 +316,7 @@ def calibrate(c, cfg, xp_after):
             continue
         est = _list_xp(c, cfg, (t0, t1))
         if est:
-            new.append([round(gain / est, 4), gain, when, "%s#%s" % (name, tag)])
+            new.append([round(gain / est, 4), gain, when, "%s#%s" % (name, tag), map_key(_one_map(c, t0, t1) or "")])
     learn_quests(c, cfg, segs)
     if not new:
         return None
@@ -340,12 +360,81 @@ def _manual_blind(c, t0, t1):
     return any(v <= 0 and s < t1 and e > t0 for s, e, v in _lasting_vals(c, 250))
 
 
+def _one_map(c, t0, t1):
+    """O mapa do trecho, se ele se passou todo num mapa só (None se houve troca de mapa no meio)."""
+    names = {map_key(m) for s, e, m in c.map_spans() if s < t1 and e > t0}
+    return names.pop() if len(names) == 1 else None
+
+
+def detect_spot(c, cfg, segs=None, xp_after=None):
+    """Deduz o spotlight do mapa da XP exata (só no modo automático). Num trecho exato que serve, passado todo
+    num mapa: se a lista sem spotlight erra mais de 12%, com ele fecha a 3% e nenhum evento do servidor explica
+    melhor, o mapa é marcado; se o mapa estava marcado pelo automático e a lista sem spotlight já fecha a 6%, é
+    desmarcado (o spotlight saiu de lá). As medidas guardadas do personagem nesse mapa são esquecidas. Devolve o
+    mapa que mudou ou None."""
+    if (cfg.get("xp_mode") if cfg.get("xp_mode") in MODES else "auto") != "auto" or not _fresh(c):
+        return None
+    if not settings(cfg)["spot"]["on"] or not gear_ready():
+        return None
+    segs = exact_segments(c, cfg, xp_after) if segs is None else segs
+    known = (cfg.get("xp_manual_last") or {}).get(str(c.session.gid))
+    plain = dict(cfg, xp_spot={})
+    by_map = {}
+    for t0, t1, gain, _tag in segs:
+        m = _one_map(c, t0, t1)
+        if (not m or quest_in(c, t0, t1) or not _big(c, cfg, t0, t1, gain)
+                or not (known or not _manual_blind(c, t0, t1))):
+            continue
+        est = _list_xp(c, plain, (t0, t1))
+        if est:
+            row = by_map.setdefault(m, [0.0, 0.0, []])
+            row[0] += gain
+            row[1] += est
+            row[2].append((t0, t1))
+    marked = (cfg.get("xp_spot") or {})
+    changed = None
+    for m, (real, est, spans) in by_map.items():
+        r0 = real / est
+        cur = next((e for k, e in marked.items() if map_key(k) == m), None)
+        fit, best = min((abs(r0 / (1.0 + p / 100.0) - 1.0), p) for p in SPOT_CHOICES)
+        if cur is not None and cur.get("auto") and fit <= SPOT_FIT and best != cur.get("pct") and abs(
+                r0 / (1.0 + float(cur.get("pct") or 0) / 100.0) - 1.0) > SERVER_MISS:
+            for k in [k for k in marked if map_key(k) == m]:       # o spotlight do mapa mudou de percentual
+                del cfg["xp_spot"][k]
+            cfg["xp_spot"][m] = dict(pct=best, when="%04d-%02d-%02d" % tuple(c.session.recorded_at[:3]), auto=True)
+            changed = m
+        elif cur is None:
+            if fit > SPOT_FIT or abs(r0 - 1.0) <= SERVER_MISS:
+                continue
+
+            def server_fit(pct):
+                bon = dict(cfg.get("xp_bonuses") or {})
+                bon["server"] = dict(on=pct > 0, pct=pct or 100)
+                e2 = [_list_xp(c, dict(plain, xp_bonuses=bon), sp) for sp in spans]
+                return abs(real / sum(e2) - 1.0) if all(e2) else 9.0
+            if min(server_fit(p) for p in SERVER_CHOICES) <= fit:
+                continue                           # um evento do servidor explica igual ou melhor
+            cfg.setdefault("xp_spot", {})[m] = dict(pct=best, when="%04d-%02d-%02d" % tuple(c.session.recorded_at[:3]),
+                                                    auto=True)
+            changed = m
+        elif cur.get("auto") and abs(r0 - 1.0) <= SERVER_FIT:
+            for k in [k for k in marked if map_key(k) == m]:
+                del cfg["xp_spot"][k]
+            changed = m
+        if changed == m:
+            entry = (cfg.get("xp_corr") or {}).get(str(c.session.gid))
+            if entry:
+                entry["samples"] = [x for x in entry.get("samples", []) if len(x) < 5 or x[4] != m]
+            _CACHE.pop("sc", None)
+    return changed
+
+
 def detect_server(c, cfg, segs=None, xp_after=None):
     """Deduz o evento do servidor da XP exata (só no modo automático). Em cada trecho exato que serve (sem entrega
     de missão, sem manual de valor desconhecido), a lista é refeita com o evento em 0, 50, 100 e 200%; se um deles
     fecha a 6% do real e o que está marcado erra mais de 12%, o programa marca esse (e esquece as medidas antigas,
     que eram sobre a lista errada). Devolve o % novo (0 = sem evento) ou None se nada mudou."""
-    if (cfg.get("xp_mode") if cfg.get("xp_mode") in MODES else "auto") != "auto" or not _fresh(c):
+    if (cfg.get("xp_mode") if cfg.get("xp_mode") in MODES else "auto") != "auto" or not _fresh(c) or not gear_ready():
         return None
     segs = exact_segments(c, cfg, xp_after) if segs is None else segs
     known = (cfg.get("xp_manual_last") or {}).get(str(c.session.gid))
@@ -427,6 +516,10 @@ BONUSES = [
     dict(key="njord", name="Banquete de Njord", pct=60, status=78, on=True, val=True, role="k"),
     dict(key="miracle", name="Milagre Solar, Lunar e Estelar (multiplica os outros bônus)", pct=100,
          status="milagre", on=True, role="first"),
+    # spotlight: os monstros de alguns mapas rendem mais por um tempo (medido em jor_ab02: tudo × 1,20). Vale só
+    # nos mapas marcados (cfg xp_spot), e o % é o do mapa
+    dict(key="spot", name="Spotlight do mapa (multiplica tudo)", pct=20, status="mapa", on=True, val=True,
+         role="spot"),
     dict(key="gear", name="Equipamentos, visuais e cartas (texto dos itens)", pct=0, status="equipamento", on=True,
          val=True, role="k"),
     # bônus "[Durante o Evento]" do texto dos itens (ex.: Carta Baby Shark): o evento do item costuma acabar antes
@@ -441,6 +534,24 @@ MANUALS = [("Manual de Combate", 50), ("Manual de Combate com Chiclete", 50), ("
 MODES = ("auto", "lista", "medido", "fixo")
 SERVER_CHOICES = (0, 50, 100, 200)   # o evento do servidor costuma ser +50%, +100% ou +200%
 SERVER_FIT, SERVER_MISS = 0.06, 0.12  # o evento deduzido tem de fechar a 6% do real, e o marcado errar mais de 12%
+SPOT_PCT = 20.0                       # spotlight medido: XP real = lista × 1,20
+SPOT_CHOICES = (20.0, 50.0)           # os que o jogo usa: +20% nos mapas de nível alto, +50% nos de nível mais baixo
+SPOT_FIT = 0.03                       # o mapa é marcado quando a XP exata fecha a 3% da lista com o spotlight
+
+
+def map_key(name):
+    """Nome do mapa sem o prefixo da instância ("0ex1@jorlab" -> "jorlab"), em minúsculas."""
+    return (name or "").split("@")[-1].strip().lower()
+
+
+def spot_maps(cfg):
+    """{mapa: %} dos mapas marcados como spotlight (cfg xp_spot: {mapa: {"pct", "when", "auto"}})."""
+    out = {}
+    for name, entry in ((cfg or {}).get("xp_spot") or {}).items():
+        pct = entry.get("pct") if isinstance(entry, dict) else None
+        if isinstance(pct, (int, float)) and pct > 0:
+            out[map_key(name)] = float(pct)
+    return out
 
 
 def settings(cfg, c=None):
@@ -503,14 +614,15 @@ def windows(c, cfg=None):
     cfg: para saber se os bônus "[Durante o Evento]" dos itens estão marcados."""
     event_on = settings(cfg or {})["gear_event"]["on"]
     off = event_off(cfg or {})
+    spots = tuple(sorted(spot_maps(cfg).items()))
     store = _moment(c)["wins"]
-    out = store.get((event_on, off))
+    out = store.get((event_on, off, spots))
     if out is None:
-        out = store[(event_on, off)] = _windows(c, event_on, off)
+        out = store[(event_on, off, spots)] = _windows(c, event_on, off, dict(spots))
     return dict(out)
 
 
-def _windows(c, event_on, off):
+def _windows(c, event_on, off, spots=None):
     mine = {}                        # status de quem grava, por efeito (uma passada só pelo registro)
     for s in c.statuses(c.me):
         mine.setdefault(s[1], []).append(s)
@@ -523,6 +635,10 @@ def _windows(c, event_on, off):
             continue
         if b["status"] == "equipamento":
             out[b["key"]] = gear_windows(c, event_on, off)
+            continue
+        if b["status"] == "mapa":     # o tempo passado em cada mapa marcado como spotlight, com o % dele
+            out[b["key"]] = [(s, e, spots[map_key(m)]) for s, e, m in c.map_spans()
+                             if map_key(m) in spots] if spots else []
             continue
         sts = mine.get(b["status"], ())
         if b.get("lasting") and b.get("val"):    # manuais: não acabam com a morte e trazem o % no status
@@ -567,7 +683,7 @@ def _pct_at(b, t, wins, sets):
 
 def parts_at(t, wins, sets):
     """Bônus (%) de cada papel num instante: {"g", "k", "p", "first"}, com a regra dos consumíveis (vale o maior)."""
-    out, group = {"g": 0.0, "k": 0.0, "p": 0.0, "first": 0.0}, {}
+    out, group = {"g": 0.0, "k": 0.0, "p": 0.0, "first": 0.0, "spot": 0.0}, {}
     for b in BONUSES:
         pct = _pct_at(b, t, wins, sets)
         if pct is None:
@@ -626,7 +742,8 @@ def factor_at(t, wins, sets, mob=None, marks=None, parts=None):
     só para o alvo da Oposição, quando não há Milagre. `parts`: os bônus do instante, se já calculados."""
     a = parts_at(t, wins, sets) if parts is None else parts
     first = a["first"] or mark_pct(marks, t, mob)
-    return ((1.0 + a["g"] / 100.0) * (1.0 + a["k"] / 100.0) + a["p"] / 100.0) * (1.0 + first / 100.0)
+    return (((1.0 + a["g"] / 100.0) * (1.0 + a["k"] / 100.0) + a["p"] / 100.0) * (1.0 + first / 100.0)
+            * (1.0 + a.get("spot", 0.0) / 100.0))
 
 
 class _Parts:
@@ -650,7 +767,8 @@ class _Parts:
 
 def _parts(c, cfg, wins, sets):
     store = _moment(c)["fac"]
-    key = (settings(cfg or {})["gear_event"]["on"], event_off(cfg or {}), repr(sorted(sets.items())))
+    key = (settings(cfg or {})["gear_event"]["on"], event_off(cfg or {}), repr(sorted(sets.items())),
+           repr(sorted(spot_maps(cfg).items())))
     p = store.get(key)
     if p is None:
         p = store[key] = _Parts(wins, sets)
@@ -962,6 +1080,14 @@ def _iteminfo_path():
     except ImportError:
         grf = None
     return os.path.join(os.path.dirname(grf), "System", "iteminfo_new.lub") if grf else None
+
+
+def gear_ready():
+    """A lista de itens do jogo já carregou (ou não há jogo instalado)? Antes disso o bônus dos itens vestidos não
+    entra na conta, e medir contra a XP exata daria o resultado errado."""
+    path = _iteminfo_path()
+    GEAR.start(path)
+    return not path or GEAR.table is not None
 
 
 def event_off(cfg):

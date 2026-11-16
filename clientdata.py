@@ -49,6 +49,10 @@ def cache_path():
     return os.path.join(os.path.dirname(i18n.config_path()), "nomes_do_jogo.json")
 
 
+def extra_path():
+    return os.path.join(os.path.dirname(i18n.config_path()), "nomes_do_jogo_extras.json")
+
+
 def grf_entries(path, prefix=I18N_PREFIX):
     """Arquivos de um .grf (versões 0x200 e 0x300) cujo nome começa com `prefix`."""
     with open(path, "rb") as f:
@@ -214,6 +218,46 @@ def read_names(path, by_pt=None):
     return names
 
 
+def find_names(path, keys):
+    """{chave: [inglês, português, espanhol]} só das chaves pedidas. As chaves de 6 letras são centenas de milhares
+    de textos do jogo e não cabem no cache: cada uma é procurada quando aparece num replay. A que não existe (ou é
+    uma frase, não um nome) fica de fora."""
+    def text(v):
+        try:
+            return " ".join(base64.b64decode(v).decode("utf-8").split()) if v else ""
+        except (ValueError, UnicodeDecodeError):
+            return ""
+
+    marks = [(k, k.encode("ascii", "ignore") + b",") for k in keys]
+    found = {}
+    with open(path, "rb") as f:
+        for _name, packed, real, offset in grf_entries(path):
+            f.seek(offset + 46)
+            try:
+                raw = zlib.decompressobj().decompress(f.read(packed))[:real]
+            except zlib.error:
+                continue
+            for key, mark in marks:
+                if key in found:
+                    continue
+                if raw.startswith(mark):
+                    at = 0
+                else:
+                    at = raw.find(b"\n" + mark) + 1
+                    if not at:
+                        continue
+                end = raw.find(b"\n", at)
+                cols = raw[at:end if end >= 0 else len(raw)].decode("utf-8", "replace").rstrip("\r").split(",")
+                if len(cols) <= COLUMNS["es"]:
+                    continue
+                row = [text(cols[COLUMNS[k]]) for k in ("en", "pt", "es")]
+                if any(row) and max(len(x) for x in row) <= MAX_NAME:
+                    found[key] = row
+            if len(found) == len(marks):
+                break
+    return found
+
+
 class ClientNames:
     """Tradução das chaves do servidor com as tabelas do jogo instalado (carrega em segundo plano)."""
 
@@ -225,6 +269,12 @@ class ClientNames:
         self.pt_monsters = {}         # {id: nome em português} (o meter preenche)
         self.version = 0              # muda quando os nomes ficam prontos (a tela redesenha)
         self._thread = None
+        self.extra = {}               # chaves longas já procuradas no jogo: chave -> [en, pt, es], ou None
+        self._wanted = set()          # chaves longas esperando a busca
+        self._extra_thread = None
+        self._extra_running = False
+        self._lock = threading.Lock()
+        self._stamp = None            # o data.grf de onde os nomes vieram (caminho, tamanho, data)
 
     def use_folder(self, folder):
         """Anota o data.grf da instalação dona da pasta Replay, de um replay ou da pasta do jogo."""
@@ -257,7 +307,14 @@ class ClientNames:
         try:
             self.loaded_from = self.grf
             st = os.stat(self.grf)
-            stamp = [self.grf, st.st_size, int(st.st_mtime)]
+            stamp = self._stamp = [self.grf, st.st_size, int(st.st_mtime)]
+            try:
+                with open(extra_path(), encoding="utf-8") as f:
+                    saved = json.load(f)
+                if saved.get("grf") == stamp and isinstance(saved.get("extra"), dict):
+                    self.extra = saved["extra"]     # o jogo atualizou: procura tudo de novo
+            except (OSError, ValueError):
+                pass
             path = cache_path()
             cached = {}
             try:
@@ -310,12 +367,55 @@ class ClientNames:
     def wait(self, timeout=None):
         if self._thread is not None:
             self._thread.join(timeout)
+        if self._extra_thread is not None:
+            self._extra_thread.join(timeout)
+
+    def _want(self, key):
+        """Chave longa que ainda não foi procurada: a busca roda em segundo plano (uns segundos) e a tela redesenha
+        quando termina."""
+        with self._lock:
+            self._wanted.add(key)
+            if not self._extra_running:
+                self._extra_running = True
+                self._extra_thread = threading.Thread(target=self._load_extra, daemon=True)
+                self._extra_thread.start()
+
+    def _load_extra(self):
+        while True:
+            with self._lock:
+                keys = set(self._wanted)
+                if not keys:
+                    self._extra_running = False
+                    return
+            try:
+                found = find_names(self.grf, keys)
+                ok = True
+            except (OSError, ValueError, struct.error, zlib.error):
+                found, ok = {}, False           # jogo atualizando o arquivo: não guarda, tenta de novo ao reabrir
+            for k in keys:
+                self.extra[k] = found.get(k)
+            with self._lock:
+                self._wanted -= keys
+            if ok and self._stamp:
+                try:
+                    tmp = extra_path() + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump({"grf": self._stamp, "extra": self.extra}, f, ensure_ascii=False)
+                    os.replace(tmp, extra_path())
+                except OSError:
+                    pass
+            self.version += 1
 
     def lookup(self, key):
         if self.names is None:
             self.start()
             return None
         row = self.names.get(key)
+        if row is None and len(key) > MAX_KEY:
+            if key in self.extra:
+                row = self.extra[key]
+            elif self.grf:
+                self._want(key)
         if not row:
             return None
         order = {"en": (0, 1, 2), "es": (2, 1, 0)}.get(i18n.LANG, (1, 2, 0))

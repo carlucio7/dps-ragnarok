@@ -148,9 +148,17 @@ class TestsTab:
             t.set_rows(rows, lambda r: r["id"])
             if self.ids[side]:
                 t.select(self.ids[side])
-        self.hint.configure(text=_("%d teste(s). As lutas contra bonecos de treino são salvas sozinhas; qualquer outra "
-                                   "(inclusive de replays de outras pessoas) dá para salvar no botão. Escolha um "
-                                   "teste de cada lado para comparar.") % len(rows))
+        app = self.win.app
+        if app.tests_waiting():
+            # sem este aviso a aba ficava vazia até a luta ser dada por encerrada, e a pessoa achava que não salvou
+            self.hint.configure(fg=self.win.c["accent"], text=_(
+                "%d teste(s). Há uma luta contra o boneco esperando para ser salva: o teste aparece sozinho quando ela "
+                "termina (%d s sem golpes, ou 15 s depois de a gravação parar).") % (len(rows), app.cfg["gap_s"]))
+        else:
+            self.hint.configure(fg=self.win.c["muted"], text=_(
+                "%d teste(s). As lutas contra bonecos de treino são salvas sozinhas; qualquer outra "
+                "(inclusive de replays de outras pessoas) dá para salvar no botão. Escolha um "
+                "teste de cada lado para comparar.") % len(rows))
         self.compare()
 
     def compare(self):

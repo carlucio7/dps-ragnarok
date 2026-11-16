@@ -212,9 +212,11 @@ def build_grf(path, files):
         f.write(head + body + struct.pack("<III", 0, len(ztable), len(table)) + ztable)
 
 
-def broadcast(key):
-    """0x01c3: anúncio do mapa com o texto como chave entre bytes 0x1c, como nas instâncias."""
-    body = bytes([0x1C]) + key.encode("ascii") + bytes([0x1C, 0])
+def broadcast(key, value=None):
+    """0x01c3: anúncio do mapa com o texto como chave entre bytes 0x1c, como nas instâncias (`value`: o número ou
+    texto que entra no anúncio, depois de um byte 0x1d)."""
+    arg = b"" if value is None else bytes([0x1D]) + str(value).encode("ascii")
+    body = bytes([0x1C]) + key.encode("ascii") + arg + bytes([0x1C, 0])
     return struct.pack("<HH", rrf.P_BROADCAST, 16 + len(body)) + bytes.fromhex("ffff000090010c0000000000") + body
 
 

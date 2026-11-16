@@ -7,6 +7,7 @@ import os
 import re
 import struct
 import sys
+import threading
 
 import clientdata
 import i18n
@@ -425,6 +426,7 @@ class Stat:
 
 
 # chefe que muda: Mudar Propriedade (skill -> elemento novo) e Imunidade a uma propriedade (status -> elemento)
+POINTS_KEY = "gQdADQ"         # "A dificuldade atual de Betelgeuse é de {0} pontos."
 PROP_SKILLS = {162: "Water", 163: "Earth", 164: "Fire", 165: "Wind", 166: "Poison", 167: "Holy", 168: "Dark",
                169: "Ghost"}
 IMMUNE_EFST = {1016: "Neutral", 1017: "Water", 1018: "Earth", 1019: "Fire", 1020: "Wind", 1021: "Poison",
@@ -519,6 +521,7 @@ class Combat:
         self.recent = collections.deque()   # (t, dano) do jogador, para o "DPS agora"
         self.now = 0
         self.map = session.map
+        self.map_log = [(0, session.map)]     # (t, mapa) a cada troca de mapa
         # posições (jogadores, chefes e quem grava): aid -> [(t, x de, y de, x para, y para)], tempos à parte
         self.pos_ev = collections.defaultdict(list)
         self.pos_t = collections.defaultdict(list)
@@ -536,6 +539,9 @@ class Combat:
         self.casts = []               # (t, fonte, fonte_original, alvo, skill, ms de conjuracao)
         self.deaths = {}              # AID -> quando morreu (a ultima vez)
         self.death_log = []           # (t, AID) de todas as mortes
+        self.off_dmg = {}             # AID -> [dano de quem grava, dano de todos] nos monstros fora do filtro de dano
+        self.off_last = None          # quando quem grava bateu por último num monstro fora do filtro (ms do replay)
+        self.boss_points = []         # (t, pontos) da dificuldade anunciada na sala do chefe (Betelgeuse)
         # drops: itens que caíram ou estavam no chão, o que entrou na bolsa de quem grava e prêmios de MVP
         self.ground = {}              # id do item no chão -> drop (enquanto está no chão)
         self.drop_ids = {}            # id do item no chão -> drop (todos, para saber quem pegou)
@@ -821,6 +827,7 @@ class Combat:
             self.close_areas(t)
             if name.lower() != (self.map or "").lower():
                 self.on_room(t, "overload", False)
+                self.map_log.append((t, name))
             self.map = name
             if len(d) >= 22:
                 x, y = struct.unpack_from("<HH", d, 18)
@@ -854,13 +861,18 @@ class Combat:
             for key in rrf.broadcast_keys(d):
                 if key in ROOM_KEYS:
                     self.on_room(t, *ROOM_KEYS[key])
+            for key, value in rrf.broadcast_args(d):
+                if key == POINTS_KEY and value.isdigit():
+                    self.boss_points.append((t, int(value)))
+                    self.version += 1
         elif pid in (rrf.P_ITEM_FALL, rrf.P_ITEM_ENTRY):
             r = rrf.parse_ground_item(pid, d)
             if r is not None and r[0] not in self.ground:
                 map_id, item, count, x, y = r
                 fell = pid == rrf.P_ITEM_FALL
+                who = self.recent_kill(t) if fell else None
                 drop = dict(t=t, item=item, count=count, x=x, y=y, fell=fell, gone=None, mine=False, by=None,
-                            mob=self.recent_kill(t) if fell else None)
+                            mob=self.name_of(who) if who is not None else None, mob_ent=self.entities.get(who))
                 self.ground[map_id] = drop
                 self.drop_ids[map_id] = drop
                 self.drops.append(drop)
@@ -1514,7 +1526,15 @@ class Combat:
                 if x.skill == MAXPAIN_ATK and x.damage > 0:
                     self.maxpain_reflect(x.time, x.src)
             return
-        if self.is_friendly(x.dst) or not self.counts_target(x.dst):
+        if self.is_friendly(x.dst):
+            return
+        if not self.counts_target(x.dst):
+            if x.damage > 0:                  # fora do filtro de dano, mas o abate continua valendo XP
+                off = self.off_dmg.setdefault(x.dst, [0, 0])
+                off[1] += x.damage
+                if src == self.me:
+                    off[0] += x.damage
+                    self.off_last = x.time
             return
         dst = self.phase_root(x.dst, x.time)
         self.hits.append(Hit(x, src, dst, x.dst, True))
@@ -1563,6 +1583,7 @@ class Combat:
         self.ground_cells = {}
         self.deaths = {}
         self.death_log = []
+        self.off_dmg, self.off_last = {}, None
         self.drops, self.pickups, self.mvp_items, self.drop_ids = [], [], [], {}
         self._pending_pickups, self._gone_by_item = [], {}
         self.was_reset = True
@@ -1571,15 +1592,23 @@ class Combat:
     # --- drops -------------------------------------------------------------
 
     def recent_kill(self, t):
-        """Nome do monstro que morreu por último até 2 s antes (quem provavelmente deixou o item cair)."""
+        """O monstro que morreu por último até 2 s antes (quem provavelmente deixou o item cair): o AID dele."""
         for when, aid in reversed(self.death_log):
             if when < t - LOOT_KILL_MS:
                 break
             if when <= t and not self.is_friendly(aid):
                 e = self.entities.get(aid)
                 if e is not None and e.kind == "mob":
-                    return self.name_of(aid)
+                    return aid
         return None
+
+    def drop_mob(self, d):
+        """Nome de quem deixou o item cair, visto na hora de mostrar: um nome que o jogo ainda estava traduzindo
+        quando o item caiu ("Monstro 21533") aparece certo depois."""
+        e = d.get("mob_ent")
+        if e is None:
+            return d["mob"]
+        return (clientdata.NAMES.resolve(e.name) if e.name else None) or monster_name(e.job) or d["mob"]
 
     def add_pickup(self, t, item, count):
         p = dict(t=t, item=item, count=count, used=False)
@@ -1686,6 +1715,23 @@ class Combat:
     def active(self):
         return (not self.finished and self.current is not None
                 and self.now - self.current.last <= self.gap_ms)
+
+    def map_spans(self):
+        """[(início, fim, mapa)] de cada trecho da gravação num mapa."""
+        log = self.map_log
+        return [(t, log[i + 1][0] if i + 1 < len(log) else max(self.now, t), name) for i, (t, name) in enumerate(log)]
+
+    def off_notice(self, within_ms=10000):
+        """Quem grava bate em monstros fora do filtro "Contar dano em" e o dano não aparece: "nothing" = nada foi
+        contado nesta gravação; "now" = já houve luta contada, ela acabou e ele bateu neles nos últimos segundos
+        (os lacaios de um chefe durante a luta não avisam); None = não é o caso."""
+        if self.off_last is None:
+            return None
+        if self.current is None and not self.history:
+            return "nothing"
+        if not self.finished and not self.active() and self.now - self.off_last <= within_ms:
+            return "now"
+        return None
 
     def dps_now(self):
         lim = self.now - NOW_WINDOW_MS
@@ -1905,16 +1951,51 @@ _XP_INFO = {}
 
 
 def _xp_info(path):
-    """(personagem, quando gravou, nível, XP de base no início) de um .rrf; guardado por arquivo."""
-    if path in _XP_INFO:
-        return _XP_INFO[path]
+    """(personagem, quando gravou, nível, XP de base no início) de um .rrf; guardado por arquivo. A gravação que
+    acabou de começar ainda não tem isso: enquanto não der para ler, tenta de novo quando o arquivo cresce."""
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return None
+    hit = _XP_INFO.get(path)
+    if hit is not None and (hit[1] is not None or hit[0] == size):
+        return hit[1]
     try:
         s = rrf.read_session(path)
     except (OSError, ValueError, struct.error):
         return None
     info = (s.gid, s.recorded_at, s.base_level, s.base_exp) if s.gid and s.base_exp is not None else None
-    _XP_INFO[path] = info
+    _XP_INFO[path] = (size, info)
     return info
+
+
+_XP_SCANS = {}
+
+
+def xp_scan(folder):
+    """True quando as gravações da pasta já foram lidas (_xp_info de cada uma). Na primeira vez começa a ler num
+    fio à parte e devolve False: são centenas de arquivos, e ler no fio da tela prendia a janela."""
+    if not folder:
+        return True
+    key = os.path.normcase(folder)
+    t = _XP_SCANS.get(key)
+    if t is None:
+        def work():
+            try:
+                names = os.listdir(folder)
+            except OSError:
+                return
+            for name in names:
+                if name.lower().endswith(".rrf"):
+                    _xp_info(os.path.join(folder, name))
+        t = _XP_SCANS[key] = threading.Thread(target=work, daemon=True)
+        t.start()
+    return not t.is_alive()
+
+
+def xp_after_soon(path, session):
+    """xp_after para o fio da tela: None enquanto a pasta ainda está sendo lida (xp_scan)."""
+    return xp_after(path, session) if path and xp_scan(os.path.dirname(path)) else None
 
 
 def xp_after(path, session):
@@ -1953,6 +2034,9 @@ def level_progress(session):
     return max(0.0, min(1.0, session.base_exp / float(session.next_exp)))
 
 
+STAMP_AT, STAMP_LEN = 0x68, 8     # data e hora do começo da gravação, no cabeçalho: dizem qual gravação é
+
+
 class ReplayFile:
     """Um .rrf sendo lido de forma incremental. O arquivo e aberto e fechado a cada
     leitura, para nunca atrapalhar o jogo quando ele quiser escrever ou fechar."""
@@ -1967,6 +2051,8 @@ class ReplayFile:
         self.size = 0
         self.error = None
         self.alert_floor = 0
+        self.stamp = b""              # data e hora da gravação, como estão no cabeçalho
+        self.gone = False             # o jogo gravou outro replay por cima deste, com o mesmo nome
 
     @property
     def ready(self):
@@ -1974,6 +2060,8 @@ class ReplayFile:
 
     def poll(self, max_bytes=8 << 20):
         """Le o que ha de novo. Devolve True se algo mudou."""
+        if self.gone:
+            return False
         try:
             with open(self.path, "rb") as fh:
                 size = os.fstat(fh.fileno()).st_size
@@ -1987,6 +2075,7 @@ class ReplayFile:
                     if not h.stream_offset or h.stream_offset > len(buf):
                         return False
                     self.header = h
+                    self.stamp = bytes(buf[STAMP_AT:STAMP_AT + STAMP_LEN])
                     self.session = rrf.Session(h, buf)
                     self.reader = rrf.StreamReader(h.keys, rrf.WANTED)
                     self.combat = Combat(self.session, self.gap_ms, self.targets)
@@ -2000,6 +2089,13 @@ class ReplayFile:
                     self.error = None
                 else:
                     catching_up = False
+                    if size != self.size:
+                        # o jogo pode gravar outro replay por cima deste, com o mesmo nome: o que vem a seguir não é
+                        # a continuação do que já foi lido (nem se decifra com a mesma chave)
+                        fh.seek(STAMP_AT)
+                        if fh.read(STAMP_LEN) != self.stamp:
+                            self.gone = True
+                            return False
                 changed = False
                 while size > self.pos:
                     fh.seek(self.pos)
@@ -2125,6 +2221,11 @@ class Watcher:
         if self.file is None:
             return False
         changed = self.file.poll()
+        if self.file.gone:
+            # outro replay foi gravado por cima, com o mesmo nome: lê de novo, do começo (antes o medidor ficava
+            # parado no replay antigo)
+            self.file = ReplayFile(self.file.path, self.gap_ms, self.targets)
+            changed = self.file.poll()
         if changed:
             self.last_change = now
         return changed

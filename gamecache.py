@@ -54,7 +54,7 @@ def save(name, mark, data):
 
 def items(info_path):
     """O resumo da lista de itens do jogo (System\\iteminfo_new.lub): dict(names, display, art, table, kinds,
-    classnum), tudo por id do item. Lido uma vez só por execução (quem pedir ao mesmo tempo espera), e do disco
+    classnum, slots), tudo por id do item. Lido uma vez só por execução (quem pedir ao mesmo tempo espera), e do disco
     enquanto o arquivo do jogo não mudar. Levanta OSError / ValueError se o arquivo não der para ler."""
     with _LOCK:
         got = _ITEMS.get(info_path)
@@ -62,9 +62,10 @@ def items(info_path):
             return got
         mark = stamp(info_path)
         raw = load(ITEMS_FILE, mark)
-        if raw is None:
+        if raw is None or "slots" not in raw:        # resumo de uma versão sem as posições: refaz
             import itemkind
             import lub
+            import visuals
             import xp
             with open(info_path, "rb") as f:
                 tbl = lub.run(f.read()).get("tbl") or {}
@@ -79,7 +80,8 @@ def items(info_path):
                        for i, entries in xp.parse_gear(tbl).items()},
                 kinds={str(i): k for i, k in itemkind.parse_kinds(tbl).items()},
                 classnum={str(i): v["ClassNum"] for i, v in rows
-                          if isinstance(v.get("ClassNum"), int) and v["ClassNum"] > 0})
+                          if isinstance(v.get("ClassNum"), int) and v["ClassNum"] > 0},
+                slots={str(i): s for i, s in visuals.slots_of(tbl).items()})
             save(ITEMS_FILE, mark, raw)
         got = _ITEMS[info_path] = dict(
             names={int(i): v for i, v in raw["names"].items()},
@@ -88,5 +90,6 @@ def items(info_path):
             table={int(i): [(pct, tuple(group) if group else None, bool(event)) for pct, group, event in entries]
                    for i, entries in raw["table"].items()},
             kinds={int(i): k for i, k in raw["kinds"].items()},
-            classnum={int(i): v for i, v in raw["classnum"].items()})
+            classnum={int(i): v for i, v in raw["classnum"].items()},
+            slots={int(i): v for i, v in raw["slots"].items()})
         return got

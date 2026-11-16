@@ -2,6 +2,26 @@
 
 Português · [English](#english) · [Español](#español)
 
+## 1.8.0
+
+Simulador de visuais, trocas de propriedade e tamanho do chefe na Linha do tempo e o spotlight do mapa na XP.
+
+- Visuais: aba nova na análise. Monte um look com os chapéus e capas do seu jogo, cabelo, cor do cabelo e cor da roupa, em qualquer classe.
+- Visuais: Pedras Gráficas e efeitos de visual animados na prévia, como Espaço Digital, Luz Angelical e Dragão Alado.
+- Visuais: o personagem pode ficar parado, andando ou sentado, virar para os lados e pisar no chão de oito mapas.
+- Visuais: guarde seus looks e copie a imagem. A aba abre com o visual de quem gravou.
+- Linha do tempo: faixas de Propriedade e Tamanho do chefe, quando ele muda durante a luta.
+- Linha do tempo: a faixa das skills do chefe voltou a aparecer.
+- XP: o spotlight do mapa entra na conta sozinho, e sai quando o evento acaba. Em "Mapas" dá para marcar o mapa à mão e escolher o percentual.
+- XP: a medida exata até a gravação seguinte passou a ser guardada, e a estimativa acerta mais.
+- Drops e XP aparecem mesmo com "Contar dano em" só nos MVPs. O widget avisa quando o dano em monstros comuns não está sendo contado.
+- Testes: a luta contra o boneco não se perde mais se você começar outra gravação ou fechar o programa logo depois.
+- Aquila: a curva de vida fecha no golpe final.
+- Betelgeuse: a dificuldade anunciada na sala é lida do replay.
+- Juncea: nome, propriedade e tamanho corrigidos.
+- A aba Equipamento não consome mais memória com o tempo.
+- A aba XP não prende mais a janela na primeira vez que abre.
+
 ## 1.7.0
 
 Gerenciador de cartões, efeitos acompanhados no widget e a análise refeita, com ícones dos equipamentos, monstros animados e simulador de XP.
@@ -190,6 +210,26 @@ Primeira versão pública.
 
 ## English
 
+### 1.8.0
+
+Costume simulator, the boss's property and size changes on the Timeline, and the map spotlight in XP.
+
+- Costumes: new tab in the analysis. Build a look with your game's hats and garments, hair, hair colour and clothes colour, on any class.
+- Costumes: Graphic Stones and animated costume effects in the preview, such as Digital Space, Angelic Light and Winged Dragon.
+- Costumes: the character can stand, walk or sit, turn around, and stand on the ground of eight maps.
+- Costumes: save your looks and copy the image. The tab opens with the look of whoever recorded.
+- Timeline: Property and Size lanes for the boss, when it changes during the fight.
+- Timeline: the boss skills lane is shown again.
+- XP: the map spotlight is counted by itself, and dropped when the event ends. Under "Maps" you can mark the map by hand and pick the percentage.
+- XP: the exact measure up to the next recording is now stored, so the estimate is closer.
+- Drops and XP show up even with "Count damage on" set to MVPs only. The widget tells you when damage on common monsters is not being counted.
+- Tests: a dummy fight is no longer lost if you start another recording or close the program right after it.
+- Aquila: the HP curve closes at the killing blow.
+- Betelgeuse: the difficulty announced in the room is read from the replay.
+- Juncea: name, property and size fixed.
+- The Equipment tab no longer uses more memory over time.
+- The XP tab no longer holds the window the first time it opens.
+
 ### 1.7.0
 
 Card manager, tracked effects on the widget and a rebuilt analysis, with equipment icons, animated monsters and an XP simulator.
@@ -377,6 +417,26 @@ First public version.
 ---
 
 ## Español
+
+### 1.8.0
+
+Simulador de visuales, cambios de propiedad y tamaño del jefe en la Línea de tiempo y el spotlight del mapa en la XP.
+
+- Visuales: pestaña nueva en el análisis. Arma un look con los sombreros y capas de tu juego, pelo, color de pelo y color de ropa, en cualquier clase.
+- Visuales: Piedras Gráficas y efectos de visual animados en la vista previa, como Espacio Digital, Luz Angelical y Dragón Alado.
+- Visuales: el personaje puede estar parado, caminando o sentado, girar hacia los lados y pisar el suelo de ocho mapas.
+- Visuales: guarda tus looks y copia la imagen. La pestaña abre con el visual de quien grabó.
+- Línea de tiempo: franjas de Propiedad y Tamaño del jefe, cuando cambia durante la pelea.
+- Línea de tiempo: la franja de las skills del jefe volvió a aparecer.
+- XP: el spotlight del mapa entra en la cuenta solo, y sale cuando el evento termina. En "Mapas" puedes marcar el mapa a mano y elegir el porcentaje.
+- XP: la medida exacta hasta la grabación siguiente ahora se guarda, y la estimación acierta más.
+- Drops y XP aparecen incluso con "Contar daño en" solo en los MVP. El widget avisa cuando el daño en monstruos comunes no se está contando.
+- Pruebas: la pelea contra el muñeco ya no se pierde si empiezas otra grabación o cierras el programa justo después.
+- Aquila: la curva de vida cierra en el golpe final.
+- Betelgeuse: la dificultad anunciada en la sala se lee del replay.
+- Juncea: nombre, propiedad y tamaño corregidos.
+- La pestaña Equipo ya no consume más memoria con el tiempo.
+- La pestaña XP ya no traba la ventana la primera vez que abre.
 
 ### 1.7.0
 

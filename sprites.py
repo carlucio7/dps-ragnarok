@@ -479,9 +479,10 @@ def frame_of(action, count, frame, head_dir=0):
     return min(head_dir, count - 1) if action in (IDLE, SIT) else frame % count
 
 
-def smooth_frames(part, frames, cache=None):
+def smooth_frames(part, frames, cache=None, with_origin=False):
     """Os quadros de um monstro montados pelo GDI+ (gdip.py) no tamanho natural, todos na mesma moldura:
     (w, h, [bytes BGRA de cima para baixo]) ou None se não der (aí vale `compose`, pixel a pixel).
+    Com `with_origin`, vem também onde a origem do sprite (os pés) fica na moldura: (w, h, quadros, x, y).
     As camadas sem escala nem giro entram pixel a pixel; as outras (peças em escala ou giradas, como as da
     Betelgeuse) entram suavizadas, na escala e no ângulo exatos. `frames`: [(camadas, âncoras)] do .act;
     `cache` guarda as imagens do .spr já convertidas, para quem monta várias ações do mesmo monstro."""
@@ -538,7 +539,7 @@ def smooth_frames(part, frames, cache=None):
             out.append(data)
     except (ValueError, TypeError, OSError):
         return None
-    return w, h, out
+    return (w, h, out, -x0, -y0) if with_origin else (w, h, out)
 
 
 def compose(order, body, action, direction, frame, head_dir=0):
@@ -821,6 +822,30 @@ class Wardrobe:
             if p:
                 return p
         return None
+
+    def thumb(self, look, with_body=True, direction=0):
+        """Miniatura parada do look: (w, h, pixels) já recortada no desenho, ou None. Sem o corpo ficam só a
+        cabeça e os chapéus (o corpo continua servindo de âncora)."""
+        order, body, _missing = self.parts(look, direction)
+        if body is None:
+            return None
+        res = compose(order if with_body else [p for p in order if p is not body], body, IDLE, direction, 0, 0)
+        return res[:3] if res else None
+
+    def hairs(self, job, sex):
+        """Os números dos cabelos que o jogo tem para a raça e o sexo."""
+        race, s = (DORAM if job in DORAM_JOBS else HUMAN), SEX.get(sex, "남")
+        return [i for i in range(1, 200) if self.grf.has("%s머리통\%s\%d_%s.spr" % (race, s, i, s))]
+
+    def hair_colors(self, hair, sex):
+        """As cores (paletas) do cabelo: 0 é a do próprio desenho."""
+        s = SEX.get(sex, "남")
+        return [0] + [k for k in range(1, 40) if self.grf.has("%s머리\머리%d_%s_%d.pal" % (PAL, hair, s, k))]
+
+    def cloth_colors(self, job, sex, option=0):
+        """As cores (paletas) da roupa da classe: 0 é a do próprio desenho."""
+        s, name = SEX.get(sex, "남"), job_sprite(job, option)
+        return [0] + [k for k in range(1, 40) if name and self.grf.has("%s몸\%s_%s_%d.pal" % (PAL, name, s, k))]
 
     def render(self, look, action, direction, frame=0, head_dir=0):
         """Quadro montado: (w, h, pixels, x da origem, y da origem, delay em ms, nº de quadros, faltou) ou None."""

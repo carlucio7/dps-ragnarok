@@ -226,6 +226,41 @@ try:
           "nome de monstro novo vem das tabelas do jogo; sem nome, mostra o id do monstro: %s" % names)
     check(os.path.isfile(clientdata.cache_path()) and "oIY2DA" not in (clientdata.NAMES.names or {}),
           "cache dos nomes gravado (só chaves curtas)")
+    # chave de 6 letras (monstros mais novos, como a Juncea): procurada no jogo quando aparece, e guardada à parte
+    jpath = os.path.join(game, "Replay", "juncea.rrf")
+    with open(jpath, "wb") as fh:
+        fh.write(fr.build(ME, [(0, fr.spawn(687, "mob", 21533, "\x1ccbb7DQ\x1c")),
+                               (0, fr.spawn(688, "mob", 21998, "\x1coIY2DA\x1c")),
+                               (0, fr.spawn(689, "mob", 21997, "\x1cZZ99zz\x1c")),
+                               (1000, fr.skill_damage(ME, 687, 5000)), (1500, fr.vanish(687, 1)),
+                               (1600, __import__("struct").pack("<HIIHBHHBBHBH", rrf.P_ITEM_FALL, 1, 607, 3, 1,
+                                                                10, 10, 6, 6, 1, 1, 0))])[0])
+    csv2 = csv + "cbb7DQ,,%s,,,,,%s,,%s\n" % (b64("Simulation Juncea"), b64("Juncea de Simulação"),
+                                             b64("Junca de simulación"))
+    fr.build_grf(os.path.join(game, "data.grf"), {"data\\i18n\\sc\\abc.csv": csv2.encode("utf-8"),
+                                                 "data\\sprite\\x.spr": b"nada"})
+    clientdata.NAMES = clientdata.ClientNames()
+    rj = meter.ReplayFile(jpath)
+    rj.poll(max_bytes=1 << 30)
+    clientdata.NAMES.wait(30)                            # as tabelas curtas
+    first = [rj.combat.name_of(a) for a in (687, 688, 689)]
+    clientdata.NAMES.wait(30)                            # a busca das chaves longas
+    after = [rj.combat.name_of(a) for a in (687, 688, 689)]
+    check(first == ["Monstro 21533", "Monstro 21998", "Monstro 21997"]
+          and after == ["Juncea de Simulação", "Uma frase", "Monstro 21997"],
+          "chave de 6 letras: o nome vem do jogo depois da busca; chave que não existe mostra o id: %s -> %s"
+          % (first, after))
+    fell = [d for d in rj.combat.drops if d["fell"]]
+    check(len(fell) == 1 and rj.combat.drop_mob(fell[0]) == "Juncea de Simulação",
+          "o nome de quem deixou o item cair é visto na hora de mostrar: %s (guardado: %s)"
+          % (fell and rj.combat.drop_mob(fell[0]), fell and fell[0]["mob"]))
+    saved_extra = json.load(open(clientdata.extra_path(), encoding="utf-8"))["extra"]
+    again = clientdata.ClientNames()
+    again.use_folder(os.path.join(game, "Replay"))
+    again.load()
+    check(saved_extra.get("cbb7DQ", [None, None])[1] == "Juncea de Simulação" and "ZZ99zz" in saved_extra
+          and again.lookup("cbb7DQ") == "Juncea de Simulação" and again._extra_thread is None,
+          "chaves longas ficam guardadas: ao reabrir o programa o nome sai na hora, sem procurar de novo")
     # várias instalações: segue a gravação mais nova de qualquer pasta Replay
     other = os.path.join(tmp, "Outro", "Replay")
     os.makedirs(other)
@@ -441,6 +476,34 @@ r = rrf.StreamReader(h.keys, rrf.WANTED)
 cm.feed(r.feed(data[h.stream_offset:]), r.last_time)
 pl = {p["name"]: p["total"] for p in an.players(cm, None, 1000)}
 check(pl == {"Tester": 3400, "Coral": 777}, "só MVPs e bonecos: ignora monstro normal e minion: %s" % pl)
+# aviso de "dano em monstros comuns não é contado": só sem luta contada em andamento
+check(c.off_notice() is None and cm.off_last == 1300 and cm.off_notice() is None,
+      "aviso do filtro: nada com 'todos os monstros', nem com uma luta contada em andamento")
+
+
+def only_mvp(events, now=None):
+    data = fr.build(ME, events)[0]
+    h = rrf.Header(data)
+    x = meter.Combat(rrf.Session(h, data), 10000, "mvp")
+    r = rrf.StreamReader(h.keys, rrf.WANTED)
+    x.feed(r.feed(data[h.stream_offset:]), r.last_time if now is None else now)
+    return x
+
+
+poring = [(0, fr.spawn(MOB, "mob", 1002, "Poring")), (1200, fr.skill_damage(ME, MOB, 10))]
+x = only_mvp(poring)
+check(x.off_notice() == "nothing" and not x.encounters(), "aviso do filtro: só bateu em monstro comum = nada contado")
+x = only_mvp([(0, fr.spawn(MOB, "mob", 1002, "Poring")), (1200, fr.skill_damage(OTHER, MOB, 10))])
+check(x.off_notice() is None, "aviso do filtro: outro jogador batendo em monstro comum não avisa quem grava")
+boss_then_poring = [(0, fr.spawn(60001, "mob", BETEL, "Betelgeuse", boss=2)), (0, fr.spawn(MOB, "mob", 1002, "Poring")),
+                    (1000, fr.skill_damage(ME, 60001, 3000)), (30000, fr.skill_damage(ME, MOB, 10))]
+x = only_mvp(boss_then_poring, now=31000)
+check(x.off_notice() == "now", "aviso do filtro: a luta contada acabou e ele bate em monstro comum = avisa")
+x = only_mvp(boss_then_poring, now=45000)
+check(x.off_notice() is None, "aviso do filtro: parou de bater em monstro comum há mais de 10 s = some")
+x = only_mvp(boss_then_poring, now=31000)
+x.finished = True
+check(x.off_notice() is None, "aviso do filtro: replay encerrado com luta contada não avisa")
 
 MAXHP = 100000
 events = [(0, fr.spawn(60001, "mob", BETEL, "Betelgeuse", boss=2)), (100, fr.hp(MAXHP, rrf.SP_MAXHP)), (100, fr.hp(MAXHP)),
@@ -481,6 +544,68 @@ try:
     cmp = testes.compare(store2.records[0], store2.records[1])
     dps = cmp["summary"][0]
     check(abs(dps["diff"] - 0.5) < 1e-9, "comparação: +50%% de DPS (%s)" % dps["diff"])
+
+    # a luta contra o boneco ainda em andamento quando o widget passa para outra gravação: antes se perdia
+    def put(path, data):
+        with open(path, "wb") as f:
+            f.write(data)
+
+    fight = dummy + [(1000 + i * 500, fr.skill_damage(ME, 4404, 2000)) for i in range(20)]
+    day = (2026, 10, 23, 1, 5, 0)
+    whole, part = fr.build(ME, fight, date=day)[0], fr.build(ME, fight[:15], date=day)[0]
+    path = os.path.join(tmp, "seguida.rrf")
+    put(path, part)
+    rf = meter.ReplayFile(path, 15000)
+    rf.poll()
+    seen = set()
+    check(testes.auto_save(store, rf, seen) == 0, "luta contra o boneco em andamento: ainda não é salva")
+    check(testes.waiting(store, rf, seen) is not None, "e aparece como esperando para ser salva")
+    left = testes.Left()
+    left.add(rf, 100.0)
+    put(path, whole)                                     # o jogo seguiu gravando depois de o widget sair dela
+    check(left.step(store, seen, 105.0) == 0 and len(left.items) == 1, "gravação deixada para trás ainda crescendo: espera")
+    check(left.step(store, seen, 105.0 + testes.QUIET_S + 1) == 1 and not left.items,
+          "gravação deixada para trás parou de crescer: o teste é salvo")
+    check(store.records[0]["damage"] == 20 * 2000, "e com a luta inteira (%s)" % store.records[0]["damage"])
+    check(testes.waiting(store, rf, seen) is None, "depois de salva, não espera mais")
+    # ao fechar o programa: salva a que já parou, larga a que ainda cresce (não guarda luta pela metade)
+    day = (2026, 10, 23, 1, 6, 0)
+    whole, part = fr.build(ME, fight, date=day)[0], fr.build(ME, fight[:15], date=day)[0]
+    path = os.path.join(tmp, "fechando.rrf")
+    put(path, part)
+    rf = meter.ReplayFile(path, 15000)
+    rf.poll()
+    left.add(rf, 200.0)
+    put(path, whole)
+    n_before = len(store.records)
+    check(left.step(store, seen, 200.5, closing=True) == 0 and not left.items and len(store.records) == n_before,
+          "fechando com a gravação crescendo: não salva pela metade")
+    rf = meter.ReplayFile(path, 15000)
+    rf.poll()
+    left.add(rf, 200.0)
+    check(left.step(store, seen, 202.0, closing=True) == 1 and store.records[0]["damage"] == 20 * 2000,
+          "fechando com a gravação já parada: o teste é salvo")
+    # outro replay gravado por cima, com o mesmo nome: é outra gravação, lida do começo
+    sub = os.path.join(tmp, "Replay")
+    os.makedirs(sub)
+    path = os.path.join(sub, "mesmo nome.rrf")
+    put(path, fr.build(ME, fight, date=(2026, 10, 23, 1, 7, 0))[0])
+    w3 = meter.Watcher(sub, 15000, auto=False)
+    w3.poll(time.time())
+    old = w3.file
+    check(old is not None and old.ready and old.combat.snapshot()["my_total"] == 20 * 2000, "replay aberto e lido")
+    again = dummy + [(1000 + i * 500, fr.skill_damage(ME, 4404, 7)) for i in range(40)]
+    put(path, fr.build(ME, again, date=(2026, 10, 23, 1, 8, 0))[0])
+    w3.poll(time.time())
+    check(old.gone and w3.file is not old, "outro replay gravado por cima, com o mesmo nome: o medidor percebe")
+    check(w3.file.ready and w3.file.combat.snapshot()["my_total"] == 40 * 7,
+          "e lê o novo do começo (%s)" % (w3.file.ready and w3.file.combat.snapshot()["my_total"]))
+    left.add(old, 300.0)
+    check(left.step(store, seen, 300.1) == 1 and store.records[0]["replay"] == "mesmo nome.rrf",
+          "a luta do replay que foi sobrescrito não se perde")
+    put(path, fr.build(ME, fight[:8], date=(2026, 10, 23, 1, 9, 0))[0])     # e agora um menor por cima
+    w3.poll(time.time())
+    check(w3.file.ready and w3.file.combat.snapshot()["my_total"] == 7 * 2000, "replay menor gravado por cima: também")
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
@@ -947,6 +1072,14 @@ with tempfile.TemporaryDirectory() as tmp:
           and est["source"][0] == "medido" and est["correction"] == 3.0,
           "XP: 3 Goblins a 10%% = 102, +306 na gravação seguinte = lista ×3 medida -> %s %s" % (f, est["source"]))
     check(xpmod.factor(rf.combat, {"xp_mode": "fixo", "xp_fixed": 200})[0] == 3.0, "XP: valor fixo +200% = ×3")
+    only_mvp = meter.ReplayFile(os.path.join(tmp, "a.rrf"), 15000, "mvp")
+    only_mvp.poll(max_bytes=1 << 30)
+    rows_mvp, _unk = xpmod.kills(only_mvp.combat)
+    check(not only_mvp.combat.encounters() and not [h for h in only_mvp.combat.hits if h.out]
+          and [(r["aid"], r["xp"], r["share"]) for r in rows_mvp] == [(r["aid"], r["xp"], r["share"]) for r in rows],
+          "XP: com 'Contar dano em: só MVPs e bonecos' o abate de monstro comum vale XP do mesmo jeito -> %d abates"
+          % len(rows_mvp))
+    rows, unknown = xpmod.kills(rf.combat)
     eta, left = xpmod.time_to_level(rf.combat, {"xp_mode": "fixo", "xp_fixed": 200}, 1000.0)
     check(left == 10 ** 9 - 1000 - 306 and abs(eta - left / 1000.0 * 60000) < 1,
           "XP: tempo até o próximo nível = XP que falta ÷ XP por minuto -> %s" % xpmod.span_text(eta))
@@ -971,6 +1104,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check(xpmod.calibrate(rc.combat, cfg, meter.xp_after) is None and len(cfg["xp_corr"]["7100"]["samples"]) == 1,
           "XP: gravação de 30 s não entra na calibração")
     rb = rrf.read_session(os.path.join(tmp, "b.rrf"))
+    scan_first = meter.xp_scan(tmp)
+    meter._XP_SCANS[os.path.normcase(tmp)].join(10)
+    check(meter.xp_scan(tmp) is True and meter.xp_scan("") is True and scan_first in (True, False)
+          and meter.xp_after_soon(a, s_a) == meter.xp_after(a, s_a),
+          "XP: as outras gravações da pasta são lidas num fio à parte; pronto, a consulta rápida dá o mesmo")
     before = xpmod.recordings_before(os.path.join(tmp, "b.rrf"), rb)
     check([os.path.basename(r["path"]) for r in before] == ["a.rrf"],
           "XP: comparar com a gravação anterior do mesmo personagem -> %s" % before)
@@ -1015,6 +1153,21 @@ cm = combat_of(fr.build(ME, [(0, fr.spawn(AQ, "mob", 21531, "Aquila", boss=True)
                              (3000, fr.broadcast("nS0XDg"))])[0])
 check(cm.overloads == [[0, 3000]], "Aquila: gravação que começa com a sobrecarga ligada conta desde o começo -> %s"
       % cm.overloads)
+# luta em que ele morreu: com 0,54%/s a curva zerava aos 34 s (40% + 15,1% - 40% - 16%), 6 s antes da morte. A
+# regeneração da luta é ajustada para a curva fechar no golpe que matou, e ela não encosta no zero antes
+ev_kill = [(0, fr.spawn(AQ, "mob", 21531, "Aquila", boss=True)), (50, fr.status(AQ, 1166, True, 0, 0, 50)),
+           (1000, fr.skill_damage(ME, AQ, 300000000)), (2000, fr.broadcast("ni0XDg")), (32000, fr.broadcast("nS0XDg")),
+           (33000, fr.skill_damage(ME, AQ, 200000000)), (34000, fr.skill_damage(ME, AQ, 80000000)),
+           (40000, fr.skill_damage(ME, AQ, 30000000)), (40000, fr.vanish(AQ, 1))]
+dk = tl.build(combat_of(fr.build(ME, ev_kill)[0]), AQ)
+before = [f for t, f in dk["hp"] if t < 40000]
+check(dk["killed"] and dk["hp"][-1] == (40000, 0.0) and min(before) >= tl.HP_FLOOR
+      and 0.0054 < dk["regen_fit"] < 0.0054 * tl.HP_FIT[1] and abs(before[-1] - 0.03) < 0.002,
+      "Aquila morto: a curva de HP fecha na morte (regeneração da luta %.3f%%/s) e fica acima de zero antes -> "
+      "%.1f%% antes do último golpe" % (dk["regen_fit"] * 100, before[-1] * 100))
+alive = tl.build(combat_of(fr.build(ME, ev_kill[:-2])[0]), AQ)
+check(not alive["killed"] and alive["regen_fit"] is None and min(f for _t, f in alive["hp"]) == tl.HP_FLOOR,
+      "Aquila vivo: sem ajuste (a regeneração do modelo), e a curva para no piso em vez de zerar")
 ba = sorted(ca.boss_alerts.values(), key=lambda b: b["t"])
 BAPHO = 52403
 ev4 = [(0, fr.spawn(BAPHO, "mob", 1039, "Baphomet", boss=True)), (500, fr.skill_damage(ME, BAPHO, 1000)),
@@ -1042,6 +1195,146 @@ cp = combat_of(fr.build(ME, ev3)[0])
 check(not cp.boss_alerts and not any(a[2] == "boss" for a in cp.alerts),
       "aviso de chefe: patrulha da Aeronave (1,9M de HP) e chefe menor trocando de propriedade não avisam -> %s" % (
           cp.boss_alerts,))
+
+
+def change_lanes(events, boss):
+    d = tl.build(combat_of(fr.build(ME, events)[0]), boss)
+    return {l["key"]: [(s, e, lab) for s, e, lab in l["items"]] for l in d["lanes"] if l["key"] in ("bossel", "bosssize")}
+
+
+# simulador de visuais: catálogo pelo texto do jogo, busca sem acento e looks guardados
+import visuals as vis  # noqa: E402
+vtbl = {5035: {"ClassNum": 120, "identifiedDescriptionName": {1: "Um chapéu.", 2: "^777777Equipa em:^000000 Topo"}},
+        2201: {"ClassNum": 12, "identifiedDescriptionName": {1: "Equipa em: Meio e baixo"}},
+        20504: {"ClassNum": 14, "identifiedDescriptionName": {1: "Tipo: Visual", 2: "Equipa em: Capa"}},
+        1201: {"ClassNum": 1, "identifiedDescriptionName": {1: "Equipa em: Arma"}},
+        607: {"identifiedDescriptionName": {1: "Equipa em: Topo"}},
+        9001: {"ClassNum": 999, "identifiedDescriptionName": {1: "Posição: Superior Peso: 0"}}}
+vslots = vis.slots_of(vtbl)
+vnames = {5035: "Chapéu de Poring", 2201: "Óculos Escuros", 20504: "[Visual] Asas de Cupido", 9001: "Sem Sprite"}
+vcat = vis.Catalog(vslots, {i: v["ClassNum"] for i, v in vtbl.items() if "ClassNum" in v}, {120: "a", 12: "b"},
+                   {14: "c"}, vnames.get)
+check(vslots == {5035: "t", 2201: "ml", 20504: "r", 9001: "t"}
+      and vcat.search("top", "chapeu PORING") == [("Chapéu de Poring", 5035, 120)]
+      and vcat.search("mid") == vcat.search("low") == [("Óculos Escuros", 2201, 12)]
+      and vcat.search("robe", "cupido") == [("[Visual] Asas de Cupido", 20504, 14)] and vcat.count("top") == 1
+      and vcat.name_of_view("top", 120) == "Chapéu de Poring" and vcat.name_of_view("top", 7) is None,
+      "visuais: posição pelo texto do item, só o que tem sprite no jogo, busca sem acento e sem maiúsculas -> %s"
+      % vslots)
+vlook = vis.clean({"job": 4302, "sex": 0, "hair": 0, "top": 120.0, "low": "x", "lixo": 5, "mid": True})
+check(vlook["job"] == 4302 and vlook["sex"] == 0 and vlook["hair"] == 1 and vlook["top"] == 120 and vlook["low"] == 0
+      and vlook["mid"] == 0 and "lixo" not in vlook
+      and vis.saved_looks({"looks": {"meu": {"job": 7}, "ruim": 5}}) == {"meu": dict(vis.DEFAULT_LOOK, job=7)},
+      "visuais: look guardado só com o que o programa conhece -> %s" % vlook)
+# efeitos de chapéu (.str): quadro-chave de base mais o de movimento vezes os quadros, texturas e cores
+import streffect as sfx  # noqa: E402
+key0 = dict(frame=0, type=0, pos=(320.0, 240.0), xy=(-8.0, 8.0, 8.0, -8.0, -8.0, -8.0, 8.0, 8.0), aniframe=0.0,
+            anitype=0, delay=0.0, angle=0.0, color=(255.0, 255.0, 255.0, 200.0), src=5, dst=7)
+key1 = dict(key0, type=1, pos=(1.0, -2.0), xy=(0.0,) * 8, angle=4.0, color=(0.0, 0.0, 0.0, -10.0), anitype=3,
+            delay=0.5)
+lay = dict(tex=["a.bmp", "b.bmp", "c.bmp"], keys=[key0, key1, dict(key0, frame=20)])
+st5 = sfx.state(lay, 5)
+check(st5["pos"] == (325.0, 230.0) and st5["angle"] == 20.0 and st5["color"][3] == 150.0 and st5["tex"] == 2
+      and sfx.state(lay, 19)["pos"] == (339.0, 202.0) and sfx.state(lay, 20) is None      # a última chave encerra
+      and sfx.state(dict(tex=[], keys=[]), 3) is None
+      and sfx._tex(float("nan"), 3) == 0 and sfx._tex(9.0, 3) == 2,
+      "efeitos: o estado da camada num quadro (posição, giro, cor e textura andam um tanto por quadro) -> %s"
+      % (st5["pos"], ))
+tga = bytes([0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 1, 0, 24, 0x20]) + bytes([10, 20, 30, 40, 50, 60])
+rle = bytes([0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 1, 0, 32, 0x20]) + bytes([0x81, 1, 2, 3, 4])
+check(sfx.tga_bgra(tga) == (2, 1, bytes([10, 20, 30, 255, 40, 50, 60, 255]))
+      and sfx.tga_bgra(rle) == (2, 1, bytes([1, 2, 3, 4, 1, 2, 3, 4]))
+      and sfx.glow(bytes([0, 0, 0, 255, 100, 200, 50, 255])) == bytes([0, 0, 0, 0, 127, 255, 63, 197])
+      and sfx.tint(bytes([200, 100, 50, 255]), (128, 255, 255, 64)) == bytes([200, 100, 25, 64]),
+      "efeitos: texturas .tga (cruas e comprimidas), o preto das de luz vira transparente e a cor do quadro entra")
+wl, wi, wh = dict(vis.DEFAULT_LOOK), {}, {}
+ch1 = vis.wear(wl, wi, wh, "mid", ("Andarilho", 900, 77), "tm")
+two = (wl["top"], wl["mid"], wi["top"], sorted(wh), wh["mid"])
+ch2 = vis.wear(wl, wi, wh, "mid", ("Óculos", 901, 5), "m")          # outro no meio: o de duas posições sai inteiro
+after = (wl["top"], wl["mid"], dict(wh))
+vis.wear(wl, wi, wh, "low", ("Triplo", 902, 9), "tml")
+three = (wl["top"], wl["mid"], wl["low"], sorted(wh))
+vis.wear(wl, wi, wh, "top", None)                                    # tirar de uma posição tira de todas
+vis.wear(wl, wi, wh, "robe", ("Capa", 903, 4), "r")
+check(two == (77, 0, 900, ["mid", "top"], (900, 77, "Andarilho")) and ch1 == {"top", "mid"}
+      and after == (0, 5, {}) and "top" in ch2 and three == (9, 0, 0, ["low", "mid", "top"])
+      and (wl["top"], wl["mid"], wl["low"], wl["robe"], wh) == (0, 0, 0, 4, {}) and vcat.letters == vslots,
+      "visuais: o visual de duas ou três posições ocupa todas e sai de todas junto -> %s %s %s" % (two, after, three))
+ON, OFF = (1, 2, 3, 255), (0, 0, 0, 0)
+check(vis.tiny_icon(24, 24, [OFF] * 576) and vis.tiny_icon(24, 24, [OFF] * 240 + [ON] * 13 + [OFF] * 323)
+      and not vis.tiny_icon(24, 24, [ON] * 576) and not vis.tiny_icon(10, 10, [ON] * 100)
+      and vis.tiny_icon(10, 10, [ON] * 80 + [OFF] * 20),
+      "visuais: ícone com a parte desenhada de até %d px num dos lados conta como minúsculo" % vis.TINY_ICON)
+vfx = vis.clean({"job": 1, "effects": ["a", 5, "b", "c", "d"]})
+check(vfx["effects"] == ["a", "b", "c"] and vis.clean({"effects": "x"})["effects"] == []
+      and vis.STONES[25058] == "ljosalfar" and vis.STONES[25138] == vis.SHRINK
+      and vis.STONES[25059] == "rl_banishing_buster" and sfx.NUDGE["ljosalfar"] == (5.5, -4.0),
+      "visuais: os efeitos do look são nomes (até %d) e as pedras conhecidas apontam para o efeito" % vis.MAX_EFFECTS)
+check(vis.fx_key("C_Snow_Powder") == vis.fx_key("HAT_EF_SNOW_POWDER") == "snowpowder"
+      and vis.fx_key("C_Romance_Rose_TW") == vis.fx_key("c_romance_rose_tw") and vis.fx_key(None) == ""
+      and vis.STONES[25225] == "red_wave" and vis.STONES[25136] == "blue_wave"
+      and vis.RESOURCE_FX["C홍염의폭렬파동"] == "red_wave" and set(sfx.EXTRA) == {"red_wave", "blue_wave"},
+      "visuais: o nome interno de um visual só de efeito casa com o do efeito; Raios Vermelhos e a Fúria dos Shuras "
+      "usam a onda vermelha, Raios Azuis a azul")
+check(vis.STONES[1002585] == "digital_space" and sfx.SPRITES["digital_space"][0] == "digital_space\\digital_space"
+      and sfx.SPRITES["digital_space"][2] is True and vis.fx_key("C_Digital_Space") == vis.fx_key("digital_space"),
+      "visuais: Espaço Digital (a pedra e o Holograma Futurista) é um sprite de efeito, atrás do personagem")
+if gdip.ready():
+    class _FakeGrf:
+        def __init__(self, files):
+            self.files = files
+
+        def read(self, name):
+            return self.files.get(name)
+
+    hfx = sfx.HatEffects.__new__(sfx.HatEffects)
+    hfx.grf = _FakeGrf({"x.spr": spr_bytes(2, 2, [1] * 4, {1: RED}), "x.act": act_bytes((0, -1), (0, -10))})
+    built = hfx._build(dict(name="x", sprite="x", ms=120.0, behind=True))
+    org = sprites.smooth_frames(body, body.act.frames(sprites.IDLE)[:1], with_origin=True)
+    check(built is not None and (built["w"], built["h"], built["cx"], built["cy"]) == (2, 2, 1, 2)
+          and len(built["frames"]) == 1 and built["ms"] == 120.0 and built["behind"] is True
+          and org is not None and org[3:] == (1, 2)
+          and hfx._build(dict(name="y", sprite="y", ms=1.0, behind=False)) is None,
+          "efeitos: o efeito de sprite sai com a origem do sprite nos pés do personagem -> %s"
+          % (built and (built["w"], built["h"], built["cx"], built["cy"]),))
+# chão da prévia: o .gnd do jogo (texturas, superfícies e a de cima de cada quadrado)
+import ground as gnd  # noqa: E402
+raw_gnd = (b"GRGN" + bytes([1, 7]) + struct.pack("<iifii", 2, 1, 10.0, 2, 8) + b"a.bmp\0\0\0" + b"b.bmp\0\0\0"
+           + struct.pack("<iiii", 1, 2, 2, 1) + bytes(16)
+           + struct.pack("<i", 1) + struct.pack("<8fhH4B", 0, .5, 0, .5, 0, 0, .5, .5, 1, 0, 255, 255, 255, 255)
+           + struct.pack("<4fiii", 0, 0, 0, 0, 0, -1, -1) + struct.pack("<4fiii", 0, 0, 0, 0, -1, -1, -1))
+pg = gnd.parse(raw_gnd)
+check(pg["w"] == 2 and pg["h"] == 1 and pg["textures"] == ["a.bmp", "b.bmp"] and pg["top"] == [0, -1]
+      and pg["tiles"] == [((0.0, 0.5, 0.0, 0.5), (0.0, 0.0, 0.5, 0.5), 1)]
+      and vis.STONES[25224] == vis.PALE and vis.STONES[25177] == vis.SHADOW,
+      "chão: o terreno do mapa (.gnd) é lido com as texturas, o recorte de cada quadrado e o que fica por cima")
+# Betelgeuse: a pontuação da dificuldade anunciada na sala; 925 = HP selado
+bet = [(0, fr.broadcast("gQdADQ", 925)), (4000, fr.spawn(60001, "mob", BETEL, "Betelgeuse", boss=2)),
+       (5000, fr.skill_damage(ME, 60001, 3000))]
+cbp = combat_of(fr.build(ME, bet)[0])
+hp925 = an.boss_hp(cbp, 60001, 3000, False)
+cb4 = combat_of(fr.build(ME, [(0, fr.broadcast("gQdADQ", 400))] + bet[1:])[0])
+check(cbp.boss_points == [(0, 925)] and an.boss_points(cbp, 60001) == 925 and hp925[0] == 500000000
+      and hp925[1] == "Selado" and an.boss_points(cb4, 60001) == 400 and an.boss_hp(cb4, 60001, 3000, False)[0] == 800000000,
+      "Betelgeuse: 925 pontos anunciados = HP selado (500M); 400 pontos não diz o HP (segue o nível de costume) -> %s"
+      % (hp925[:2],))
+# linha do tempo: faixas "Propriedade" e "Tamanho" do chefe só nas lutas em que ele troca
+ev5 = [(0, fr.spawn(AQ, "mob", 21531, "Aquila", boss=True)), (500, fr.skill_damage(ME, AQ, 1000)),
+       (2000, struct.pack("<HIBI", rrf.P_SPRITE, AQ, 0, 21588)),                           # sobrecarga
+       (6000, fr.skill_use(AQ, AQ, 168)), (6010, struct.pack("<HIBI", rrf.P_SPRITE, AQ, 0, 21531)),
+       (9000, fr.skill_damage(ME, AQ, 1000))]
+got = change_lanes(ev5, AQ)
+check(list(got) == ["bossel"] and [(s, lab) for s, _e, lab in got["bossel"]][1:] == [(2000, "Neutro 1"), (6010, "Sombrio")]
+      and got["bossel"][0][2] == "Neutro 3" and got["bossel"][0][1] == 2000,
+      "linha do tempo: propriedade do chefe por trecho; a troca junto com a volta da forma vale na forma nova -> %s"
+      % got)
+got = change_lanes(ev4 + [(4000, fr.skill_damage(ME, BAPHO, 1000))], BAPHO)
+check(list(got) == ["bosssize"] and [(s, lab) for s, _e, lab in got["bosssize"]][1:] == [(2000, "médio")]
+      and got["bosssize"][0][2] == "grande",
+      "linha do tempo: tamanho do chefe por trecho quando a forma nova tem outro tamanho -> %s" % got)
+check(change_lanes([(0, fr.spawn(AQ, "mob", 21531, "Aquila", boss=True)), (500, fr.skill_damage(ME, AQ, 1000)),
+                    (3000, fr.skill_damage(ME, AQ, 1000))], AQ) == {},
+      "linha do tempo: sem troca de propriedade nem de tamanho, nenhuma das duas faixas aparece")
 
 # --- subida de nível no meio da gravação: ponto exato, correção na hora e a XP do nível novo pela tabela ---
 check(xpmod.table_need(4302, 244) == 99691521069 and xpmod.table_need(4302, 248) == 220850071960
@@ -1451,6 +1744,69 @@ with tempfile.TemporaryDirectory() as tmp2:
     cfgl = {"xp_mode": "lista"}
     xpmod.calibrate(rfa.combat, cfgl, meter.xp_after)
     check("xp_bonuses" not in cfgl, "XP: no modo \"pela lista\" o programa não mexe no evento do servidor")
+# spotlight do mapa: a mesma gravação (111 pela lista), mas a seguinte mostra +133 = lista × 1,20
+for tag, gain in (("spot", 133), ("plain", 111)):
+    with tempfile.TemporaryDirectory() as tmp3:
+        for name, date, exp, events in (("a.rrf", (2026, 11, 5, 19, 35, 0), 1000, ev),
+                                        ("b.rrf", (2026, 11, 5, 19, 45, 40), 1000 + gain, [])):
+            with open(os.path.join(tmp3, name), "wb") as f:
+                f.write(fr.build(ME, events, date=date, xp=(7100, exp, 10 ** 9))[0])
+        rfs = meter.ReplayFile(os.path.join(tmp3, "a.rrf"))
+        rfs.poll(max_bytes=1 << 30)
+        here = xpmod.map_key(rfs.combat.map)
+        if tag == "spot":
+            cfgs = {}
+            corr = xpmod.calibrate(rfs.combat, cfgs, meter.xp_after)
+            ests = xpmod.estimate(rfs.combat, cfgs)
+            spot = (cfgs.get("xp_spot") or {}).get(here) or {}
+            check(spot.get("pct") == 20 and spot.get("auto") and "xp_bonuses" not in cfgs and abs(corr - 1.0) < 0.01
+                  and round(ests["xp"]) == 133 and cfgs["xp_corr"]["7100"]["samples"][0][4] == here,
+                  "XP automática: XP exata = lista × 1,20 marca o mapa como spotlight (e não mexe no evento do "
+                  "servidor) -> %s %s" % (cfgs.get("xp_spot"), corr))
+            lst = xpmod.estimate(rfs.combat, {"xp_mode": "lista", "xp_spot": {here.upper(): {"pct": 20}}})["xp"]
+            off = xpmod.estimate(rfs.combat, {"xp_mode": "lista", "xp_spot": {here: {"pct": 20}},
+                                              "xp_bonuses": {"spot": {"on": False, "pct": 20}}})["xp"]
+            other = xpmod.estimate(rfs.combat, {"xp_mode": "lista", "xp_spot": {"outro_mapa": {"pct": 20}}})["xp"]
+            check(abs(lst - 111 * 1.2) < 1e-6 and round(off) == 111 and round(other) == 111,
+                  "XP: o spotlight multiplica tudo, só no mapa marcado e só com o bônus ligado -> %s %s %s"
+                  % (lst, off, other))
+        else:
+            cfgu = {"xp_spot": {here: {"pct": 20, "when": "2026-11-01", "auto": True}}}
+            xpmod.calibrate(rfs.combat, cfgu, meter.xp_after)
+            cfgk = {"xp_spot": {here: {"pct": 20, "when": "2026-11-01", "auto": False}}}
+            xpmod.calibrate(rfs.combat, cfgk, meter.xp_after)
+            check(not cfgu.get("xp_spot") and here in cfgk["xp_spot"],
+                  "XP automática: mapa marcado pelo programa cuja XP exata já fecha sem o spotlight é desmarcado; o "
+                  "marcado à mão fica -> %s %s" % (cfgu.get("xp_spot"), cfgk.get("xp_spot")))
+# spotlight de +50% (mapas de nível mais baixo): com o evento do servidor em 50% a lista dá 166,5; +250 = x1,5
+with tempfile.TemporaryDirectory() as tmp5:
+    for name, date, exp, events in (("a.rrf", (2026, 11, 5, 19, 35, 0), 1000, ev),
+                                    ("b.rrf", (2026, 11, 5, 19, 45, 40), 1000 + 250, [])):
+        with open(os.path.join(tmp5, name), "wb") as f:
+            f.write(fr.build(ME, events, date=date, xp=(7100, exp, 10 ** 9))[0])
+    rf5 = meter.ReplayFile(os.path.join(tmp5, "a.rrf"))
+    rf5.poll(max_bytes=1 << 30)
+    here5 = xpmod.map_key(rf5.combat.map)
+    cfg5 = {"xp_bonuses": {"server": {"on": True, "pct": 50}}}
+    xpmod.calibrate(rf5.combat, cfg5, meter.xp_after)
+    cfg6 = {"xp_bonuses": {"server": {"on": True, "pct": 50}},
+            "xp_spot": {here5: {"pct": 20, "when": "2026-11-01", "auto": True}}}
+    xpmod.calibrate(rf5.combat, cfg6, meter.xp_after)
+    cfg7 = {"xp_bonuses": {"server": {"on": True, "pct": 50}},
+            "xp_spot": {here5: {"pct": 20, "when": "2026-11-01", "auto": False}}}
+    xpmod.calibrate(rf5.combat, cfg7, meter.xp_after)
+    custom = xpmod.estimate(rf5.combat, {"xp_mode": "lista", "xp_spot": {here5: {"pct": 75}}})["xp"]
+    check(cfg5["xp_spot"][here5]["pct"] == 50 and cfg5["xp_bonuses"]["server"]["pct"] == 50
+          and cfg6["xp_spot"][here5]["pct"] == 50 and cfg7["xp_spot"][here5]["pct"] == 20
+          and abs(custom - 111 * 1.75) < 1e-6 and 20.0 in xpmod.SPOT_CHOICES and 50.0 in xpmod.SPOT_CHOICES,
+          "XP automática: o spotlight de +50%% também é achado, o mapa marcado pelo programa troca de percentual, o "
+          "marcado à mão fica, e qualquer %% digitado vale -> %s %s %s" % (cfg5.get("xp_spot"), cfg6.get("xp_spot"),
+                                                                        cfg7.get("xp_spot")))
+old_s = {"xp_corr": {"7100": {"samples": [[2.0, 100, "2026-11-01 10:00", "x#0"], [1.0, 100, "2026-11-05 10:00", "y#0"]]}}}
+new_s = {"xp_corr": {"7100": {"samples": [[2.0, 100, "2026-11-03 10:00", "x#0"], [1.0, 100, "2026-11-05 10:00", "y#0"]]}}}
+check(xpmod.stored_correction(cq, old_s) == (1.0, 1) and xpmod.stored_correction(cq, new_s) == (1.5, 2),
+      "XP: a correção guardada usa só as medidas de até 3 dias antes da mais nova -> %s %s"
+      % (xpmod.stored_correction(cq, old_s), xpmod.stored_correction(cq, new_s)))
 xpmod.MAX_AGE_S = 24 * 3600
 
 # --- Milagre Solar, Lunar e Estelar (status 160 de 1 hora, sem ícone) e bônus dos itens ----------------

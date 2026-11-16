@@ -60,7 +60,8 @@ ELEMENT_PT = {"Neutral": _("Neutro"), "Water": _("Água"), "Earth": _("Terra"), 
 # Chefes que o rAthena não tem (conferido no Divine Pride)
 BOSS_ELEMENTS = {20994: ("Neutral", 2),           # Betelgeuse
                  21531: ("Neutral", 3), 21588: ("Neutral", 1),   # Aquila e a forma de sobrecarga
-                 20573: ("Dark", 3)}             # Fantasma de Amdarais
+                 20573: ("Dark", 3),             # Fantasma de Amdarais
+                 21533: ("Poison", 4)}           # Juncea de Simulação
 # Status que trocam o elemento da arma (encantamentos, conversores e poções de ataque elemental)
 ENDOWS = {90: "Fire", 91: "Water", 92: "Wind", 93: "Earth", 97: "Undead", 146: "Dark", 148: "Ghost", 17: "Holy",
           6: "Poison", 897: "Neutral", 898: "Water", 899: "Earth", 900: "Fire", 901: "Wind", 902: "Poison",

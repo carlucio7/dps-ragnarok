@@ -451,6 +451,15 @@ def broadcast_keys(d):
     return [k.decode("ascii") for k in _BROADCAST_KEY.findall(d[4:])]
 
 
+_BROADCAST_ARG = re.compile(rb"\x1c([A-Za-z0-9+/]{2,8})\x1d([^\x1c\x1d]{0,24})\x1c")
+
+
+def broadcast_args(d):
+    """[(chave, valor)] dos anúncios que levam um número ou texto dentro (\x1cCHAVE\x1dVALOR\x1c), como "A
+    dificuldade atual de Betelgeuse é de {0} pontos."."""
+    return [(k.decode("ascii"), v.decode("ascii", "replace")) for k, v in _BROADCAST_ARG.findall(d[4:])]
+
+
 SP_HP, SP_MAXHP = 5, 6
 SP_BASELEVEL = 11          # 0x00b0: nível de base (chega quando quem grava sobe de nível)
 

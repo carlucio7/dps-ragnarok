@@ -42,8 +42,8 @@ BUCKETS = [(1000, "1 s"), (2000, "2 s"), (5000, "5 s"), (10000, "10 s")]
 SESSION, LATEST = _("Sessão inteira"), _("Último encontro (acompanha)")
 ZOOMS = (0.8, 0.9, 1.0, 1.1, 1.25, 1.4, 1.6)
 # abas pelo nome (a configuração antiga guardava a posição, na ordem de OLD_TABS)
-TABS = ["resumo", "jogadores", "equip", "monstros", "drops", "xp", "linha", "buffs", "mortes", "testes", "dedo",
-        "cartoes"]
+TABS = ["resumo", "jogadores", "equip", "visuais", "monstros", "drops", "xp", "linha", "buffs", "mortes", "testes",
+        "dedo", "cartoes"]
 KEEP_LABELS = [("all", "em todos os personagens"), ("char", "só neste personagem"),
                ("session", "só até fechar o programa")]      # para quem valem os itens marcados (aviso de item)
 # ao vivo, a aba à vista é refeita com dados novos no máximo a cada LIVE_MIN_S, ou a cada LIVE_COST × o que levou
@@ -960,6 +960,8 @@ class AnalysisWindow:
         self.build_summary()
         self.build_players()
         self.build_equip()
+        import ui_visuals
+        self.visuals_tab = ui_visuals.VisualsTab(self, self.nb)
         self.build_monsters()
         self.build_drops()
         self.build_xp()
@@ -1131,6 +1133,7 @@ class AnalysisWindow:
                                   wraplength=150 * sc)
         self.eq_info.pack(fill="x", padx=10, pady=(6, 10))
         self.eq_dir, self.eq_frame, self.eq_after = 0, 0, None
+        self.eq_n = 1                 # quadros da animação à vista (o quadro dá a volta: as imagens se repetem)
         self.eq_look, self.eq_images, self.eq_loader_v = None, {}, -1
 
     def refresh_equip(self, c):
@@ -1221,8 +1224,11 @@ class AnalysisWindow:
             photo = tk.PhotoImage(master=self.top, data=sprites.png_b64(iw, ih, px), format="png")
             if sc > 1:
                 photo = photo.zoom(sc)
+            if len(self.eq_images) > 300:      # muitas poses e direções vistas: recomeça o cache
+                self.eq_images = {}
             img = self.eq_images[key] = (photo, ox * sc, oy * sc, delay, nframes, missing)
         photo, ox, oy, delay, nframes, missing = img
+        self.eq_n = max(1, nframes)
         fx, fy = W / 2, H - 22 * sc
         cv.create_oval(fx - 14 * sc, fy - 4 * sc, fx + 14 * sc, fy + 4 * sc, fill=_mix(col["tile"], "#000000", 0.35),
                        outline="")
@@ -1243,7 +1249,7 @@ class AnalysisWindow:
         self.eq_after = None
         if self.tab_name() != "equip":
             return
-        self.eq_frame += 1
+        self.eq_frame = (self.eq_frame + 1) % self.eq_n
         self.eq_draw()
 
     def eq_wait_loader(self):
@@ -1443,7 +1449,7 @@ class AnalysisWindow:
         mine_rows, other_rows, ground_rows = [], [], []
         for i, d in enumerate(drops):
             row = dict(key=i, t=d["t"], time=dur(d["t"]), name=meter.item_name(d["item"]), count=d["count"],
-                       mob=d["mob"] or "", where="%d, %d" % (d["x"], d["y"]), item=d["item"])
+                       mob=c.drop_mob(d) or "", where="%d, %d" % (d["x"], d["y"]), item=d["item"])
             if d["mine"]:
                 mine_rows.append(row)
             elif d["by"] is not None:
@@ -1762,6 +1768,12 @@ class AnalysisWindow:
             seen.grid(row=i, column=3, sticky="w", padx=(10, 0))
             self.xp_on[bdef["key"]], self.xp_pct[bdef["key"]], self.xp_seen[bdef["key"]] = var, pv, seen
             pv.trace_add("write", lambda *_a: self.xp_save_soon())     # o % digitado vale sem precisar de Enter
+            if bdef["key"] == "spot":                  # o % é o do mapa: o botão marca e desmarca os mapas
+                pv.set(_("auto"))
+                ent.grid_remove()
+                self.xp_spot_btn = ttk.Button(lst, text=_("Mapas ▾"), style="An.TButton", width=7,
+                                              command=self.xp_spot_menu)
+                self.xp_spot_btn.grid(row=i, column=1, columnspan=2, padx=(8, 2), sticky="w")
             if bdef["key"] in ("gear", "gear_event"):  # o % vem do texto dos itens vestidos
                 pv.set(_("auto"))
                 ent.configure(state="disabled", disabledbackground=c["tile"], disabledforeground=c["muted"])
@@ -1921,8 +1933,12 @@ class AnalysisWindow:
         if not self.xp_loaded:
             self.xp_load()
         f = self.app.watcher.file
-        if (f is not None and f.ready and f.combat is c and f.pos >= f.size and c.finished
-                and id(c) not in self.xp_calibrated):
+        # as outras gravações da pasta são lidas num fio à parte; enquanto isso a aba aparece sem a medida exata
+        scanned = meter.xp_scan(os.path.dirname(getattr(c, "path", None) or ""))
+        if not scanned and not getattr(self, "_xp_scan_wait", None):
+            self._xp_scan_wait = self.top.after(400, self.xp_scan_done)
+        if (scanned and xp.gear_ready() and f is not None and f.ready and f.combat is c and f.pos >= f.size
+                and c.finished and id(c) not in self.xp_calibrated):
             self.xp_calibrated.add(id(c))
             self.app.xp_calibrate(c)
         cfg = self.app.cfg
@@ -1977,8 +1993,10 @@ class AnalysisWindow:
         else:
             put("level", "%d" % ses.base_level if ses.base_level else "—",
                 dec("%.2f%%" % (100 * prog)) if prog is not None else "")
-        nxt = meter.xp_after(c.path, ses)
-        if nxt is None:
+        nxt = meter.xp_after(c.path, ses) if scanned else None
+        if not scanned:
+            put("real", "…", _("lendo as outras gravações"))
+        elif nxt is None:
             put("real", "—", _("sem gravação depois desta"))
         else:
             _y, mo, d, hh, mm, _ss = nxt["when"]
@@ -2006,6 +2024,14 @@ class AnalysisWindow:
                     if len(counted) < len(ev):
                         text += " " + _("(%d de %d itens)") % (len(counted), len(ev))
                 self.xp_event_btn.configure(state="normal" if ev else "disabled")
+            elif b["key"] == "spot":
+                spots = xp.spot_maps(cfg)
+                if seen.get("spot"):
+                    names = sorted({xp.map_key(m) for _s, _e, m in c.map_spans()} & set(spots))
+                    text = _("%s: +%g%% em %s da gravação") % (", ".join(names), max(spots[n] for n in names),
+                                                             dec("%.0f%%" % (100 * seen["spot"])))
+                else:
+                    text = _("%s não está marcado como spotlight (botão Mapas)") % xp.map_key(c.map or c.session.map)
             elif b["status"] is None:
                 text = _("marque se valia")
             elif b["key"] == "gear":
@@ -2076,6 +2102,53 @@ class AnalysisWindow:
         self.refresh_xp_compare(c)
         self.xp_sim.refresh(c, est)
 
+    def xp_spot_menu(self):
+        """Menu dos mapas em spotlight: o mapa desta gravação e os já marcados; marcado = os monstros de lá rendem
+        mais XP. O automático também marca e desmarca pela XP exata."""
+        c = self.combat()
+        spots = xp.spot_maps(self.app.cfg)
+        here = xp.map_key((c.map or c.session.map) if c is not None else "")
+        m = tk.Menu(self.top, tearoff=0)
+        self._spot_vars = []
+        for name in sorted(set(spots) | ({here} if here else set())):
+            # cada mapa: sem spotlight, um dos percentuais do jogo ou outro, digitado
+            cur = spots.get(name, 0.0)
+            var = tk.DoubleVar(self.top, cur)
+            self._spot_vars.append(var)
+            sub = tk.Menu(m, tearoff=0)
+            sub.add_radiobutton(label=_("sem spotlight"), variable=var, value=0.0,
+                                command=lambda n=name: self.xp_set_spot(n, 0))
+            for pct in sorted(set(xp.SPOT_CHOICES) | ({cur} if cur else set())):
+                sub.add_radiobutton(label="+%g%%" % pct, variable=var, value=pct,
+                                    command=lambda n=name, p=pct: self.xp_set_spot(n, p))
+            sub.add_command(label=_("Outro %…"), command=lambda n=name: self.xp_ask_spot(n))
+            m.add_cascade(label=(_("%s em spotlight (+%g%%)") % (name, cur)) if cur else name, menu=sub)
+        m.add_separator()
+        m.add_command(label=_("O programa marca o mapa sozinho quando a XP exata fecha com o spotlight."),
+                      state="disabled")
+        self._menu = m
+        b = self.xp_spot_btn
+        m.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
+
+    def xp_ask_spot(self, name):
+        pct = simpledialog.askfloat(_("Spotlight"), _("Quanto o spotlight de %s rende a mais (%%)?") % name,
+                                    parent=self.top, minvalue=1.0, maxvalue=1000.0)
+        if pct:
+            self.xp_set_spot(name, pct)
+
+    def xp_set_spot(self, name, pct):
+        """Marca o mapa como spotlight com esse % (0 = desmarca)."""
+        cfg = self.app.cfg
+        marked = dict(cfg.get("xp_spot") or {})
+        for k in [k for k in marked if xp.map_key(k) == name]:
+            del marked[k]
+        if pct:                                    # marcou: o spotlight passa a contar
+            marked[name] = dict(pct=float(pct), when=time.strftime("%Y-%m-%d"), auto=False)
+            self.xp_on["spot"].set(True)
+        cfg["xp_spot"] = marked
+        cfg["xp_corr"] = {}                        # as medidas guardadas eram sobre a lista antiga
+        self.xp_save()
+
     def xp_event_menu(self):
         """Menu com cada item de bônus "[Durante o Evento]": marcado = o evento daquele item ainda vale."""
         items = getattr(self, "xp_event_items", None) or {}
@@ -2106,9 +2179,19 @@ class AnalysisWindow:
             self.xp_on["gear_event"].set(True)
         self.xp_save()
 
+    def xp_scan_done(self):
+        """A leitura das outras gravações acabou? Refaz a aba; senão olha de novo daqui a pouco."""
+        self._xp_scan_wait = None
+        try:
+            if self.top.winfo_exists():
+                self.refresh(force=True)
+        except tk.TclError:
+            pass
+
     def refresh_xp_compare(self, c):
         """Aba "Comparar": esta gravação (ou recorte) contra outra do mesmo personagem."""
-        if self.xp_cmp_for != (getattr(c, "path", None), c.session.gid):
+        if (self.xp_cmp_for != (getattr(c, "path", None), c.session.gid)
+                and meter.xp_scan(os.path.dirname(getattr(c, "path", None) or ""))):
             self.xp_cmp_for = (getattr(c, "path", None), c.session.gid)
             self.xp_cmp_files = xp.recordings_before(getattr(c, "path", None), c.session)
             labels = []
@@ -2354,7 +2437,7 @@ class AnalysisWindow:
         c = self.combat()
         live = c is not None and c.active()
         sig = (id(c), c.version if c else None, self.scope_var.get(), self.group_var.get(),
-               len(self.app.tests.records))
+               len(self.app.tests.records), self.app.tests_waiting())
         now = time.monotonic()
         if sig == self.sig and not (live and now - self._last >= 1.0):
             return
@@ -2386,7 +2469,7 @@ class AnalysisWindow:
             self.mob_key = None
             self.colors = {}
         self.sig = (id(c), c.version if c else None, self.scope_var.get(), self.group_var.get(),
-                    len(self.app.tests.records))
+                    len(self.app.tests.records), self.app.tests_waiting())
         if self.mvp_var.get() != (self.app.cfg.get("targets") == "mvp"):
             self.mvp_var.set(self.app.cfg.get("targets") == "mvp")       # mudou pelo menu do widget
         self.update_scope_list(c)
@@ -2395,6 +2478,8 @@ class AnalysisWindow:
             self.refresh_tests()              # o histórico não depende do replay aberto
         elif tab == "cartoes":
             self.cards_tab.refresh()          # nem o gerenciador de cartões
+        elif tab == "visuais":
+            self.visuals_tab.refresh(c)       # nem o simulador de visuais (sem replay parte de um aprendiz)
         if c is None:
             self.title_lbl.configure(text=_("Análise"))
             self.status_lbl.configure(text=_("sem replay aberto — comece a gravar no jogo ou abra um replay salvo"))

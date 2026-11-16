@@ -23,6 +23,8 @@ HEAL = 28                     # Curar: o servidor manda curas de efeitos sem que
 # curas sem autor: status no curado -> skill que cura sozinha (Mediale Votum a cada 2 s, Talismã de Proteção a cada 3 s)
 HEAL_EFFECTS = ((1197, 5269), (1356, 5418))
 HP_STEP_MS = 1000             # sem golpes, a curva de HP ganha um ponto por segundo (a regeneração aparece)
+HP_FLOOR = 0.005              # chefe com modelo, vivo: a curva estimada não encosta no zero antes da morte
+HP_FIT = (0.5, 1.5)           # quanto a regeneração do modelo pode ser ajustada para a curva fechar na morte
 # faixas ligadas ao abrir (as outras aparecem desligadas na lista)
 DEFAULT_ON = {dd.DARK_CLAW, dd.FLORESCER, 1402, dd.MAX_PAIN}
 # cores das faixas (o resto usa a paleta dos jogadores)
@@ -34,6 +36,9 @@ EVENT_COLORS = {"boss": "#f97316", "reflect": "#ef4444", "claw": "#a78bfa", "str
 AREA_COLORS = {285: "#fb923c", 286: "#38bdf8", 287: "#bef264", 288: "#94a3b8", 405: "#e2e8f0", 2465: "#f87171",
                2466: "#60a5fa", 2467: "#a3e635", 2468: "#d6a38f"}
 AREA_OFF = {288}              # Proteger Terreno não muda o dano: fica na lista, desligado
+CHANGE_COLORS = {"bossel": "#f472b6", "bosssize": "#22d3ee"}
+FORM_JOIN_MS = 300            # Mudar Propriedade junto com a troca de forma: vale para a forma nova
+SIZE_PT = {"S": _("pequeno"), "M": _("médio"), "L": _("grande")}
 
 
 def fights(c, rng=None):
@@ -43,6 +48,54 @@ def fights(c, rng=None):
 
 def _lane(key, name, kind, color, on, items):
     return dict(key=key, name=name, kind=kind, color=color, on=on, items=items)
+
+
+def boss_change_lanes(c, x, t0, t1):
+    """Faixas "Propriedade" e "Tamanho" do chefe, só nas lutas em que ele troca: um trecho por valor, a começar
+    pelo que ele tinha antes da primeira troca. A propriedade muda com Mudar Propriedade e volta à da forma quando
+    ele troca de forma ou de fase (é outro monstro); o tamanho é o de cada forma."""
+    def element_of(job):
+        m = dd.BOSS_ELEMENTS.get(job)
+        if m is None:
+            row = dd.MOB_DB.get(str(job))
+            m = (row["e"], row["l"]) if row else None
+        return "%s %d" % (an.element_name(m[0]), m[1]) if m else _("original")
+
+    steps = []                                  # (t, ordem, propriedade ou None, tamanho ou None)
+    for p in x.phases:
+        e = c.entities.get(p["aid"])
+        job = e.job if e is not None else 0
+        steps.append((t0 if p is x.phases[0] else p["appear"], 0, element_of(job), SIZE_PT.get(meter.MOB_SIZE.get(job))))
+    forms = []
+    for aid in x.boss_aids:
+        for t, cls in c.sprite_log.get(aid, ()):
+            if t0 <= t <= t1:
+                steps.append((t, 1, element_of(cls), SIZE_PT.get(meter.MOB_SIZE.get(cls))))
+                forms.append(t)
+    changed = False
+    for b in c.boss_alerts.values():
+        if b.get("element") and b.get("aid") in x.boss_aids and t0 <= b["t"] <= t1:
+            # o Aquila troca de propriedade no instante em que volta da sobrecarga: a troca vale na forma nova
+            near = [t for t in forms if abs(t - b["t"]) <= FORM_JOIN_MS]
+            steps.append((max(near) if near else b["t"], 2, an.element_name(b["element"]), None))
+            changed = True
+    steps.sort(key=lambda s: s[:2])
+    lanes = []
+    for key, name, col, wanted in (("bossel", _("Propriedade"), 2, changed), ("bosssize", _("Tamanho"), 3, True)):
+        spans, cur, since = [], None, t0
+        for st in steps:
+            if st[col] is None or st[col] == cur:
+                continue
+            if cur is not None and st[0] > since:
+                spans.append((since, st[0], cur))
+            cur, since = st[col], max(t0, st[0])
+            if spans and spans[-1][2] == cur:   # voltou ao mesmo valor no mesmo instante: o trecho continua
+                since = spans.pop()[0]
+        if cur is not None and t1 > since:
+            spans.append((since, t1, cur))
+        if wanted and len(spans) > 1:           # só quando houve troca de verdade
+            lanes.append(_lane(key, name, "span", CHANGE_COLORS[key], True, spans))
+    return lanes
 
 
 def build(c, key, rng=None):
@@ -66,20 +119,40 @@ def build(c, key, rng=None):
     wins = an.regen_windows(c, x.boss_aids, model, x.start, x.end) if model else None
     hidden = an.hidden_losses(c, x.boss_aids, model, x.start, x.end) if model else []
 
-    def gained(a, b):                      # regeneração entre a e b (só dentro das janelas, se houver)
-        if wins is None:
-            return regen * (b - a) / 1000.0
-        return regen * sum(max(0, min(b, e2) - max(a, s2)) for s2, e2 in wins) / 1000.0
     steps = sorted([(t, d, 0.0) for t, _a, d in out] + [(t, 0, model["hidden"]) for t in hidden] + [(x.end, 0, 0.0)])
-    hp, frac, last = [(x.start, 1.0)], 1.0, x.start
-    for t, d, lost in steps:
-        while regen and t - last > HP_STEP_MS and frac < 1.0:
-            frac = min(1.0, frac + gained(last, last + HP_STEP_MS))
-            last += HP_STEP_MS
-            hp.append((last, frac))
-        frac = max(0.0, min(1.0, frac + gained(last, t)) - (d / x.hp if x.hp else 0.0) - lost) if x.hp else 1.0
-        last = t
-        hp.append((t, frac))
+
+    def curve(rate, floor=0.0):
+        """(pontos da curva, valor sem piso depois do último golpe) com a regeneração `rate` por segundo."""
+        def gained(a, b):                  # regeneração entre a e b (só dentro das janelas, se houver)
+            if wins is None:
+                return rate * (b - a) / 1000.0
+            return rate * sum(max(0, min(b, e2) - max(a, s2)) for s2, e2 in wins) / 1000.0
+        pts, frac, last, raw = [(x.start, 1.0)], 1.0, x.start, 1.0
+        for t, d, lost in steps:
+            while rate and t - last > HP_STEP_MS and frac < 1.0:
+                frac = min(1.0, frac + gained(last, last + HP_STEP_MS))
+                last += HP_STEP_MS
+                pts.append((last, frac))
+            if x.hp:
+                raw = min(1.0, frac + gained(last, t)) - d / x.hp - lost
+                frac = max(floor, raw)
+            last = t
+            pts.append((t, frac))
+        return pts, raw
+
+    fitted = None
+    if model and regen and x.killed and x.hp and out and not an.caught_midway(c, key):
+        # ele morreu no último golpe: a regeneração desta luta é a que faz a curva fechar ali (dentro de HP_FIT)
+        target = -0.5 * out[-1][2] / x.hp
+        lo, hi = HP_FIT[0] * regen, HP_FIT[1] * regen
+        for _i in range(30):
+            mid = (lo + hi) / 2.0
+            if curve(mid, -1e9)[1] < target:       # sem piso: o valor do fim só sobe com a regeneração
+                lo = mid
+            else:
+                hi = mid
+        fitted = (lo + hi) / 2.0
+    hp = curve(fitted if fitted is not None else regen, HP_FLOOR if model else 0.0)[0]
     if x.killed:
         hp.append((x.end, 0.0))
 
@@ -96,6 +169,8 @@ def build(c, key, rng=None):
                     for a, ef, s, e in c.statuses() if a in x.boss_aids and ef == RELIEVE and e >= t0 and s <= t1)
     if relief:
         lanes.insert(0, _lane("st%d" % RELIEVE, _("Alívio (redução de dano)"), "span", "#94a3b8", True, relief))
+    # propriedade e tamanho do chefe, nas lutas em que ele troca: logo abaixo do Alívio
+    lanes[1 if relief else 0:1 if relief else 0] = boss_change_lanes(c, x, t0, t1)
     # áreas no chão (Vulcão, Insígnias, Proteger Terreno, Prisão de Teia): uma faixa por skill, com os trechos em
     # que havia alguma no chão; cada começo e fim vai para a lista de eventos com quem pôs e o que a apagou
     area_spans, area_events = collections.defaultdict(list), []
@@ -238,7 +313,8 @@ def build(c, key, rng=None):
     events.sort(key=lambda e: e["t"])
 
     used = {e["lane"] for e in events}
-    for k, name, color in (("deaths", _("Mortes"), None),            # None: cor do texto do tema ("boss", _("Skills do chefe"), EVENT_COLORS["boss"]),
+    for k, name, color in (("deaths", _("Mortes"), None),            # None: cor do texto do tema
+                           ("boss", _("Skills do chefe"), EVENT_COLORS["boss"]),
                            ("reflect", _("Dano refletido"), EVENT_COLORS["reflect"]),
                            ("claw", _("Usos da %s") % meter.skill_name(5001), EVENT_COLORS["claw"]),
                            ("strong", _("Golpes fortes (≥ 0,5% do HP)"), EVENT_COLORS["strong"]),
@@ -269,6 +345,7 @@ def build(c, key, rng=None):
             order.append(a)
     return dict(key=key, name=c.target_name(key), t0=t0, t1=t1, start=x.start, end=x.end, killed=x.killed,
                 out=out, taken=taken, hp=hp, hp_known=True, hp_max=x.hp, hp_label=x.hp_label, lanes=lanes,
+                regen=regen, regen_fit=fitted,
                 events=events,
                 marks=sorted(marks), players=order, party=set(x.party), dmg=dmg,
                 names={a: c.name_of(a) for a in order}, starts=starts, phase_dmg=dd.phase_damage(x),

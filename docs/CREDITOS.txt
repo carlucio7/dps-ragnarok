@@ -6,6 +6,11 @@ Replay Master {VERSION} — créditos / credits / créditos
   https://github.com/adsonpleal/rrfparser
   https://github.com/adsonpleal/ragreplaystats
 
+- Qual efeito cada Pedra Gráfica liga (aba Visuais) / which effect each Graphic
+  Stone turns on / qué efecto activa cada Piedra Gráfica:
+  latamvisuais, de Adson Leal (licença MIT / MIT license).
+  https://github.com/adsonpleal/latamvisuais
+
 - Nomes de skills, classes, monstros, buffs e itens (cliente da LATAM) /
   skill, class, monster, buff and item names (LATAM client):
   extraídos pelo projeto ragreplaystats / extracted by ragreplaystats.
