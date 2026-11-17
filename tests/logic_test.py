@@ -1802,6 +1802,10 @@ with tempfile.TemporaryDirectory() as tmp5:
           "XP automática: o spotlight de +50%% também é achado, o mapa marcado pelo programa troca de percentual, o "
           "marcado à mão fica, e qualquer %% digitado vale -> %s %s %s" % (cfg5.get("xp_spot"), cfg6.get("xp_spot"),
                                                                         cfg7.get("xp_spot")))
+# monstros do Lago do Abismo 4 (abyss_04) com XP; sem nenhum monstro de XP conhecida a previsão diz isso
+check(all(xpmod.MOB_EXP.get(m) for m in range(20612, 20618)) and xpmod.MOB_EXP[20617][:2] == [207, 249407]
+      and xpmod.MOB_EXP[20773][1] == 252562 and xpmod.MOB_EXP[20604][1] == 179251 and xpmod.MOB_EXP[1085][1:] == [0, 0],
+      "XP: os monstros do Lago do Abismo 4 têm XP (não ficam em \"calculando\" para sempre)")
 # XP de cada nível da 3ª classe (Mestre Estelar 4239), a mesma que o jogo mandou no começo das gravações
 check(xpmod.table_need(4239, 163) == 132704283 and xpmod.table_need(4239, 180) == 371309911
       and xpmod.table_need(4239, 200) is None and xpmod.table_need(4302, 240) == 45000661693

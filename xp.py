@@ -1277,6 +1277,13 @@ def _farm_start(c):
     return max(rows[0]["t"], first * 60000)
 
 
+def no_known_xp(c):
+    """Há abates, mas nenhum que renda XP pela base do programa (monstros que ela ainda não tem, ou que não dão
+    XP): a previsão não tem como sair do "calculando"."""
+    rows, _unknown = kills(c)
+    return bool(rows) and not any(r["xp"] for r in rows)
+
+
 def warming_up(c, cfg):
     """True enquanto a previsão ainda não vale: menos de 10 min de farm e menos de 1% do nível ganho."""
     start = farm_start(c)

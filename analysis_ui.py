@@ -1960,7 +1960,9 @@ class AnalysisWindow:
             put("min", "—", _("recorte curto demais"))
             put("hour", "—", _("recorte curto demais"))
         eta, left = xp.time_to_level(c, cfg)          # pelo ritmo dos últimos minutos
-        if eta is None and xp.warming_up(c, cfg):
+        if eta is None and xp.no_known_xp(c):
+            put("eta", "—", _("nenhum abate com XP conhecida: os monstros deste mapa ainda não têm XP no programa"))
+        elif eta is None and xp.warming_up(c, cfg):
             put("eta", _("calculando…"), _("depois de 10 min de farm ou 1% do nível"))
         elif eta is None:
             put("eta", "—", _("sem ritmo de XP no recorte"))

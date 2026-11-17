@@ -279,6 +279,10 @@ CATALOG = {
     "Último golpe visível: %s": ("Last visible hit: %s", "Último golpe visible: %s"),
     "agora (estimado)": ("now (estimated)", "ahora (estimado)"),
     "calculando…": ("calculating…", "calculando…"),
+    "nenhum abate com XP conhecida": ("no kill with known XP", "ningún abate con XP conocida"),
+    "nenhum abate com XP conhecida: os monstros deste mapa ainda não têm XP no programa": (
+        "no kill with known XP: this map's monsters have no XP in the program yet",
+        "ningún abate con XP conocida: los monstruos de este mapa aún no tienen XP en el programa"),
     "10 min de farm ou 1%": ("10 min of farming or 1%", "10 min de farmeo o 1%"),
     "depois de 10 min de farm ou 1% do nível": ("after 10 min of farming or 1% of the level",
                                                 "después de 10 min de farmeo o 1% del nivel"),

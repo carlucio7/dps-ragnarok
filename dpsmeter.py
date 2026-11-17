@@ -2141,6 +2141,9 @@ class DpsApp:
                     right = _("pode ser menos: missões fora da conta")
                 rows.append(dict(label=_("Até o próximo nível"), value=xp.span_text(eta) if eta else _("já subiu"),
                                  right=right, frac=1.0, me=True, pin="xp_eta"))
+            elif xp.no_known_xp(cb):
+                rows.append(dict(label=_("Até o próximo nível"), value="—",
+                                 right=_("nenhum abate com XP conhecida"), frac=1.0, me=True, pin="xp_eta"))
             elif xp.warming_up(cb, self.cfg):
                 rows.append(dict(label=_("Até o próximo nível"), value=_("calculando…"),
                                  right=_("10 min de farm ou 1%"), frac=1.0, me=True, pin="xp_eta"))

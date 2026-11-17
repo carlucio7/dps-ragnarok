@@ -2,6 +2,13 @@
 
 Português · [English](#english) · [Español](#español)
 
+## 1.9.1
+
+Correção na previsão de nível e monstros novos na estimativa de XP.
+
+- XP: os monstros de mapas novos entram na estimativa: Lago do Abismo 4, Torre de Thanatos (andares novos), Templo de Odin (passado), Ilusão do Labirinto e outros. A previsão de nível não fica mais presa em "calculando".
+- Quando os monstros do mapa ainda não têm XP no programa, o widget avisa em vez de ficar calculando.
+
 ## 1.9.0
 
 Som e temporizador em cada efeito acompanhado, e o % do nível continua depois de upar.
@@ -221,6 +228,13 @@ Primeira versão pública.
 
 ## English
 
+### 1.9.1
+
+Fix in the level forecast and new monsters in the XP estimate.
+
+- XP: monsters from new maps count in the estimate: Abyss Lake 4, Thanatos Tower (new floors), Odin Temple (past), Labyrinth Illusion and more. The level forecast no longer gets stuck on "calculating".
+- When the map's monsters have no XP in the program yet, the widget says so instead of calculating forever.
+
 ### 1.9.0
 
 Sound and timer on each tracked effect, and the level % keeps going after a level-up.
@@ -439,6 +453,13 @@ First public version.
 ---
 
 ## Español
+
+### 1.9.1
+
+Corrección en la previsión de nivel y monstruos nuevos en la estimación de XP.
+
+- XP: los monstruos de mapas nuevos entran en la estimación: Lago del Abismo 4, Torre de Thanatos (pisos nuevos), Templo de Odín (pasado), Ilusión del Laberinto y otros. La previsión de nivel ya no se queda en "calculando".
+- Cuando los monstruos del mapa aún no tienen XP en el programa, el widget lo avisa en vez de quedarse calculando.
 
 ### 1.9.0
 
