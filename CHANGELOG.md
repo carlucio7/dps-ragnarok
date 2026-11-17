@@ -2,6 +2,17 @@
 
 Português · [English](#english) · [Español](#español)
 
+## 1.9.0
+
+Som e temporizador em cada efeito acompanhado, e o % do nível continua depois de upar.
+
+- Efeitos acompanhados: cada um tem o próprio som, que toca ao começar, ao acabar ou alguns segundos antes de acabar.
+- 17 sons, cada um em 4 tons, para reconhecer de ouvido qual efeito avisou.
+- Temporizador: escolha a duração do contador de cada efeito, também nos efeitos de que o jogo não manda a duração.
+- Aba Cartões: as opções do efeito escolhido ficam juntas, abaixo da lista Acompanhando.
+- XP: o % do nível e o tempo até o próximo nível continuam depois de subir de nível em todas as classes, não só na 4ª classe.
+- XP: os monstros da Ilusão do Labirinto entram na estimativa.
+
 ## 1.8.0
 
 Simulador de visuais, trocas de propriedade e tamanho do chefe na Linha do tempo e o spotlight do mapa na XP.
@@ -210,6 +221,17 @@ Primeira versão pública.
 
 ## English
 
+### 1.9.0
+
+Sound and timer on each tracked effect, and the level % keeps going after a level-up.
+
+- Tracked effects: each one has its own sound, played when it starts, when it ends or a few seconds before it ends.
+- 17 sounds, each in 4 tones, so you can tell by ear which effect warned you.
+- Timer: pick how long each effect's countdown runs, also for effects the game sends no duration for.
+- Cards tab: the options of the chosen effect sit together, under the Tracking list.
+- XP: the level % and the time to the next level keep going after a level-up on every class, not only 4th classes.
+- XP: the Labyrinth Illusion monsters count in the estimate.
+
 ### 1.8.0
 
 Costume simulator, the boss's property and size changes on the Timeline, and the map spotlight in XP.
@@ -417,6 +439,17 @@ First public version.
 ---
 
 ## Español
+
+### 1.9.0
+
+Sonido y temporizador en cada efecto seguido, y el % del nivel sigue después de subir de nivel.
+
+- Efectos seguidos: cada uno tiene su propio sonido, que suena al empezar, al terminar o unos segundos antes de terminar.
+- 17 sonidos, cada uno en 4 tonos, para reconocer de oído qué efecto avisó.
+- Temporizador: elige la duración del contador de cada efecto, también en los efectos de los que el juego no envía la duración.
+- Pestaña Tarjetas: las opciones del efecto elegido quedan juntas, debajo de la lista Siguiendo.
+- XP: el % del nivel y el tiempo hasta el próximo nivel siguen después de subir de nivel en todas las clases, no solo en las 4ª clases.
+- XP: los monstruos de la Ilusión del Laberinto entran en la estimación.
 
 ### 1.8.0
 

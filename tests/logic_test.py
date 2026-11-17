@@ -1802,6 +1802,11 @@ with tempfile.TemporaryDirectory() as tmp5:
           "XP automática: o spotlight de +50%% também é achado, o mapa marcado pelo programa troca de percentual, o "
           "marcado à mão fica, e qualquer %% digitado vale -> %s %s %s" % (cfg5.get("xp_spot"), cfg6.get("xp_spot"),
                                                                         cfg7.get("xp_spot")))
+# XP de cada nível da 3ª classe (Mestre Estelar 4239), a mesma que o jogo mandou no começo das gravações
+check(xpmod.table_need(4239, 163) == 132704283 and xpmod.table_need(4239, 180) == 371309911
+      and xpmod.table_need(4239, 200) is None and xpmod.table_need(4302, 240) == 45000661693
+      and xpmod.table_need(4302, 248) == 220850071960 and xpmod.table_need(999999, 100) is None,
+      "XP: a XP do nível vem da tabela também fora da 4ª classe (o %% e o tempo até o nível seguem depois de upar)")
 old_s = {"xp_corr": {"7100": {"samples": [[2.0, 100, "2026-11-01 10:00", "x#0"], [1.0, 100, "2026-11-05 10:00", "y#0"]]}}}
 new_s = {"xp_corr": {"7100": {"samples": [[2.0, 100, "2026-11-03 10:00", "x#0"], [1.0, 100, "2026-11-05 10:00", "y#0"]]}}}
 check(xpmod.stored_correction(cq, old_s) == (1.0, 1) and xpmod.stored_correction(cq, new_s) == (1.5, 2),
@@ -2096,7 +2101,9 @@ check(rep["total"] == 30000 and rep["hits"] == 1 and rep["victims"] == 1 and rep
 # cartões: o contador da Garra Sombria no chefe com o tempo que falta, e as chaves dos cartões do programa
 cfg17 = {}
 check(cardmod.track(cfg17, "status", 730) and cardmod.is_tracked(cfg17, "status", 730)
-      and cardmod.tracked(cfg17) == [dict(kind="status", id=730, where="target", show="counter")]
+      and cardmod.tracked(cfg17) == [dict(kind="status", id=730, where="target", show="counter", sound=None,
+                                          before=cardmod.DEFAULT_BEFORE, snd="sino", tone=cardmod.DEFAULT_TONE,
+                                          secs=0)]
       and any(r["id"] == 730 and r["group"] == "Debuff no alvo" for r in cardmod.search("garra")),
       "cartões: a busca acha a Garra Sombria e ela entra na lista olhando o alvo -> %s" % cfg17)
 live = cardmod.live(c17, cardmod.tracked(cfg17))
@@ -2115,6 +2122,41 @@ watch.update(live, 100.0)
 shown, ended = watch.update([], 101.0)
 check(len(ended) == 1 and shown[0]["ended"] == 0.0 and cardmod.time_text(shown[0]) == "acabou"
       and watch.update([], 105.0) == ([], []), "cartões: quando o efeito acaba o contador pisca e some")
+# som de cada efeito e temporizador escolhido
+cfg18 = {}
+cardmod.track(cfg18, "status", 730, sound="before", before=5, tone="grave", secs=30, snd="sonar")
+cardmod.track(cfg18, "status", 1142, sound="start")
+cardmod.track(cfg18, "status", 730, show="card")                       # mudar outra coisa não perde o som
+t18 = cardmod.tracked(cfg18)
+live18 = cardmod.live(c17, t18)
+garra = next(r for r in live18 if r["key"] == "status:730")
+check(t18[0]["sound"] == "before" and t18[0]["before"] == 5 and t18[0]["tone"] == "grave" and t18[0]["secs"] == 30
+      and t18[0]["show"] == "card" and garra["total"] == 30000 and garra["left"] == 30000 - (c17.now - 11000)
+      and cardmod.sound_text(cfg18, t18[0]) == "5 s antes de acabar" and cardmod.timer_text(t18[0]) == "30 s"
+      and cardmod.timer_text(dict(secs=90)) == "1:30" and cardmod.timer_text(dict(secs=0)) == "do jogo"
+      and cardmod.sound_of({"tracker_sound": True}, dict(sound=None)) == "end"
+      and cardmod.sound_of({}, dict(sound=None)) == "off",
+      "cartões: cada efeito guarda o som e o temporizador; o temporizador vale no lugar da duração do jogo -> %s"
+      % t18)
+w18, prev18 = cardmod.Watch(), {}
+row = lambda left: [dict(key="status:730", left=left)]                 # noqa: E731
+w18.update(row(9000), 0.0)
+first = cardmod.sounds(cfg18, t18, w18, [], prev18)                     # já estava ativo ao abrir: nada
+w18.update(row(6000), 1.0)
+above = cardmod.sounds(cfg18, t18, w18, [], prev18)
+w18.update(row(4000), 2.0)
+cross = cardmod.sounds(cfg18, t18, w18, [], prev18)
+w18.update(row(3000), 3.0)
+again = cardmod.sounds(cfg18, t18, w18, [], prev18)
+_shown, gone = w18.update([dict(key="status:1142", left=None)], 4.0)
+start = cardmod.sounds(cfg18, t18, w18, gone, prev18)
+import sounds as sndmod  # noqa: E402
+waves = [sndmod.wav(k, "agudo", 40) for k in sndmod.KEYS]
+check(first == [] and above == [] and cross == [("sonar", "grave")] and again == []
+      and start == [("sino", cardmod.DEFAULT_TONE)] and len(sndmod.KEYS) >= 16
+      and all(w[:4] == b"RIFF" and len(w) > 2000 for w in waves) and sndmod.wav("nada")[:4] == b"RIFF",
+      "cartões: o som toca uma vez ao cruzar \"5 s antes de acabar\", e ao começar no efeito que pediu -> %s"
+      % [first, above, cross, again, start])
 cfg17 = {"alert_boss": True}
 cardmod.set_enabled(cfg17, "maxpain", False)
 one = cardmod.enabled(cfg17, "maxpain"), cardmod.enabled(cfg17, "boss_size")

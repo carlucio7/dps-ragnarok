@@ -31,6 +31,7 @@ import itemping
 import sprites
 import meter
 import quests
+import sounds
 import testes
 import xp
 from analysis_ui import AnalysisWindow
@@ -333,6 +334,12 @@ def play_ping(volume=40, tone=None):
     play_wav(lambda v: itemping.wav(v, tone), volume)
 
 
+def play_sound(voice, volume=40):
+    """Toca um dos sons dos efeitos acompanhados: voice = (som, tom)."""
+    snd, tone = voice
+    play_wav(lambda v: sounds.wav(snd, tone, v), volume)
+
+
 def round_rect_pts(x1, y1, x2, y2, r):
     r = max(0.0, min(r, (x2 - x1) / 2, (y2 - y1) / 2))
     return [x1 + r, y1, x1 + r, y1, x2 - r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y1 + r,
@@ -453,6 +460,8 @@ class DpsApp:
         self.ping_session = None      # itens marcados só até fechar o programa (ping_keep "session")
         self.watch = cards.Watch()    # efeitos acompanhados: o que estava ativo na leitura anterior
         self.watch_for = None
+        self.fx_left = {}             # efeitos acompanhados: quanto faltava na leitura anterior (som "antes de acabar")
+        self.fx_sound_at = 0.0
         self.tracker_rows = []        # contadores a desenhar no pé das linhas
         self.pinned_fx = {}           # contadores dos efeitos fixados na faixa fixa: chave -> linha
         self.fx_cards = []            # efeitos ativos que a pessoa escolheu ver como cartão
@@ -836,13 +845,21 @@ class DpsApp:
                     self.tracker_rows, self.pinned_fx, self.fx_cards = [], {}, []
                     self.dirty = True
                 self.watch.reset()
+                self.fx_left = {}
                 return
             if c is not self.watch_for:
                 self.watch.reset()
+                self.fx_left = {}
                 self.watch_for = c
             rows, ended = self.watch.update(cards.live(c, trackers), now, self.cfg.get("tracker_flash", True))
-            if ended and self.cfg.get("tracker_sound"):
-                play_beep(self.cfg.get("tracker_volume", 40))
+            # o som de cada efeito: ao começar, ao acabar ou alguns segundos antes (um por vez, sem embolar)
+            tones = cards.sounds(self.cfg, trackers, self.watch, ended, self.fx_left)
+            if tones and now - self.fx_sound_at >= cards.SOUND_GAP_S:
+                self.fx_sound_at = now
+                if tones[0] is None:
+                    play_beep(self.cfg.get("tracker_volume", 40))
+                else:
+                    play_sound(tones[0], self.cfg.get("tracker_volume", 40))
             if rows or self.tracker_rows or self.pinned_fx or self.fx_cards:
                 self.dirty = True                 # o contador anda a cada leitura
             # cada efeito aparece como a pessoa escolheu: fixado na faixa fixa (à vista mesmo com um cartão),
@@ -995,10 +1012,90 @@ class DpsApp:
                 sm.add_radiobutton(label=label, variable=var, value=mode,
                                    command=lambda mode=mode: self.set_fx_show(kind, int(ident), mode))
             m.add_cascade(label=_("Mostrar %s como") % cards.short_name(row["name"]), menu=sm)
+            t = self.fx_tracker(kind, int(ident))
+            if t is not None:
+                m.add_cascade(label=_("Som: %s") % cards.sound_text(self.cfg, t), menu=self.fx_sound_menu(m, t))
+                m.add_cascade(label=_("Temporizador: %s") % cards.timer_text(t), menu=self.fx_timer_menu(m, t))
             m.add_command(label=_("Parar de acompanhar %s") % row["name"],
                           command=lambda: self.untrack(kind, int(ident)))
         m.add_command(label=_("Cartões e efeitos acompanhados…"), command=lambda: self.open_analysis("cartoes"))
         return m
+
+    def fx_tracker(self, kind, ident):
+        """A entrada da lista dos acompanhados de um efeito (com o som e o temporizador), ou None."""
+        e = cards.entry(kind, ident)
+        ids = set(e["ids"]) if e else {ident}
+        return next((t for t in cards.tracked(self.cfg) if t["kind"] == kind and t["id"] in ids), None)
+
+    def set_fx_option(self, kind, ident, play=False, **opts):
+        """Troca o som ou o temporizador de um efeito acompanhado (opts: sound, before, tone, secs)."""
+        if cards.track(self.cfg, kind, ident, on=True, **opts):
+            self.save()
+        self.dirty = True
+        if play:
+            t = self.fx_tracker(kind, ident)
+            if t is not None:
+                play_sound(cards.voice(t), self.cfg.get("tracker_volume", 40))
+        if self.analysis is not None:
+            self.analysis.refresh(force=True)
+
+    def fx_sound_menu(self, parent, t):
+        """Submenu do som de um efeito: quando toca, quantos segundos antes e o tom."""
+        kind, ident = t["kind"], t["id"]
+        sm = self.new_menu(parent)
+        var = self.keep(tk.StringVar(self.root, t["sound"] or ""))
+        sm.add_radiobutton(label=_("Padrão da aba Cartões (%s)") % (
+            _("ao acabar") if self.cfg.get("tracker_sound") else _("sem som")), variable=var, value="",
+            command=lambda: self.set_fx_option(kind, ident, sound=None))
+        for mode in cards.SOUNDS:
+            label = (_("%d s antes de acabar") % t["before"]) if mode == "before" else _(cards.SOUND_TEXT[mode])
+            sm.add_radiobutton(label=label, variable=var, value=mode,
+                               command=lambda mode=mode: self.set_fx_option(kind, ident, sound=mode,
+                                                                            play=mode != "off"))
+        sm.add_separator()
+        bm = self.new_menu(sm)
+        bvar = self.keep(tk.IntVar(self.root, t["before"]))
+        for s in cards.BEFORE_CHOICES:
+            bm.add_radiobutton(label="%d s" % s, variable=bvar, value=s,
+                               command=lambda s=s: self.set_fx_option(kind, ident, sound="before", before=s))
+        sm.add_cascade(label=_("Quantos segundos antes"), menu=bm)
+        km = self.new_menu(sm)
+        kvar = self.keep(tk.StringVar(self.root, t["snd"]))
+        for key in sounds.KEYS:
+            km.add_radiobutton(label=_(sounds.NAMES[key]), variable=kvar, value=key,
+                               command=lambda key=key: self.set_fx_option(kind, ident, snd=key, play=True))
+        sm.add_cascade(label=_("Qual som: %s") % _(sounds.NAMES[t["snd"]]), menu=km)
+        tm = self.new_menu(sm)
+        tvar = self.keep(tk.StringVar(self.root, t["tone"]))
+        for tone, hz in itemping.TONES:
+            tm.add_radiobutton(label="%s (%d Hz)" % (_(TONE_NAMES[tone]), hz), variable=tvar, value=tone,
+                               command=lambda tone=tone: self.set_fx_option(kind, ident, tone=tone, play=True))
+        sm.add_cascade(label=_("Tom"), menu=tm)
+        return sm
+
+    def fx_timer_menu(self, parent, t):
+        """Submenu do temporizador de um efeito: a duração do jogo ou uma escolhida."""
+        kind, ident = t["kind"], t["id"]
+        tm = self.new_menu(parent)
+        var = self.keep(tk.IntVar(self.root, t["secs"]))
+        tm.add_radiobutton(label=_("A duração que o jogo manda"), variable=var, value=0,
+                           command=lambda: self.set_fx_option(kind, ident, secs=0))
+        choices = sorted(set(cards.TIMER_CHOICES) | ({t["secs"]} if t["secs"] else set()))
+        for s in choices:
+            tm.add_radiobutton(label=cards.timer_text(dict(secs=s)), variable=var, value=s,
+                               command=lambda s=s: self.set_fx_option(kind, ident, secs=s))
+        tm.add_command(label=_("Outro…"), command=lambda: self.ask_fx_timer(kind, ident))
+        return tm
+
+    def ask_fx_timer(self, kind, ident):
+        from tkinter import simpledialog
+        t = self.fx_tracker(kind, ident)
+        secs = simpledialog.askinteger(_("Temporizador"), _("Quantos segundos o contador de %s conta?")
+                                       % cards.short_name(cards.name_of(t)) if t else "",
+                                       parent=self.root, minvalue=1, maxvalue=cards.MAX_TIMER_S,
+                                       initialvalue=(t or {}).get("secs") or 20)
+        if secs:
+            self.set_fx_option(kind, ident, secs=secs)
 
     def fx_pin_key(self, kind, ident):
         e = cards.entry(kind, ident)

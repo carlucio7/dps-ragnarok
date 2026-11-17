@@ -16,6 +16,7 @@ import clientdata
 import i18n
 import itemping
 import meter
+import sounds as sndlib
 from i18n import _
 
 # cartões do programa: (chave, nome, o que é, chave da configuração que liga/desliga ou None = lista cards_off)
@@ -50,6 +51,16 @@ SHOWS = ("counter", "pin", "card")
 SHOW_TEXT = {"counter": "contador", "pin": "faixa fixa", "card": "cartão"}
 DEFAULT_ROWS = 4
 MAX_TRACKED = 30
+# som de cada efeito acompanhado: quando toca. None = o padrão da aba ("Som quando acabar")
+SOUNDS = ("off", "start", "end", "before")
+SOUND_TEXT = {"off": "sem som", "start": "ao começar", "end": "ao acabar", "before": "antes de acabar"}
+BEFORE_CHOICES = (1, 2, 3, 5, 10, 15, 30)       # "antes de acabar": quantos segundos antes
+DEFAULT_BEFORE = 3
+DEFAULT_TONE = "agudo"                          # os tons são os do aviso de item (itemping.TONES)
+# temporizador: a duração que a pessoa escolhe (s); 0 = a do jogo
+TIMER_CHOICES = (5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 300, 600)
+MAX_TIMER_S = 3600
+SOUND_GAP_S = 0.6             # dois sons seguidos ficam pelo menos isso separados (vários efeitos ao mesmo tempo)
 
 
 # ------------------------------------------------------------------ cartões do programa
@@ -178,10 +189,21 @@ def default_where(kind, ident):
     return "target" if kind == "status" and ident in meter.MOB_DEBUFFS else ("any" if kind == "area" else "me")
 
 
+def _int(v, lo, hi, default):
+    try:
+        v = int(v)
+    except (TypeError, ValueError):
+        return default
+    return v if lo <= v <= hi else default
+
+
 def tracked(cfg):
-    """Os efeitos acompanhados: [dict(kind, id, where, show)], só os válidos. `show`: "counter" (contador no pé
-    das linhas) ou "card" (cartão enquanto durar); o fixado na faixa fixa é outra lista (os fixados do widget)."""
+    """Os efeitos acompanhados: [dict(kind, id, where, show, sound, before, snd, tone, secs)], só os válidos.
+    `show`: "counter" (contador no pé das linhas) ou "card" (cartão enquanto durar); o fixado na faixa fixa é outra
+    lista (os fixados do widget). `sound`: quando tocar (SOUNDS) ou None = o padrão da aba; `before`: segundos antes
+    de acabar; `snd`: qual som (sounds.KEYS); `tone`: o tom; `secs`: o temporizador escolhido (0 = a do jogo)."""
     out, seen = [], set()
+    tones = {name for name, _hz in itemping.TONES}
     for t in cfg.get("trackers") or []:
         try:
             kind, ident = t["kind"], int(t["id"])
@@ -191,8 +213,36 @@ def tracked(cfg):
             continue
         seen.add((kind, ident))
         where = t.get("where") if t.get("where") in ("me", "target", "any") else default_where(kind, ident)
-        out.append(dict(kind=kind, id=ident, where=where, show="card" if t.get("show") == "card" else "counter"))
+        out.append(dict(kind=kind, id=ident, where=where, show="card" if t.get("show") == "card" else "counter",
+                        sound=t.get("sound") if t.get("sound") in SOUNDS else None,
+                        before=_int(t.get("before"), 1, 600, DEFAULT_BEFORE),
+                        snd=t.get("snd") if t.get("snd") in sndlib.KEYS else sndlib.DEFAULT,
+                        tone=t.get("tone") if t.get("tone") in tones else DEFAULT_TONE,
+                        secs=_int(t.get("secs"), 0, MAX_TIMER_S, 0)))
     return out[:MAX_TRACKED]
+
+
+def sound_of(cfg, t):
+    """Quando o efeito toca som: o escolhido nele ou, sem escolha, o padrão da aba ("Som quando acabar")."""
+    if t.get("sound"):
+        return t["sound"]
+    return "end" if cfg.get("tracker_sound") else "off"
+
+
+def sound_text(cfg, t):
+    """O som do efeito em palavras: "ao acabar", "3 s antes de acabar", "sem som"."""
+    mode = sound_of(cfg, t)
+    if mode == "before":
+        return _("%d s antes de acabar") % t["before"]
+    return _(SOUND_TEXT[mode])
+
+
+def timer_text(t):
+    """O temporizador em palavras: "do jogo", "20 s", "1:30"."""
+    s = t.get("secs") or 0
+    if not s:
+        return _("do jogo")
+    return "%d s" % s if s < 60 else ("%d:%02d" % divmod(s, 60))
 
 
 def is_tracked(cfg, kind, ident):
@@ -201,21 +251,31 @@ def is_tracked(cfg, kind, ident):
     return any(t["kind"] == kind and t["id"] in ids for t in tracked(cfg))
 
 
-def track(cfg, kind, ident, on=True, where=None, show=None):
-    """Põe ou tira um efeito da lista (ou troca onde olhar / como aparece de um que já está, sem tirá-lo do
-    lugar). Devolve True se mudou."""
+_KEEP = object()
+
+
+def track(cfg, kind, ident, on=True, where=None, show=None, sound=_KEEP, before=None, tone=None, secs=None,
+          snd=None):
+    """Põe ou tira um efeito da lista (ou troca onde olhar / como aparece / o som / o temporizador de um que já
+    está, sem tirá-lo do lugar). `sound` None volta ao padrão da aba. Devolve True se mudou."""
     e = entry(kind, ident)
     ids = set(e["ids"]) if e else {ident}
     cur = tracked(cfg)
     same = lambda t: t["kind"] == kind and t["id"] in ids          # noqa: E731
-    old = next((t for t in cur if same(t)), None)
+    old = next((t for t in cur if same(t)), None) or {}
     if not on:
         new = [t for t in cur if not same(t)]
     else:
         item = dict(kind=kind, id=(e["id"] if e else ident),
-                    where=where or (old or {}).get("where") or default_where(kind, ident),
-                    show=show if show in ("counter", "card") else (old or {}).get("show", "counter"))
-        new = [item if same(t) else t for t in cur] if old is not None else cur + [item]
+                    where=where or old.get("where") or default_where(kind, ident),
+                    show=show if show in ("counter", "card") else old.get("show", "counter"),
+                    sound=(sound if sound in SOUNDS else None) if sound is not _KEEP else old.get("sound"),
+                    before=_int(before, 1, 600, DEFAULT_BEFORE) if before is not None else old.get("before",
+                                                                                                  DEFAULT_BEFORE),
+                    snd=snd if snd in sndlib.KEYS else old.get("snd", sndlib.DEFAULT),
+                    tone=tone if tone in {n for n, _h in itemping.TONES} else old.get("tone", DEFAULT_TONE),
+                    secs=_int(secs, 0, MAX_TIMER_S, 0) if secs is not None else old.get("secs", 0))
+        new = [item if same(t) else t for t in cur] if old else cur + [item]
     if new == cur:
         return False
     cfg["trackers"] = new[:MAX_TRACKED]
@@ -261,7 +321,10 @@ def live(c, trackers):
             if t["where"] == "target" and (mine or c.is_friendly(aid)):
                 continue
             rem = None
-            if left and left not in NO_TIMER:
+            if t.get("secs"):                      # o temporizador escolhido vale no lugar da duração do jogo
+                total = left = t["secs"] * 1000
+                rem = max(0, left - (c.now - start))
+            elif left and left not in NO_TIMER:
                 rem = left - (c.now - seen_at.get((aid, efst), start))
                 if rem < -OVERDUE_MS:
                     continue                       # o fim não chegou (o alvo saiu da tela): não fica vencido na tela
@@ -287,8 +350,11 @@ def live(c, trackers):
                 continue
             key = "area:%d" % t["id"]
             if key not in best:
+                secs = t.get("secs") or 0
                 best[key] = dict(key=key, name=name_of(t), where=t["where"],
-                                 target=None if a["src"] == c.me else c.name_of(a["src"]), left=None, total=None,
+                                 target=None if a["src"] == c.me else c.name_of(a["src"]),
+                                 left=max(0, secs * 1000 - (c.now - a["t"])) if secs else None,
+                                 total=secs * 1000 if secs else None,
                                  since=c.now - a["t"], boss=False, mob=None)
     return sorted(best.values(), key=lambda r: (r["left"] is None, r["left"] if r["left"] is not None else -r["since"]))
 
@@ -299,15 +365,21 @@ class Watch:
     def __init__(self):
         self.prev = {}
         self.gone = {}                # chave -> (linha, quando acabou)
+        self.started = []             # as que começaram na última leitura (a primeira leitura não conta)
+        self.fresh = True
 
     def reset(self):
-        self.prev, self.gone = {}, {}
+        self.prev, self.gone, self.started, self.fresh = {}, {}, [], True
 
     def update(self, rows, now, flash=True):
         """(linhas para desenhar, as que acabaram agora). As que acabaram entram no fim, com `ended` = há quantos
         segundos."""
         cur = {r["key"]: r for r in rows}
         ended = [r for k, r in self.prev.items() if k not in cur]
+        # as que começaram agora; na primeira leitura (replay aberto no meio) o que já estava ativo não conta
+        self.started = [] if self.fresh else [r for k, r in cur.items() if k not in self.prev]
+        self.crossed = [r for k, r in cur.items() if k in self.prev]      # para o "antes de acabar"
+        self.fresh = False
         for r in ended:
             self.gone[r["key"]] = (r, now)
         for k in cur:
@@ -318,6 +390,41 @@ class Watch:
         if flash:
             out += [dict(r, ended=now - when) for r, when in self.gone.values()]
         return out, ended
+
+
+def voice(t):
+    """(som, tom) de um efeito acompanhado."""
+    return t.get("snd") or sndlib.DEFAULT, t.get("tone") or DEFAULT_TONE
+
+
+def sounds(cfg, trackers, watch, ended, prev_left):
+    """Os sons a tocar nesta leitura: [(som, tom)], um por efeito que pediu som e passou do ponto agora (começou,
+    acabou, ou cruzou "N s antes de acabar"); None = o bipe de sempre (efeito sem som próprio, padrão da aba).
+    `prev_left`: {chave: ms que faltavam na leitura anterior}, que esta função atualiza."""
+    by_key = {"%s:%d" % (t["kind"], t["id"]): t for t in trackers}
+    out = []
+    for r in watch.started:
+        t = by_key.get(r["key"])
+        if t and sound_of(cfg, t) == "start":
+            out.append(voice(t))
+    for r in ended:
+        t = by_key.get(r["key"])
+        if t and sound_of(cfg, t) == "end":
+            out.append(voice(t) if t.get("sound") else None)      # o padrão da aba toca o bipe de sempre
+    for r in getattr(watch, "crossed", ()) + watch.started:
+        t = by_key.get(r["key"])
+        left = r.get("left")
+        if t is None or left is None or sound_of(cfg, t) != "before":
+            continue
+        mark = t["before"] * 1000
+        before = prev_left.get(r["key"])
+        if left <= mark and (before is None and r in watch.started and left > 0 or before is not None and before > mark):
+            out.append(voice(t))
+    for k in [k for k in prev_left if k not in {r["key"] for r in watch.crossed + watch.started}]:
+        del prev_left[k]
+    for r in watch.crossed + watch.started:
+        prev_left[r["key"]] = r.get("left")
+    return out
 
 
 def time_text(row):

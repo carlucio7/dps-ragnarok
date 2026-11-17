@@ -14,7 +14,9 @@ from tkinter import ttk
 
 import cards
 import clientdata
+import itemping
 import meter
+import sounds
 import sprites
 import ui_parts
 import xp
@@ -296,12 +298,9 @@ class CardsTab:
         right = tk.Frame(tab, bg=c["panel"])
         right.grid(row=0, column=1, sticky="nsew")
         win.section(right, _("Efeitos acompanhados no widget"))
-        note2 = win.label(right, _("Enquanto um efeito da lista está ativo, o widget mostra um contador no pé das "
-                                   "linhas: o tempo que falta quando o jogo manda a duração (os debuffs no chefe "
-                                   "vêm com ela) ou há quanto tempo está ativo. Só durante a gravação. Cada "
-                                   "efeito aparece como você escolher em \"Aparece como\": contador (um cartão o "
-                                   "cobre enquanto aparece), faixa fixa (até 2; com um cartão aberto vai para a "
-                                   "direita do DPS) ou cartão (fica enquanto o efeito durar)."),
+        note2 = win.label(right, _("Enquanto um efeito da lista está ativo, o widget mostra o tempo que falta (ou "
+                                   "há quanto tempo está ativo), só durante a gravação. Escolha um efeito em "
+                                   "Acompanhando para mudar como ele aparece, o temporizador e o som."),
                           "small", "muted", "panel", anchor="w", justify="left")
         note2.pack(fill="x", padx=10, pady=(0, 6))
         ui_parts.follow_wrap(right, note2, 24, 200)
@@ -329,7 +328,7 @@ class CardsTab:
         gb.bind("<<ComboboxSelected>>", lambda e: self.fill_results())
         ttk.Button(bar, text=_("Acompanhar"), style="An.TButton", command=self.add_selected).pack(side="right")
         self.t_found = Table(right, win, [("mark", "", 26, "center", "text"), ("name", _("Efeito"), 250, "w", "text"),
-                                          ("group_txt", _("Tipo"), 170, "w", "text")], height=7,
+                                          ("group_txt", _("Tipo"), 170, "w", "text")], height=5,
                              on_select=lambda r: self.show_preview(("trackers", (r["kind"], r["id"])) if r else None))
         self.t_found.pack(fill="both", expand=True, padx=(8, 8), pady=(6, 4))
         self.t_found.tree.bind("<Double-1>", lambda e: self.add_selected())
@@ -337,24 +336,67 @@ class CardsTab:
         head.pack(fill="x", padx=10, pady=(4, 0))
         self.following = win.label(head, "", "head", bg="panel", anchor="w")
         self.following.pack(side="left")
-        ttk.Button(head, text=_("Remover"), style="An.TButton", command=self.remove_selected).pack(side="right")
-        ttk.Button(head, text=_("Trocar onde olhar"), style="An.TButton", command=self.cycle_where).pack(
-            side="right", padx=6)
-        # como o efeito escolhido aparece: contador no pé das linhas, fixado na faixa fixa ou cartão enquanto durar
-        self.show_var = tk.StringVar(win.top, "")
-        self.show_box = ttk.Combobox(head, textvariable=self.show_var, state="disabled", width=11,
-                                     values=[_(cards.SHOW_TEXT[m]) for m in cards.SHOWS], style="An.TCombobox",
-                                     font=win.f["text"])
-        self.show_box.pack(side="right")
-        self.show_box.bind("<<ComboboxSelected>>", lambda e: self.show_selected())
-        win.label(head, _("Aparece como:"), color="muted", bg="panel").pack(side="right", padx=(0, 6))
-        self.t_mine = Table(right, win, [("name", _("Efeito"), 210, "w", "text"), ("group_txt", _("Tipo"), 135, "w", "text"),
-                                         ("where_txt", _("Onde olhar"), 105, "w", "text"),
-                                         ("shows_txt", _("Onde aparece"), 110, "w", "text")], height=5,
+        self.t_mine = Table(right, win, [("name", _("Efeito"), 180, "w", "text"),
+                                         ("where_txt", _("Onde olhar"), 95, "w", "text"),
+                                         ("shows_txt", _("Onde aparece"), 95, "w", "text"),
+                                         ("timer_txt", _("Temporizador"), 90, "w", "text"),
+                                         ("sound_txt", _("Som"), 130, "w", "text")], height=4,
                             on_select=self.mine_selected)
         self.t_mine.pack(fill="both", expand=True, padx=(8, 8), pady=(4, 4))
+        # tudo do efeito escolhido na lista, junto: como aparece, onde olhar, temporizador e som
+        each = tk.Frame(right, bg=c["tile"], padx=10, pady=5)
+        # embaixo e antes das listas na ordem do pack: com a janela baixa, as listas encolhem e as opções ficam
+        each.pack(side="bottom", fill="x", padx=10, pady=(0, 4), before=self.t_found.frame)
+        self.each = each
+        self.t_mine.frame.pack_forget()
+        self.t_mine.frame.pack(side="bottom", fill="both", padx=(8, 8), pady=(4, 4), after=each)
+        head.pack_forget()
+        head.pack(side="bottom", fill="x", padx=10, pady=(4, 0), after=self.t_mine.frame)
+        top = tk.Frame(each, bg=c["tile"])
+        top.grid(row=0, column=0, columnspan=5, sticky="ew", pady=(0, 2))
+        each.columnconfigure(4, weight=1)
+        self.each_title = win.label(top, "", "text", "muted", "tile", anchor="w")
+        self.each_title.pack(side="left")
+        self.remove_btn = ttk.Button(top, text=_("Remover"), style="An.TButton", command=self.remove_selected,
+                                     state="disabled")
+        self.remove_btn.pack(side="right")
+
+        def box(row, col, label, var, values, width, on_pick, editable=False):
+            win.label(each, label, color="muted", bg="tile").grid(row=row, column=col, sticky="w", padx=(0, 6), pady=1)
+            b = ttk.Combobox(each, textvariable=var, state="disabled", width=width, values=values,
+                             style="An.TCombobox", font=win.f["text"])
+            b.grid(row=row, column=col + 1, sticky="w", padx=(0, 14), pady=1)
+            b.bind("<<ComboboxSelected>>", lambda e: on_pick())
+            if editable:
+                b.bind("<Return>", lambda e: on_pick())
+                b.bind("<FocusOut>", lambda e: on_pick())
+            return b
+        self.show_var = tk.StringVar(win.top, "")
+        self.show_box = box(1, 0, _("Aparece como:"), self.show_var, [_(cards.SHOW_TEXT[m]) for m in cards.SHOWS],
+                            12, self.show_selected)
+        self.where_var = tk.StringVar(win.top, "")
+        self.where_box = box(1, 2, _("Onde olhar:"), self.where_var, [], 14, self.where_selected)
+        self.timer_var = tk.StringVar(win.top, "")
+        self.timer_box = box(2, 0, _("Temporizador:"), self.timer_var,
+                             [_("do jogo")] + [cards.timer_text(dict(secs=s)) for s in cards.TIMER_CHOICES], 8,
+                             self.timer_selected, editable=True)
+        self.snd_var = tk.StringVar(win.top, "")
+        self.snd_box = box(3, 0, _("Tocar som:"), self.snd_var,
+                           [_("padrão da aba")] + [_(cards.SOUND_TEXT[m]) for m in cards.SOUNDS], 15, self.sound_selected)
+        self.before_var = tk.StringVar(win.top, "")
+        self.before_box = box(3, 2, _("Segundos antes:"), self.before_var, ["%d s" % s for s in cards.BEFORE_CHOICES],
+                              6, self.sound_selected)
+        self.kind_var = tk.StringVar(win.top, "")
+        self.kind_box = box(4, 0, _("Som:"), self.kind_var, [_(sounds.NAMES[k]) for k in sounds.KEYS], 12,
+                            lambda: self.sound_selected(play=True))
+        self.tone_var = tk.StringVar(win.top, "")
+        self.tone_box = box(4, 2, _("Tom:"), self.tone_var, [_(self.tone_name(t)) for t, _hz in itemping.TONES], 10,
+                            lambda: self.sound_selected(play=True))
+        self.play_btn = ttk.Button(each, text="▶ " + _("Ouvir"), style="An.TButton", state="disabled",
+                                   command=self.play_selected)
+        self.play_btn.grid(row=4, column=4, sticky="w", pady=1)
         opts = tk.Frame(right, bg=c["panel"])
-        opts.pack(fill="x", padx=10, pady=(2, 10))
+        opts.pack(side="bottom", fill="x", padx=10, pady=(2, 10), before=self.each)
         win.label(opts, _("Mostrar até"), color="muted", bg="panel").pack(side="left")
         self.rows_var = tk.StringVar(win.top, "%d" % cards.DEFAULT_ROWS)
         rb = ttk.Combobox(opts, textvariable=self.rows_var, values=["%d" % n for n in cards.ROW_CHOICES], width=3,
@@ -364,7 +406,7 @@ class CardsTab:
         win.label(opts, _("contadores"), color="muted", bg="panel").pack(side="left")
         self.flash_var = tk.BooleanVar(win.top, True)
         self.sound_var = tk.BooleanVar(win.top, False)
-        for var, text in ((self.flash_var, _('Piscar "acabou"')), (self.sound_var, _("Som quando acabar"))):
+        for var, text in ((self.flash_var, _('Piscar "acabou"')), (self.sound_var, _("Som quando acabar (padrão)"))):
             ttk.Checkbutton(opts, text=text, variable=var, style="An.TCheckbutton",
                             command=self.save_options).pack(side="left", padx=(16, 0))
         self.sig = None
@@ -456,13 +498,102 @@ class CardsTab:
             self.win.app.untrack(row["kind"], row["id"])      # sai da lista e, se estava fixado, da faixa fixa
 
     def mine_selected(self, row):
-        """Escolheu um efeito acompanhado: a caixa "Aparece como" passa a valer para ele."""
+        """Escolheu um efeito acompanhado: as caixas "Aparece como", "Temporizador" e "Som" passam a valer
+        para ele."""
+        boxes = (self.show_box, self.where_box, self.timer_box, self.snd_box, self.kind_box, self.tone_box)
         if row is None:
-            self.show_box.configure(state="disabled")
+            for b in boxes + (self.before_box,):
+                b.configure(state="disabled")
+            for b in (self.play_btn, self.remove_btn):
+                b.configure(state="disabled")
+            self.each_title.configure(text=_("Escolha um efeito na lista acima para mudar as opções dele."))
             return
-        self.show_box.configure(state="readonly")
+        for b in boxes:
+            b.configure(state="readonly")
+        self.timer_box.configure(state="normal")           # dá para digitar outro número de segundos
+        for b in (self.play_btn, self.remove_btn):
+            b.configure(state="normal")
+        t = row["t"]
+        self.each_title.configure(text=_("Opções de %s") % row["name"])
         self.show_var.set(_(cards.SHOW_TEXT[row["show"]]))
+        order = self.where_order(row)
+        self.where_box.configure(values=[cards.where_text(dict(t, where=w)) for w in order])
+        self.where_var.set(cards.where_text(t))
+        self.timer_var.set(cards.timer_text(t))
+        self.snd_var.set(_(cards.SOUND_TEXT[t["sound"]]) if t["sound"] else _("padrão da aba"))
+        self.before_var.set("%d s" % t["before"])
+        self.before_box.configure(state="readonly" if t["sound"] == "before" else "disabled")
+        self.kind_var.set(_(sounds.NAMES[t["snd"]]))
+        self.tone_var.set(_(self.tone_name(t["tone"])))
         self.show_preview(("trackers", (row["kind"], row["id"])))
+
+    @staticmethod
+    def where_order(row):
+        return ("any", "me") if row["kind"] == "area" else ("me", "target")
+
+    def where_selected(self):
+        row = self.t_mine.selected()
+        if row is None:
+            return
+        pick = next((w for w in self.where_order(row) if cards.where_text(dict(row["t"], where=w))
+                     == self.where_var.get()), None)
+        if pick and pick != row["where"]:
+            cards.track(self.cfg(), row["kind"], row["id"], on=True, where=pick)
+            self.pv_what = ("trackers", (row["kind"], row["id"]))
+            self.saved()
+
+    @staticmethod
+    def tone_name(tone):
+        return {"grave": "Grave", "medio": "Médio", "agudo": "Agudo", "bem agudo": "Bem agudo"}.get(tone, tone)
+
+    def timer_selected(self):
+        """Temporizador do efeito escolhido: "do jogo", uma das opções ou um número de segundos digitado."""
+        row = self.t_mine.selected()
+        if row is None:
+            return
+        text = self.timer_var.get().strip()
+        secs = 0
+        if text and text != _("do jogo"):
+            digits = text.replace("s", "").strip()
+            try:
+                if ":" in digits:
+                    m, s = digits.split(":", 1)
+                    secs = int(m) * 60 + int(s)
+                else:
+                    secs = int(float(digits.replace(",", ".")))
+            except ValueError:
+                self.timer_var.set(cards.timer_text(row["t"]))
+                return
+            secs = max(1, min(cards.MAX_TIMER_S, secs))
+        self.pv_what = ("trackers", (row["kind"], row["id"]))
+        self.sig = None
+        self.win.app.set_fx_option(row["kind"], row["id"], secs=secs)
+
+    def sound_selected(self, play=False):
+        """Som do efeito escolhido: quando toca, quantos segundos antes e o tom."""
+        row = self.t_mine.selected()
+        if row is None:
+            return
+        mode = next((m for m in cards.SOUNDS if _(cards.SOUND_TEXT[m]) == self.snd_var.get()), None)
+        tone = next((t for t, _hz in itemping.TONES if _(self.tone_name(t)) == self.tone_var.get()), None)
+        snd = next((k for k in sounds.KEYS if _(sounds.NAMES[k]) == self.kind_var.get()), None)
+        try:
+            before = int(self.before_var.get().split()[0])
+        except (ValueError, IndexError):
+            before = None
+        self.pv_what = ("trackers", (row["kind"], row["id"]))
+        self.sig = None
+        if mode is None and play:                         # escolheu o som com o padrão da aba: passa a tocar
+            mode = "end"                                  # ao acabar, que era o que o padrão faria
+        self.win.app.set_fx_option(row["kind"], row["id"], play=play or (mode not in (None, "off")
+                                                                          and mode != row["t"]["sound"]),
+                                   sound=mode, before=before, tone=tone, snd=snd)
+
+    def play_selected(self):
+        row = self.t_mine.selected()
+        if row is not None:
+            import dpsmeter
+            dpsmeter.play_sound(cards.voice(row["t"]), self.cfg().get("tracker_volume", 40))
 
     def show_selected(self):
         row = self.t_mine.selected()
@@ -471,16 +602,6 @@ class CardsTab:
             self.pv_what = ("trackers", (row["kind"], row["id"]))
             self.sig = None
             self.win.app.set_fx_show(row["kind"], row["id"], mode)
-
-    def cycle_where(self):
-        row = self.t_mine.selected()
-        if row is None:
-            return
-        order = ("any", "me") if row["kind"] == "area" else ("me", "target")
-        nxt = order[(order.index(row["where"]) + 1) % len(order)] if row["where"] in order else order[0]
-        cards.track(self.cfg(), row["kind"], row["id"], on=True, where=nxt)
-        self.pv_what = ("trackers", (row["kind"], row["id"]))
-        self.saved()
 
     def save_options(self):
         cfg = self.cfg()
@@ -522,9 +643,10 @@ class CardsTab:
             e = cards.entry(t["kind"], t["id"])
             key = "%s:%d" % (t["kind"], t["id"])
             show = "pin" if key in fixed else t["show"]
-            rows.append(dict(key=key, kind=t["kind"], id=t["id"], where=t["where"],
+            rows.append(dict(key=key, kind=t["kind"], id=t["id"], where=t["where"], t=t,
                              name=cards.name_of(t), group_txt=_(e["group"]) if e else "",
-                             where_txt=cards.where_text(t), show=show, shows_txt=_(cards.SHOW_TEXT[show])))
+                             where_txt=cards.where_text(t), show=show, shows_txt=_(cards.SHOW_TEXT[show]),
+                             timer_txt=cards.timer_text(t), sound_txt=cards.sound_text(cfg, t)))
         self.t_mine.set_rows(rows, lambda r: r["key"], lambda r: ["me"] if r["show"] != "counter" else [])
         self.mine_selected(self.t_mine.selected())
         self.following.configure(text=(_("Acompanhando (%d)") % len(rows)) if rows

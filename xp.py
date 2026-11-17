@@ -54,14 +54,39 @@ TABLE_4TH_FROM = (224, 1868364511)
 MAX_LEVEL_4TH = 250
 
 
+_BASE_EXP = None
+
+
+def _base_exp():
+    """{classe: {nível: XP}} da tabela do rAthena (data/base_exp.json, tools/build_base_exp.py), lida uma vez."""
+    global _BASE_EXP
+    if _BASE_EXP is None:
+        _BASE_EXP = {}
+        try:
+            with open(os.path.join(_DATA, "base_exp.json"), encoding="utf-8") as f:
+                for g in json.load(f).get("groups", []):
+                    # o último nível vem com 999999999 (não há nível seguinte): fica de fora
+                    levels = {int(k): int(v) for k, v in g.get("exp", {}).items()
+                              if int(v) != 999999999 and int(k) < int(g.get("max") or 9999)}
+                    for job in g.get("jobs", []):
+                        _BASE_EXP[int(job)] = levels
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+    return _BASE_EXP
+
+
 def table_need(job, level):
-    """XP do nível `level` (para chegar ao seguinte) pela tabela conhecida, ou None."""
-    lv, need = TABLE_4TH_FROM
-    if job not in FOURTH_JOBS or not lv <= level < MAX_LEVEL_4TH:
-        return None
-    for _i in range(level - lv):
-        need = need * 122 // 100
-    return need
+    """XP do nível `level` (para chegar ao seguinte) pela tabela conhecida, ou None. A 4ª classe do ROLatam tem a
+    própria tabela (cada nível 22% acima do anterior); as outras classes seguem a do rAthena, que confere com o que
+    o jogo manda (3ª classe, níveis 163 a 180)."""
+    if job in FOURTH_JOBS:
+        lv, need = TABLE_4TH_FROM
+        if not lv <= level < MAX_LEVEL_4TH:
+            return None
+        for _i in range(level - lv):
+            need = need * 122 // 100
+        return need
+    return _base_exp().get(job, {}).get(level)
 
 
 def penalty(diff):
