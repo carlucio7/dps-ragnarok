@@ -7,22 +7,62 @@ e devolvem listas de dicts prontas para tabela/grafico.
 
 import collections
 import math
+import weakref
 
 import meter
 import rrf
 from i18n import _
+
+_MONSTERS = {}                # monsters(): {"c": a gravação (ref. fraca), "sig": o estado dela, (rng, group): linhas}
+_SAME = {}                    # contas da gravação parada (golpes do recorte, golpes finais, jogadores): ver _same
 
 
 def _in(rng, t):
     return rng is None or rng[0] <= t <= rng[1]
 
 
+def _same(c):
+    """O lugar das contas guardadas enquanto a gravação e os nomes não mudam. O Resumo e o cabeçalho da análise pedem
+    as mesmas várias vezes (os golpes do recorte saíam 7 vezes ao abrir, cada uma varrendo os ~250 mil golpes de um
+    replay grande). Ao vivo a gravação muda a todo instante e isto só recomeça vazio."""
+    sig = (c.version, len(c.hits), c.names_stamp())
+    m = _SAME
+    if m.get("c") is None or m["c"]() is not c or m.get("sig") != sig or len(m) > 40:
+        m.clear()
+        m.update(c=weakref.ref(c), sig=sig)
+    return m
+
+
+def _rkey(rng):
+    return tuple(rng) if rng is not None else None
+
+
 def out_hits(c, rng):
-    return [h for h in c.hits if h.out and _in(rng, h.t)]
+    m = _same(c)
+    key = ("out", _rkey(rng))
+    hs = m.get(key)
+    if hs is None:
+        if rng is None:
+            hs = [h for h in c.hits if h.out]
+        else:
+            lo, hi = rng
+            hs = [h for h in c.hits if h.out and lo <= h.t <= hi]
+        m[key] = hs
+    return list(hs)
 
 
 def in_hits(c, rng):
-    return [h for h in c.hits if not h.out and _in(rng, h.t)]
+    m = _same(c)
+    key = ("in", _rkey(rng))
+    hs = m.get(key)
+    if hs is None:
+        if rng is None:
+            hs = [h for h in c.hits if not h.out]
+        else:
+            lo, hi = rng
+            hs = [h for h in c.hits if not h.out and lo <= h.t <= hi]
+        m[key] = hs
+    return list(hs)
 
 
 def _mob_key(h, group):
@@ -53,6 +93,15 @@ def source_label(c, h):
 
 def killing_blows(c, rng=None):
     """AID morto -> (dono do ultimo golpe aliado antes da morte, quando morreu)."""
+    m = _same(c)
+    key = ("blows", _rkey(rng))
+    out = m.get(key)
+    if out is None:
+        out = m[key] = _killing_blows(c, rng)
+    return dict(out)
+
+
+def _killing_blows(c, rng):
     last = {}
     out = {}
     deaths = sorted((t, aid) for aid, t in c.deaths.items() if _in(rng, t))
@@ -69,6 +118,17 @@ def killing_blows(c, rng=None):
 
 
 def players(c, rng, dur_ms):
+    """Uma linha por jogador no recorte (dano, DPS, golpes, abates, mortes...), do maior dano para o menor. Guardada
+    enquanto a gravação e os nomes não mudam (o cabeçalho e o Resumo pedem a mesma); cada um recebe cópias."""
+    m = _same(c)
+    key = ("players", _rkey(rng), dur_ms)
+    rows = m.get(key)
+    if rows is None:
+        rows = m[key] = _players(c, rng, dur_ms)
+    return [dict(r) for r in rows]
+
+
+def _players(c, rng, dur_ms):
     agg = {}
     for h in out_hits(c, rng):
         a = agg.get(h.src)
@@ -402,6 +462,22 @@ def monster_info(c, key):
 
 
 def monsters(c, rng, group=True):
+    """Dano em cada monstro (ou grupo de fases), do maior para o menor. A conta fica guardada enquanto a gravação,
+    os nomes e o HP escolhido não mudam: o Resumo, a Linha do tempo, os Buffs, o Dedo Duro e a aba Monstros pedem a
+    mesma (num replay grande, ~0,2 s cada vez). Cada um recebe cópias das linhas."""
+    sig = (c.version, len(c.hits), c.names_stamp(), frozenset(HP_CHOICE.items()))
+    m = _MONSTERS
+    if m.get("c") is None or m["c"]() is not c or m.get("sig") != sig:
+        m.clear()
+        m.update(c=weakref.ref(c), sig=sig)
+    key = (tuple(rng) if rng is not None else None, bool(group))
+    rows = m.get(key)
+    if rows is None:
+        rows = m[key] = _monsters(c, rng, group)
+    return [dict(r) for r in rows]
+
+
+def _monsters(c, rng, group):
     agg = {}
     for h in out_hits(c, rng):
         k = _mob_key(h, group)
@@ -755,8 +831,10 @@ def _dur(ms):
 
 
 def _full(v):
-    from fmt import full
-    return full(v)
+    return _fmt_full(v)
+
+
+from fmt import full as _fmt_full  # noqa: E402 - aqui embaixo, como antes (o import dentro da função custava a cada golpe)
 
 
 # --- mortes ----------------------------------------------------------------------

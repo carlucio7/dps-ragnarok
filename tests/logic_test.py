@@ -715,6 +715,63 @@ check(not any("Nuvem" in a["who"] for a in r2["alerts"] if elo in a["what"]),
       "sem nenhum sinal do %s: desconhecido, não acusa" % elo)
 check(len(elo_rows) == 3, "%s na tabela de buffs da classe" % elo)
 
+# --- Dedo Duro: Animista (Chuva de Mariscos, Balaio de Gato -> Despertar, Bênção da Natureza, Aliança Animal) ---
+ANI, SKE2, MAG3, BOSS3 = 2201, 2202, 2203, 60003
+ani_ev = [(0, fr.spawn(ANI, "pc", 4308, "Bicho")), (0, fr.spawn(SKE2, "pc", 4302, "Ceu2")),
+      (0, fr.spawn(MAG3, "pc", 4255, "Mago2")), (0, fr.spawn(BOSS3, "mob", BETEL, "Betelgeuse", boss=2))]
+ani_ev += [(100, fr.party_hp(a, 50000, 50000)) for a in (ANI, SKE2, MAG3)]
+ani_ev += [(500, fr.skill_use(ANI, ANI, 5040)), (900, fr.skill_use(ANI, ANI, 5447)), (1000, fr.skill_use(ANI, ANI, 5053))]
+ani_ev += [(600, fr.status(a, 920, True, 180000, 180000, 10)) for a in (ANI, SKE2, MAG3)]       # Chuva de Mariscos
+ani_ev += [(70000, fr.status(a, 920, False)) for a in (ANI, SKE2, MAG3)]
+ani_ev += [(1000, fr.status(a, 953, True, 12000, 12000, 100)) for a in (ANI, SKE2, MAG3)]       # Despertar (Balaio)
+ani_ev += [(13000, fr.status(a, 953, False)) for a in (ANI, SKE2, MAG3)]
+ani_ev += [(900, fr.status(ANI, 1377, True, 150000, 150000, 15)), (70000, fr.status(ANI, 1377, False))]  # Aliança Animal
+# Bênção da Natureza no Mestre Celestial: P.ATQ e S.ATQM +50 por 10 s; depois, 1 min sem poder receber de novo
+bless_ev = [(20000, fr.skill_use(ANI, SKE2, 5448)), (20000, fr.status(SKE2, 1378, True, 10000, 10000, 5)),
+            (30000, fr.status(SKE2, 1378, False)), (30000, fr.status(SKE2, 1379, True, 60000, 60000, 0)),
+            (60000, fr.status(SKE2, 1379, False))]
+ani_ev += bless_ev
+ani_ev += [(2000 + i * 500, fr.skill_damage(a, BOSS3, 2000000, skill=sk, hits=1)) for i in range(120)
+       for a, sk in ((SKE2, 5474), (MAG3, 2218), (ANI, 5437))]
+c_ani = combat_of(fr.build(ME, sorted(ani_ev, key=lambda e: e[0]), player="Eu")[0], gap_ms=15000)
+r_ani = dd.analyze(c_ani, BOSS3)
+shrimp = {b["name"] for b in r_ani["buffs"] if b["buff"] == meter.status_name(920)}
+awake = [b for b in r_ani["buffs"] if b["buff"] == meter.status_name(953)]
+pact = [b for b in r_ani["buffs"] if b["buff"] == meter.status_name(1377)]
+check(meter.job_name(4308) == "Animista" and {"Ceu2", "Mago2"} <= shrimp,
+      "Animista: Chuva de Mariscos cobrada de quem bate físico e mágico (ATQ e ATQM +10%%): %s" % sorted(shrimp))
+check(len(awake) == 1 and "rajada" in awake[0]["note"] and not any(meter.status_name(953) in a["what"]
+                                                                  for a in r_ani["alerts"]),
+      "Despertar do Balaio de Gato (12 s a cada 180 s): na tabela da classe, sem alerta de tempo ativo: %s"
+      % [(b["name"], b["note"]) for b in awake])
+check(len(pact) == 1 and pact[0]["name"] == "Bicho" and pact[0]["p1"] == "100%",
+      "Aliança Animal: buff da própria classe do Animista -> %s" % [(b["name"], b["p1"]) for b in pact])
+bless, aftermath = meter.status_name(1378), meter.status_name(1379)
+bless_rows = {row["name"]: row for row in an.buff_uptime(c_ani, SKE2, None)[0]}
+check(bless in bless_rows and not any(bless in a["what"] or aftermath in a["what"] for a in r_ani["alerts"] + r_ani["o_alerts"]),
+      "Bênção da Natureza (alvo único, 10 s): na tabela de buffs de quem recebeu (%s), sem alerta" % bless)
+# crédito: os buffs do Animista do grupo rendem para ele (estimativa da calculadora); fora do grupo, nada
+import contrib  # noqa: E402
+crows, _ctot = contrib.credit(c_ani, BOSS3)
+ani_via = next((r_["via"] for r_ in crows if r_["aid"] == ANI), {})
+frows = {r_["efst"]: r_ for r_ in contrib.fight(c_ani, BOSS3)[0]}
+# Bênção: 20 golpes de 2M com Chuva (×1,006) e Bênção (×1,151): o ganho de cada um, dividido pelo log, ~261,6K
+check(set(ani_via) == {920, 953, 1378} and abs(ani_via[1378] - 5232000) < 50000 and ani_via[953] > 0
+      and ani_via[920] > 0 and frows.get(1378, {}).get("where") == "given" and frows[1378]["hits"] == 20,
+      "crédito do Animista do grupo (Chuva, Despertar, Bênção) -> %s" % {k: round(v) for k, v in ani_via.items()})
+solo = combat_of(fr.build(ME, sorted([e for e in ani_ev if e != (100, fr.party_hp(ANI, 50000, 50000))],
+                                     key=lambda e: e[0]), player="Eu")[0], gap_ms=15000)
+srows, _stot = contrib.credit(solo, BOSS3)
+check(not any(r_["via"] for r_ in srows) and not {920, 953, 1378} & {r_["efst"] for r_ in contrib.fight(solo, BOSS3)[0]},
+      "Animista fora do grupo: os buffs dele não entram no crédito")
+# Dedo Duro: Animista do grupo que não usou a Bênção da Natureza em nenhum momento = grave
+check(not any(meter.skill_name(5448) in a["what"] for a in r_ani["alerts"]), "usou a Bênção da Natureza: sem alerta")
+lazy = combat_of(fr.build(ME, sorted([e for e in ani_ev if e not in bless_ev], key=lambda e: e[0]),
+                          player="Eu")[0], gap_ms=15000)
+nob = [a for a in dd.analyze(lazy, BOSS3)["alerts"] if a["what"] == "%s não foi usada" % meter.skill_name(5448)]
+check(len(nob) == 1 and nob[0]["sev"] == 2 and nob[0]["who"] == "Bicho",
+      "Animista sem a Bênção da Natureza na luta: grave -> %s" % [(a["sev"], a["who"]) for a in nob])
+
 # --- HP do chefe pela dificuldade (o replay não diz a dificuldade) ----------------
 hp_of = lambda total, killed: an.boss_hp(c2, BOSS2, total, killed)[:2]
 check(hp_of(844e6, True) == (800000000, "Nível 1") and hp_of(480e6, True) == (500000000, "Selado")
@@ -771,6 +828,16 @@ check(len(heal) == 1 and heal[0]["aid"] == ME and heal[0]["what"] == "recebeu cu
 marked = [e for e in d3["events"] + d3["lane_events"] if e["aid"] == ME or e.get("target") == ME]
 check(not any(e["kind"] in ("boss", "status", "reflect") for e in marked),
       "linha do tempo: 'Jogadores marcados' não traz skills nem status do chefe")
+# golpe a golpe: só montados quando alguém liga a faixa (numa luta longa são mais de cem mil eventos)
+hev = d2["hit_events"]()
+_ph = [h for h in c2.hits if d2["t0"] <= h.t <= d2["t1"] and h.out and h.src in set(d2["players"])]
+check({l["key"] for l in d2["lanes"]} >= {"hits"} and not any(e["kind"] in ("hit", "mobhit") for e in d2["events"])
+      and d2["hit_events"]() is hev and [e["t"] for e in hev] == sorted(e["t"] for e in hev) and _ph
+      and sorted((e["t"], e["aid"], e["value"]) for e in hev if e["kind"] == "hit")
+      == sorted((h.t, h.src, h.dmg) for h in _ph)
+      and all(e["who"] == c2.name_of(e["aid"]) and "target" in e for e in hev if e["kind"] == "hit"),
+      "linha do tempo: golpes de cada jogador montados só quando a faixa liga, uma vez, em ordem -> %d de %d"
+      % (sum(1 for e in hev if e["kind"] == "hit"), len(_ph)))
 ts2, vals = tl.series([(1000, 500), (1500, 500), (9000, 1000)], 0, 10000, 1000, 1000)
 check(vals[1] == 1000.0 and vals[9] == 1000.0 and sum(vals) == 2000.0, "curva: dano por segundo por balde")
 
@@ -921,6 +988,20 @@ rows, total = contrib.fight(c, 61000)
 got = {r["efst"]: round(r["contrib"]) for r in rows}
 check(total == 5250000 and got.get(1183) == 1000000 and got.get(1142) == 500000 and got.get(730) == 750000,
       "contribuição: Pólen 100/250, Vício 50/250 do golpe de fogo; Garra 75/175 só no corpo a corpo -> %s" % got)
+# corpo a corpo x de longe: alcance negativo é o da arma (Firmamento −9, Golpe Fulminante −1) e algumas skills fogem
+# da regra (Impacto Brutal, Revoada Sombria e Avanço Sísmico chegam de longe mas contam como corpo a corpo)
+near = [s for s in (5474, 5, 42, 271, 5287, 5294, 5296, 5315, 5473, 0) if contrib.melee(s)]
+far = [s for s in (46, 2554, 5406, 5437, 2332, 57) if not contrib.melee(s)]
+check(len(near) == 10 and len(far) == 6, "corpo a corpo: %s; de longe: %s" % (near, far))
+ev = [(0, fr.spawn(61000, "mob", BETEL, "Betelgeuse", boss=2)),
+      (500, fr.status(61000, 730, True, 20000, 20000, 150)),                    # Garra Sombria nv 5 (150%)
+      (1000, fr.skill_damage(ME, 61000, 1750000, skill=5474, hits=1)),          # Firmamento: corpo a corpo
+      (2000, fr.skill_damage(ME, 61000, 1000000, skill=46, hits=1))]            # Rajada Dupla: de longe
+c = combat_of(fr.build(ME, ev)[0])
+rows, total = contrib.fight(c, 61000)
+got = {r["efst"]: round(r["contrib"]) for r in rows}
+check(total == 2750000 and got.get(730) == 750000,
+      "contribuição: a Garra Sombria vale no Firmamento (75/175) e não na Rajada Dupla -> %s" % got)
 # Lex Aeterna em sequência: o jogo liga o status uma vez e só desliga no fim, mas cada uso dobra o próximo golpe
 ev = [(0, fr.spawn(61000, "mob", BETEL, "Betelgeuse", boss=2)),
       (1000, fr.skill_use(OTHER, 61000, 78)), (1000, fr.status(61000, 22, True, 600000, 600000, 1)),
@@ -943,6 +1024,36 @@ check(ctotal == 18000 and round(cred[OTHER]["total"]) == 3000 and round(cred[OTH
       and round(cred[ME]["own"]) == 15000 and round(sum(r["total"] for r in crows)) == 18000,
       "dano creditado: quem pôs a Lex fica com o ganho dela (3000), quem bateu com o resto; soma 100%% -> %s"
       % {k: round(v["total"]) for k, v in cred.items()})
+# Lex Aeterna na linha do tempo: um ponto por Lex posta, com o golpe que ela dobrou ou por que não dobrou nada
+import timeline as _tl  # noqa: E402
+ev += [(3000, fr.skill_use(OTHER, 61000, 78)), (3300, fr.skill_use(OTHER, 61000, 78)),     # a 1ª não acumula
+       (3400, fr.skill_damage(ME, 61000, 4000, skill=5473, hits=1)), (3700, fr.skill_use(OTHER, 61000, 78))]
+c = combat_of(fr.build(ME, ev)[0])
+_lx = [e for e in _tl.build(c, 61000)["events"] if e["kind"] == "lex"]
+_lanes = {l["key"]: l for l in _tl.build(c, 61000)["lanes"]}
+check([(e["t"], e["aid"], e["used"], e.get("target")) for e in _lx]
+      == [(1000, OTHER, True, ME), (1300, OTHER, True, ME), (1600, OTHER, True, ME), (2000, None, False, None),
+          (3000, OTHER, False, None), (3300, OTHER, True, ME), (3700, OTHER, False, None)]
+      and "1.000 (a Lex rendeu 500)" in _lx[0]["detail"] and _lx[3]["detail"] == _tl.LEX_END["off"]
+      and _lx[4]["detail"] == _tl.LEX_END["replaced"] and _lx[6]["detail"] == _tl.LEX_END["left"]
+      and _lanes["lex"]["kind"] == "point" and _lanes["lex"]["on"] and len(_lanes["lex"]["items"]) == 7,
+      "linha do tempo: Lex Aeterna com o golpe dobrado, a que só o status mostrou (gasta fora da tela), a que não "
+      "acumulou e a que sobrou -> %s" % [(e["t"], e["used"], e["detail"]) for e in _lx])
+# força de cada golpe (cor na lista, bolinhas na curva de HP): faixa pelo % do HP do chefe; o % vai nos golpes fortes
+# e no golpe a golpe no chefe, e a Lex que dobrou guarda o instante e o % do golpe dobrado
+_big = ev + [(4000, fr.skill_use(OTHER, 61000, 78)), (4100, fr.skill_damage(ME, 61000, 48000000, skill=5473, hits=1)),
+             (4500, fr.skill_damage(ME, 61000, 4000000, skill=5473, hits=1))]
+_d = _tl.build(combat_of(fr.build(ME, _big)[0]), 61000)
+_hp = float(_d["hp_max"])
+_st = [(e["t"], _tl.strength(e["pct"])) for e in _d["events"] if e["kind"] == "strong"]
+_lxu = [e for e in _d["events"] if e["kind"] == "lex" and e["used"]]
+check([_tl.strength(p) for p in (0.0049, 0.005, 0.01, 0.0101, 0.05, 0.0501)] == [0, 1, 1, 2, 2, 3]
+      and _st == [(4100, 3), (4500, 1)]
+      and all(e.get("pct") == e["value"] / _hp for e in _d["hit_events"]() if e["kind"] == "hit")
+      and (_lxu[-1]["hit_t"], _tl.strength(_lxu[-1]["hit_pct"])) == (4100, 3)
+      and all(e["hit_t"] >= e["t"] and e["hit_pct"] == 2 * e["value"] / _hp for e in _lxu),
+      "força do golpe: faixas < 0,5%% | 0,5–1%% | > 1%% | > 5%% do HP; o %% nos golpes e, na Lex, o do golpe dobrado "
+      "-> %s, %s" % (_st, [(e["hit_t"], round(e["hit_pct"] * 100, 4)) for e in _lxu]))
 
 # --- visual de quem gravou (sprites do jogo) ------------------------------------
 import sprites  # noqa: E402
@@ -989,6 +1100,73 @@ with tempfile.TemporaryDirectory() as tmp:
     r = wd.render(dict(job=4302, sex=1, hair=22, top=1677), sprites.WALK, 3)
     check(r is not None and r[:2] == (2, 13) and r[7] == ["top"],
           "sprite: guarda-roupa lê corpo e cabeça do .grf; chapéu sem tabela fica como faltando -> %s" % (r and r[7]))
+# a cifra do .grf com tabelas dá o mesmo que a conta bit a bit (blocos ao acaso e casos de borda)
+import random as _rnd  # noqa: E402
+_rg = _rnd.Random(7)
+_blocks = [bytes(8), b"\xff" * 8, bytes(range(8))] + [bytes(_rg.randrange(256) for _ in range(8)) for _ in range(400)]
+_same = 0
+for _b in _blocks:
+    _x, _y = bytearray(_b), bytearray(_b)
+    sprites._des_block(_x, 0)
+    sprites._des_block_bits(_y, 0)
+    _same += _x == _y
+check(_same == len(_blocks), "grf: a cifra com tabelas é igual à bit a bit em %d de %d blocos" % (_same, len(_blocks)))
+# imagem no lugar como o jogo (metade do tamanho em divisão inteira): com round() o .5 ia para o par e um quadro
+# de tamanho ímpar pulava 1 pixel (o Olho do Necromante, 37 de altura, saltava a cada passo)
+check([sprites.put_at(11, y, 53, 37)[1] - y for y in (-65, -64, -63, -62)] == [-18] * 4
+      and sprites.put_at(0, 0, 4, 4) == (-2, -2) and sprites.put_at(-3, 5, 5, 3) == (-5, 4),
+      "sprites: a imagem fica no mesmo lugar em relação à camada em todo quadro (sem o arredondamento para o par)")
+_E, _A, _B = bytes(4), bytes([1, 2, 3, 255]), bytes([4, 5, 6, 9])
+_im = _E + _A + _E + _E + _E + _E + _B + _E + _E * 4            # 4 x 3: um pixel em (1, 0), outro em (2, 1)
+check(sprites.alpha_box(4, 3, _im) == (1, 0, 3, 2) and sprites.alpha_box(2, 2, bytes(16)) is None
+      and sprites.crop_rgba(4, _im, (1, 0, 3, 2)) == _A + _E + _E + _B,
+      "visuais: miniatura do chapéu recortada no que tem pixel")
+# chapéus e capas animados (varredura de 2026-11-17: 371 chapéus e 16 capas): parado e sentado, os quadros vêm em 3
+# grupos (cabeça de frente, esquerda, direita) que animam no ritmo da parte; andando, a parte com o mesmo número
+# de quadros do corpo segue o passo dele, e a de outra quantidade anima no próprio ritmo
+
+
+class _FakeAct:
+    def __init__(self, counts, delay=100.0):
+        self.counts, self.delays = counts, [delay] * 104
+
+    def frames(self, act_i):
+        return [([], [(0, 0)])] * self.counts.get(act_i // 8, 1)
+
+
+hat24 = sprites.Part("top", None, _FakeAct({0: 24, 1: 8, 2: 24}))
+hat3 = sprites.Part("top", None, _FakeAct({0: 3, 1: 8}))
+hat16 = sprites.Part("top", None, _FakeAct({0: 24, 1: 16}, 200.0))
+pf = sprites.part_frame
+check(pf(hat24, 0, sprites.IDLE, 0, 0, 3, 250) == 2 and pf(hat24, 0, sprites.IDLE, 1, 0, 3, 250) == 10
+      and pf(hat24, 0, sprites.IDLE, 2, 0, 3, 820) == 16 and pf(hat3, 0, sprites.IDLE, 1, 0, 3, 999) == 1
+      and pf(hat24, 8, sprites.WALK, 0, 5, 8, 999) == 5 and pf(hat16, 8, sprites.WALK, 0, 5, 8, 650) == 3
+      and pf(hat24, 16, sprites.SIT, 2, 0, 3, 100) == 17
+      and sprites.own_clock(24, sprites.IDLE, 3) and not sprites.own_clock(3, sprites.IDLE, 3)
+      and not sprites.own_clock(8, sprites.WALK, 8) and sprites.own_clock(16, sprites.WALK, 8)
+      and sprites.own_clock(8, sprites.IDLE, 3),
+      "visuais animados: parado, o chapéu de 24 quadros anima dentro do grupo da direção da cabeça (frente 0-7, "
+      "esquerda 8-15, direita 16-23); o comum mostra o quadro da direção; andando, segue o passo do corpo, e o de "
+      "outra quantidade de quadros anima no próprio ritmo")
+check(sprites.extent([body, head], body, sprites.IDLE, 0) == (-ox, -oy, w_ - ox, h_ - oy),
+      "visuais: o retângulo de todos os quadros (pés fixos na prévia) bate com o do quadro montado -> %s" % (
+          sprites.extent([body, head], body, sprites.IDLE, 0),))
+# o personagem montado pelo GDI+: igual ao pixel a pixel no que é opaco; no translúcido sobre o vazio a cor fica
+# inteira (o pixel a pixel escurecia: o brilho do Olho do Necromante saía sujo)
+import gdip as _gd  # noqa: E402
+if _gd.ready():
+    fast = sprites.compose_gdi([body, head], body, sprites.IDLE, 0, 0)
+    ghost = sprites.Part("fantasma", body.spr, sprites.Act(act_bytes((0, -1), (0, -10))), anchored=False)
+    ghost.act.frames(0)[0][0][0].color = (255, 255, 255, 128)
+    slow_g = sprites.compose([ghost], ghost, sprites.IDLE, 0, 0)[2][0]
+    fast_g = sprites.compose_gdi([ghost], ghost, sprites.IDLE, 0, 0)[2][:4]
+    check(fast is not None and fast[:2] == (w_, h_) and fast[3:] == (ox, oy)
+          and fast[2] == b"".join(bytes(p) for p in px)
+          and slow_g[:3] == (128, 0, 0) and tuple(fast_g) == (255, 0, 0, 128)
+          and sprites.shade(bytes([200, 100, 50, 255])) == bytes([40, 20, 10, 141])
+          and sprites.whiten(bytes([0, 100, 255, 7])) == bytes([153, 193, 255, 7]),
+          "visuais: o quadro do personagem pelo GDI+ é igual ao pixel a pixel no opaco e mantém a cor no translúcido "
+          "-> %s %s" % (slow_g, tuple(fast_g)))
 # desenho suavizado (GDI+ do Windows): os monstros maiores que a caixa ou montados com peças em escala
 import gdip  # noqa: E402
 if gdip.ready():
@@ -1265,6 +1443,23 @@ check(vis.tiny_icon(24, 24, [OFF] * 576) and vis.tiny_icon(24, 24, [OFF] * 240 +
       and not vis.tiny_icon(24, 24, [ON] * 576) and not vis.tiny_icon(10, 10, [ON] * 100)
       and vis.tiny_icon(10, 10, [ON] * 80 + [OFF] * 20),
       "visuais: ícone com a parte desenhada de até %d px num dos lados conta como minúsculo" % vis.TINY_ICON)
+# Desfazer da aba Visuais: o estado de antes de cada passo vai para a pilha; passo que não muda nada não conta;
+# a troca de replay recomeça sem nada para desfazer; no máximo UNDO_MAX passos
+hist = vis.History()
+hist.reset("a")
+hist.record("b")
+hist.record("b")                          # nada mudou: não conta
+hist.record("c")
+u1, u2, u3 = hist.undo(), hist.undo(), hist.undo()
+hist.record("d")
+after_undo = (hist.now, hist.past)
+hist.reset("x")
+for k in range(vis.UNDO_MAX + 7):
+    hist.record(k)
+check((u1, u2, u3) == ("b", "a", None) and after_undo == ("d", ["a"]) and len(hist.past) == vis.UNDO_MAX
+      and hist.past[0] == 6 and hist.can_undo() and not vis.History().can_undo(),
+      "visuais: Desfazer volta passo a passo, passo sem mudança não conta, guarda até %d -> %s %s"
+      % (vis.UNDO_MAX, (u1, u2, u3), after_undo))
 vfx = vis.clean({"job": 1, "effects": ["a", 5, "b", "c", "d"]})
 check(vfx["effects"] == ["a", "b", "c"] and vis.clean({"effects": "x"})["effects"] == []
       and vis.STONES[25058] == "ljosalfar" and vis.STONES[25138] == vis.SHRINK
@@ -1308,6 +1503,66 @@ check(pg["w"] == 2 and pg["h"] == 1 and pg["textures"] == ["a.bmp", "b.bmp"] and
       and pg["tiles"] == [((0.0, 0.5, 0.0, 0.5), (0.0, 0.0, 0.5, 0.5), 1)]
       and vis.STONES[25224] == vis.PALE and vis.STONES[25177] == vis.SHADOW,
       "chão: o terreno do mapa (.gnd) é lido com as texturas, o recorte de cada quadrado e o que fica por cima")
+try:
+    gnd.parse(raw_gnd[:-5])
+    _cut = "leu"
+except ValueError:
+    _cut = "recusou"
+check(_cut == "recusou", "chão: .gnd cortado no meio é recusado (o chão fica de fora em vez de sair torto)")
+# índice do .grf: os nomes das pastas pedidas sem diferença de maiúsculas, a pasta que está dentro de outra pedida
+# não conta duas vezes, e read() desempacota a entrada guardada em bytes crus
+with tempfile.TemporaryDirectory() as tmp:
+    gp = os.path.join(tmp, "data.grf")
+    fr.build_grf(gp, {"Data\\Texture\\Effect\\Brilho.BMP": b"luz", "data\\texture\\chao.bmp": b"terra",
+                      "data\\sprite\\x.spr": b"sprite", "data\\prontera.gnd": b"mapa"})
+    _g = sprites.Grf(gp, prefixes=("data\\texture\\effect\\", "data\\texture\\", "data\\prontera.gnd"))
+    _gv = sprites.Grf(gp, prefixes=gnd.PREFIXES + sfx.PREFIXES)
+    check(sorted(_g.index) == [b"data\\prontera.gnd", b"data\\texture\\chao.bmp", b"data\\texture\\effect\\brilho.bmp"]
+          and _g.read("DATA\\texture\\effect\\brilho.bmp") == b"luz" and _g.read("data\\prontera.gnd") == b"mapa"
+          and _g.read("data\\sprite\\x.spr") is None and _g.folders == [b"data\\texture\\", b"data\\prontera.gnd"]
+          and _g.covers((sfx.EFF, sprites.ITEM_ICON)) and not _g.covers((sprites.HUMAN,))
+          and gnd.Ground(gp, _gv).grf is _gv and gnd.Ground(gp, _g).grf is not _g
+          and gnd.Ground(gp, _gv).places() == [gnd.PLACES[0]],
+          "grf: índice das pastas pedidas (maiúsculas não importam, pasta dentro de outra é coberta); o chão usa um "
+          "índice já aberto só se ele cobre todas as pastas dele -> %s" % sorted(_g.index))
+
+
+def bmp_bytes(w, h, bpp, pixels, palette=(), top_down=False):
+    """.bmp de 8 bits (pixels = índices na paleta [(r, g, b)]) ou de 24 bits (pixels = (r, g, b)), listados de cima
+    para baixo; o arquivo guarda as linhas de baixo para cima (a não ser top_down), cada uma em múltiplo de 4 bytes."""
+    stride = ((w * bpp + 31) // 32) * 4
+    rows = []
+    for y in range(h):
+        row = pixels[y * w:(y + 1) * w]
+        line = bytes(row) if bpp == 8 else b"".join(bytes((b, g, r)) for r, g, b in row)
+        rows.append(line.ljust(stride, b"\0"))
+    if not top_down:
+        rows.reverse()
+    pal = b"".join(bytes((b, g, r, 0)) for r, g, b in palette)
+    off = 54 + len(pal)
+    return (b"BM" + struct.pack("<IHHI", off + stride * h, 0, 0, off)
+            + struct.pack("<IiiHHIIiiII", 40, w, -h if top_down else h, 1, bpp, 0, stride * h, 0, 0, len(palette), 0)
+            + pal + b"".join(rows))
+
+
+def bmp_reference(data):
+    """O BGRA pela leitura pixel a pixel (sprites.bmp_rgba), a conta que a textura do chão usava antes."""
+    w, h, px = sprites.bmp_rgba(data)
+    return w, h, b"".join(bytes((p[2], p[1], p[0], p[3])) for p in px)
+
+
+# magenta é transparente: vermelho e azul acima de 240 e verde abaixo de 16 (240 e 16 já não contam)
+_pal = [(255, 0, 255), (10, 20, 30), (241, 15, 241), (240, 0, 255), (255, 16, 255)]
+_rg2 = _rnd.Random(11)
+_bmps = [bmp_bytes(3, 2, 8, [0, 1, 2, 3, 4, 1], _pal), bmp_bytes(3, 2, 8, [4, 3, 2, 1, 0, 0], _pal, top_down=True),
+         bmp_bytes(3, 2, 24, _pal + [(1, 2, 3)]), bmp_bytes(5, 3, 24, [tuple(_rg2.choice((0, 15, 16, 240, 241, 255))
+                                                                       for _ in range(3)) for _ in range(15)]),
+         bmp_bytes(2, 2, 24, _pal[:4], top_down=True)]
+_got = [sfx.bmp_bgra(b) for b in _bmps]
+check(all(g == bmp_reference(b) for g, b in zip(_got, _bmps)) and _got[0][2][:8] == bytes((255, 0, 255, 0, 30, 20, 10, 255))
+      and [_got[2][2][i * 4 + 3] for i in range(6)] == [0, 255, 0, 255, 255, 255],
+      "efeitos/chão: textura .bmp de 8 e 24 bits lida em bloco igual à leitura pixel a pixel (magenta transparente, "
+      "linhas de baixo para cima ou de cima para baixo, largura ímpar)")
 # Betelgeuse: a pontuação da dificuldade anunciada na sala; 925 = HP selado
 bet = [(0, fr.broadcast("gQdADQ", 925)), (4000, fr.spawn(60001, "mob", BETEL, "Betelgeuse", boss=2)),
        (5000, fr.skill_damage(ME, 60001, 3000))]
@@ -1355,6 +1610,83 @@ check(cl.level_ups and cl.level_ups[0][1] == 241 and sc and abs(sc[0] - 2.0) < 1
       and pr["need"] == xpmod.table_need(4302, 241) and abs(pr["xp"] - 2 * 68) < 1e-6,
       "XP: subida de nível = ponto exato (3 Goblins = 102 pela lista, faltavam 204 -> ×2); depois dela conta do zero "
       "no 241 -> %s %s" % (sc, pr and (pr["level"], round(pr["xp"]))))
+# XP do nível: a que o jogo mandou (no começo desta gravação ou de outra da mesma classe) vale mais que a tabela
+seen = {"xp_levels": {"4302": {"240": 777, "241": 12345}}}
+got = (xpmod.need(cl, seen, 240), xpmod.need(cl, seen, 241), xpmod.need(cl, {}, 241),
+       xpmod.need(cl, {"xp_levels": {"4302": {"241": 999999999}}}, 241))
+check(got == (1000, 12345, xpmod.table_need(4302, 241), xpmod.table_need(4302, 241)),
+      "XP: a XP do nível que o jogo mandou em outra gravação vale mais que a tabela; a desta gravação vale mais que "
+      "todas; o 999999999 do nível máximo não conta -> %s" % (got,))
+# penalidade do rAthena: monstro 16+ níveis acima rende 40% (Petite: 1.086 × 40% = 434, como nos bancos de dados)
+check(xpmod.penalty(16) == 40 and xpmod.penalty(28) == 40 and xpmod.penalty(15) == 115 and xpmod.penalty(10) == 140,
+      "XP: monstro 16 ou mais níveis acima rende 40%")
+# o jogo reaproveita o AID (depois de trocar de mapa, outro monstro qualquer): o abate é do monstro que tinha o
+# número na hora da morte, e o dano conta só naquela vida
+er = [(0, fr.spawn(OTHER, "pc", 4252, "Outro")), (0, fr.spawn(52601, "mob", 1127, "Hode")),
+      (300, fr.skill_damage(OTHER, 52601, 5000)), (400, fr.skill_damage(ME, 52601, 5000)), (500, fr.vanish(52601, 1)),
+      (5000, fr.spawn(52601, "mob", 1155, "Petite")), (5300, fr.skill_damage(ME, 52601, 5000)),
+      (5400, fr.vanish(52601, 1))]
+cr = combat_of(fr.build(ME, er, xp=(7204, 0, 10 ** 12))[0])
+rr = [(r["mob"], round(r["share"], 2), r["name"]) for r in xpmod.kills(cr)[0]]
+check(rr == [(1127, 0.5, meter.monster_name(1127) or "Monstro 1127"), (1155, 1.0, cr.name_of(52601))],
+      "XP: AID reaproveitado — o 1º abate é do Hode (com a parte dele: 50%%), o 2º do Petite (100%%, só a vida dele) "
+      "-> %s" % rr)
+# a entrega que sobe o nível (mesmo instante da subida) é do nível que fechou: não conta de novo no nível novo
+eu = []
+for i, aid in enumerate((52211, 52212, 52213)):
+    eu += [(i * 60000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 60000 + 300, fr.skill_damage(ME, aid, 5000)),
+           (i * 60000 + 400, fr.vanish(aid, 1))]
+eu += [(150000, fr.quest_done(3477)), (150000, fr.hp(241, rrf.SP_BASELEVEL)), (170000, fr.quest_done(4244))]
+cu = combat_of(fr.build(ME, eu, xp=(7201, 0, 10 ** 6))[0])
+pu = xpmod.progress(cu, {})
+cfg_u = {"xp_mode": "lista"}
+xpmod.learn_quests(cu, cfg_u, [(0, 150000, 10 ** 6, "0")])
+cu2 = combat_of(fr.build(ME, eu[:9] + [(150000, fr.quest_done(4245)), (150000, fr.hp(241, rrf.SP_BASELEVEL))],
+                         xp=(7201, 0, 10 ** 6))[0])
+check(pu["level"] == 241 and pu["xp"] == 0 and xpmod.quests_uncounted(cu, {}) == 1
+      and xpmod.quests_uncounted(cu2, {}) == 0 and xpmod.quest_in(cu, 0, 150000) and xpmod.quest_in(cu, 150000, 160000)
+      and "xp_quests" not in cfg_u,
+      "missões: a entrega que subiu o nível conta no nível que fechou e não no novo (nem avisa nele); os dois trechos "
+      "em volta saem da calibração e do aprendizado (a sobra não aparece) -> %s" % (pu and round(pu["xp"]),))
+# nível em que um abate vale 10%+ do nível (a sobra do abate que subiu passa sem aparecer): fora da medição, ele e
+# o seguinte
+el2 = []
+for i, aid in enumerate((52221, 52222, 52223, 52224)):
+    el2 += [(i * 60000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 60000 + 300, fr.skill_damage(ME, aid, 5000)),
+            (i * 60000 + 400, fr.vanish(aid, 1))]
+el2 += [(100000, fr.hp(241, rrf.SP_BASELEVEL)), (200000, fr.hp(242, rrf.SP_BASELEVEL))]
+ce = combat_of(fr.build(ME, el2, xp=(7202, 0, 200))[0])         # nível 240 de 200 de XP: um Goblin (34) vale 17%
+check(xpmod.level_segments(ce, {}) == [] and len(xpmod.level_segments(cl, {})) == 1,
+      "XP: nível em que um abate vale 10% ou mais dele fica fora da medição, e o seguinte também")
+# aprender missões entregues juntas (o total dividido, valendo só quando vêm juntas) e num trecho sem abates
+eb = [(1000, fr.quest_done(4246)), (2000, fr.quest_done(4247)), (5000, fr.quest_done(4246))]
+cb2 = combat_of(fr.build(ME, eb, xp=(7203, 0, 10 ** 12))[0])
+cfg_b = {"xp_mode": "lista"}
+xpmod.learn_quests(cb2, cfg_b, [(0, 3000, 1000, "0")])
+both = json.loads(json.dumps(cfg_b["xp_quests"]))
+alone = xpmod.quest_rows(cb2, cfg_b, (4000, 6000))
+together = [r["xp"] for r in xpmod.quest_rows(cb2, cfg_b, (0, 3000))]
+xpmod.learn_quests(cb2, cfg_b, [(4000, 6000, 640, "fim")])
+obs_b = [(o["quest"], o["base"], o.get("with")) for o in cfg_b["xp_learn"]["quests"]]
+check(both == {"4246": {"base": 500, "level": 240, "mult": 1.0, "with": [4247]},
+               "4247": {"base": 500, "level": 240, "mult": 1.0, "with": [4246]}}
+      and alone[0]["xp"] is None and together == [500, 500]
+      and cfg_b["xp_quests"]["4246"] == {"base": 640, "level": 240, "mult": 1.0}
+      and cfg_b["xp_quests"]["4247"]["with"] == [4246]
+      and obs_b == [(4246, 500, [4247]), (4247, 500, [4246]), (4246, 640, None)]
+      and all(o["date"] == "2026-10-22" and o["src"].startswith("#") for o in cfg_b["xp_learn"]["quests"]),
+      "missões: duas entregues juntas dividem o total e só valem juntas; sozinha num trecho sem abates (gravar, "
+      "entregar e gravar de novo) a recompensa sai exata; cada medida fica anotada no registro de aprendizado -> "
+      "%s %s" % (both, obs_b))
+# a mesma missão entregue mais de uma vez no trecho (a Água Mineral renova a espera): cada entrega rende inteira
+ea = [(1000, fr.quest_done(3477)), (2000, fr.quest_done(3477)), (5000, fr.quest_done(4248)),
+      (6000, fr.quest_done(4248))]
+ca = combat_of(fr.build(ME, ea, xp=(7205, 0, 10 ** 12))[0])
+cfg_a = {"xp_mode": "lista"}
+xpmod.learn_quests(ca, cfg_a, [(0, 3000, 2 * 148560 * 1.5, "0"), (4000, 7000, 2 * 1000, "1")])
+got = {k: (v["base"], v.get("with")) for k, v in cfg_a["xp_quests"].items()}
+check(got == {"3477": (222840, None), "4248": (1000, None)} and len(xpmod.quest_rows(ca, cfg_a, (0, 3000))) == 2,
+      "missões: a mesma missão entregue duas vezes no trecho conta nas duas (renovada com Água Mineral) -> %s" % got)
 
 ev = []
 for i, aid in enumerate((52301, 52302, 52303)):                           # 3 abates no 1º minuto de farm
@@ -1544,6 +1876,61 @@ cm = combat_of(fr.build(ME, ev)[0])
 check(len(cm.areas) == 1 and cm.area_spans(cm.areas[0]) == [(1000, 9000)] and cm.in_area(cm.areas[0], (10, 10), 5000)
       and not cm.in_area(cm.areas[0], (11, 10), 5000),
       "áreas no chão: teleporte fecha as células, e a que reaparece segue no chão -> %s" % [a["units"] for a in cm.areas])
+# as quatro Insígnias no chão ao mesmo tempo, debaixo do chefe: cada uma rende +50% só no elemento que vence o dela
+# (Fogo → água, Água → vento, Vento → terra, Terra → fogo) e o crédito das quatro vai para quem as pôs
+INSIGNIAS = [(2465, 0xF1), (2466, 0xF2), (2467, 0xF3), (2468, 0xF4)]
+
+
+def insignia_fight(on=True, skills=(2218, 2219, 2220, 2221)):
+    """Quem grava e mais três (2402-2404) batem 1 vez por segundo de 1 a 20 s, cada um com um Tetra Vortex de
+    `skills` (fogo, água, vento, terra). Com `on`, as quatro Insígnias do Mestre Elemental ficam sob o chefe de 4,5 a
+    15,5 s (11 golpes de cada um), e os golpes desse trecho saem +50%."""
+    who = [ME, 2402, 2403, 2404]
+    ev = [(0, at(fr.spawn(ABOSS, "mob", 1038, "Chefe", boss=2), 100, 100)), (0, fr.spawn(EM, "pc", 4261, "Elementa")),
+          (0, fr.stop(ME, 100, 95))] + [(0, fr.spawn(a, "pc", 4255, "Magus %d" % a)) for a in who[1:]]
+    ev += [(100, fr.party_hp(a, 50000, 50000)) for a in [EM] + who]
+    if on:
+        for i, (skill, kind) in enumerate(INSIGNIAS):
+            ev += [(4500, fr.ground_skill(EM, skill, 3, 100, 100)), (15500, fr.ground_gone(8200 + i)),
+                   (4500, fr.ground_area(8200 + i, EM, 100, 100, kind, 3, 1))]
+    for k in range(20):
+        t = 1000 + k * 1000
+        ev += [(t, fr.skill_damage(a, ABOSS, AHIT * 3 // 2 if on and 4500 <= t <= 15500 else AHIT, skill=s, hits=1))
+               for a, s in zip(who, skills)]
+    ev += [(20500, fr.vanish(ABOSS, 1))]
+    return combat_of(fr.build(ME, sorted(ev, key=lambda e: e[0]))[0])
+
+
+c4 = insignia_fight()
+rows4, total4 = contrib.fight(c4, ABOSS)
+by4 = {r["key"]: r for r in rows4}
+crows4, _t4 = contrib.credit(c4, ABOSS)
+cb4 = {r["aid"]: r for r in crows4}
+check(sorted(a["skill"] for a in c4.areas) == [2465, 2466, 2467, 2468]
+      and all(c4.area_spans(a) == [(4500, 15500)] and c4.in_area(a, (100, 100), 10000) for a in c4.areas)
+      and all(round(by4[-sk]["contrib"]) == 11 * AHIT // 2 and by4[-sk]["hits"] == 11 and by4[-sk]["where"] == "boss"
+              and "+50%% no dano de %s" % dd.ELEMENT_PT[contrib.AREAS[-sk][1]].lower() in by4[-sk]["rule"]
+              for sk, _k in INSIGNIAS)
+      and [contrib.AREAS[-sk][1] for sk, _k in INSIGNIAS] == ["Water", "Wind", "Earth", "Fire"]
+      and round(cb4[EM]["total"]) == 4 * 11 * AHIT // 2 and sorted(cb4[EM]["via"]) == [-2468, -2467, -2466, -2465]
+      and all(round(cb4[a]["own"]) == 20 * AHIT and not cb4[a]["via"] for a in (ME, 2402, 2403, 2404))
+      and abs(sum(r["total"] for r in crows4) - total4) < 1,
+      "as quatro Insígnias ao mesmo tempo: +50%% só no elemento que vence cada uma; crédito das quatro para quem pôs "
+      "-> %s" % {contrib.effect_name(k): round(v) for k, v in cb4[EM]["via"].items()})
+r4 = dd.analyze(c4, ABOSS)
+dd4 = {d["key"]: d for d in r4["debuffs"] if d["key"].startswith("area|")}
+l4 = {l["key"]: l for l in tl.build(c4, ABOSS)["lanes"] if l.get("area")}
+check(sorted(dd4) == ["area|2465", "area|2466", "area|2467", "area|2468"] and len({d["p1"] for d in dd4.values()}) == 1
+      and all(d["who"] == "Elementa" for d in dd4.values())
+      and sorted(l4) == ["ar2465", "ar2466", "ar2467", "ar2468"] and all(l["items"] == [(4500, 15500)] for l in l4.values())
+      and len({l["color"] for l in l4.values()}) == 4,
+      "as quatro Insígnias no Dedo Duro e na linha do tempo, cada uma com a sua cor -> %s" % {
+          k: d["p1"] for k, d in dd4.items()})
+wal = {a["what"]: a for a in dd.analyze(insignia_fight(on=False, skills=(2219,) * 4), ABOSS)["alerts"]}
+check(wal.get("Insígnia do Fogo faltou", {}).get("sev") == 1 and "água" in wal["Insígnia do Fogo faltou"]["detail"]
+      and "Insígnia da Terra faltou" not in wal and "Insígnia da Água faltou" not in wal,
+      "Dedo Duro: grupo batendo com água sem a Insígnia do Fogo é alerta amarelo (as outras não são cobradas) -> %s" % (
+          sorted(k for k in wal if "faltou" in k)))
 
 # --- Oposição no Dedo Duro: casa certa pelo tamanho do chefe (quem grava é Mestre Celestial) ----------
 def hate_fight(level=None, start=70000):
@@ -1696,22 +2083,59 @@ ev = [(0, fr.status(ME, 250, True, 1800000, 1800000, 100)), (0, fr.status(ME, 10
       (65000, fr.quest_done(5964)), (66000, fr.quest_done(4242)), (70000, fr.stop(ME, 1, 1))]
 cq = combat_of(fr.build(ME, ev, xp=(7100, 0, 10 ** 12))[0])
 hq = xpmod.hunts(cq)
-eq0 = xpmod.estimate(cq, {})
-check(eq0["quest_xp"] == 0 and eq0["xp"] == 0 and len(eq0["quests"]) == 2 and eq0["quests_unknown"] == 2
-      and xpmod.quests_uncounted(cq, {}) == 2,
-      "missões: a XP das entregas fica fora da conta (recurso desligado), mas as entregas são listadas e a tela avisa")
-xpmod.QUEST_XP_ON = True                     # o mecanismo continua testado para quando a regra fechar
 qr = xpmod.quest_rows(cq, {})
 eq = xpmod.estimate(cq, {})
 check([(h["quest"], h["parts"]) for h in hq] == [(7777, [(3, 10)])] and 5964 not in cq.quest_hunts,
       "missões: o progresso da caça aparece e some quando a missão é entregue -> %s" % hq)
-check(qr[0]["mult"] == 2.5 and qr[0]["xp"] == 5586774400 and qr[1]["xp"] is None and eq["quest_xp"] == 5586774400
-      and eq["xp"] == 5586774400 and eq["kill_xp"] == 0 and eq["quests_unknown"] == 1 and eq["per_min"] == 0,
-      "missões: Jantar do Diabo com manual 100%% e Kafra rende ×2,5 (5.586.774.400), fora do ritmo dos abates -> %s"
+check([q["quest"] for q in qr] == [5964, 4242] and qr[0]["mult"] == 2.5 and qr[0]["xp"] == 698346800 * 2.5
+      and qr[1]["xp"] is None and eq["quest_xp"] == 1745867000 and eq["xp"] == 1745867000 and eq["kill_xp"] == 0
+      and eq["quests_unknown"] == 1 and eq["per_min"] == 0 and xpmod.quests_uncounted(cq, {}) == 1,
+      "missões: a XP do Jantar do Diabo (tabela) entra na estimativa com manual 100%% e Kafra (×2,5), fora do ritmo "
+      "dos abates; a de recompensa desconhecida fica de fora e a tela avisa -> %s"
       % [(q["quest"], q["mult"], q["xp"]) for q in qr])
-check(xpmod.quest_base(4242, {"xp_quests": {"4242": {"base": 1000}}}) == 1000 and xpmod.quest_base(4242, {}) is None,
+check(xpmod.quest_base(4242, {"xp_quests": {"4242": {"base": 1000}}}) == 1000 and xpmod.quest_base(4242, {}) is None
+      and xpmod.quest_base(5964, {"xp_quests": {"5964": {"base": 7}}}) == 7,
       "missões: a recompensa aprendida vale no lugar da tabela")
-xpmod.QUEST_XP_ON = False
+# bônus da missão: (1 + manual + Kafra) × Njord × Milagre; evento, VIP, Cetro, itens e spotlight não entram
+# (Jantar do Diabo capturado: 698.346.800 do iRO Wiki -> 5.586.774.400 com manual 100, Kafra, Njord e Milagre = ×8;
+# três diárias de Hugel com manual 50 e Kafra pagaram ×1,94 sobre o iRO Wiki)
+on = [(0, 10 ** 9, 0)]
+qw = {"vip": on, "scepter": on, "kafra": on, "manual": [(0, 10 ** 9, 100)], "njord": [(0, 10 ** 9, 60)],
+      "gear": [(0, 10 ** 9, 65)], "miracle": on, "spot": [(0, 10 ** 9, 20)]}
+qs4 = xpmod.settings({"xp_bonuses": {"server": {"on": True, "pct": 100}}})
+qw_h = {"vip": on, "scepter": on, "kafra": on, "manual": [(0, 10 ** 9, 50)], "gear": [(0, 10 ** 9, 15)]}
+got = (xpmod.quest_mult(1000, qw, qs4), xpmod.quest_mult(1000, qw_h, qs4),
+       xpmod.quest_base(3477, {}), xpmod.quest_base(8663, {}), xpmod.quest_base(8665, {}), xpmod.quest_base(5964, {}))
+check(got == (8.0, 2.0, 148560.0, 165480.0, 165480.0, 698346800.0) and round(698346800 * got[0]) == 5586774400,
+      "missões: bônus de missão = (1 + manual + Kafra) × Njord × Milagre, sem evento, VIP, Cetro, itens nem "
+      "spotlight; Sociedade de Monstros pela tabela (a 8663 do LATAM é a 8665 do rAthena) -> %s" % (got,))
+# missão de espera ("[Espera] Refeição do Diabo"): sai da lista sem dar XP, não é entrega nem tira o trecho da calibração
+ew = [(0, fr.spawn(52401, "mob", 1124, "Goblin")), (300, fr.skill_damage(ME, 52401, 5000)), (400, fr.vanish(52401, 1)),
+      (1000, fr.quest_done(5961))]
+cw2 = combat_of(fr.build(ME, ew, xp=(7101, 0, 10 ** 12))[0])
+check(xpmod.quest_wait(5961) and xpmod.quest_rows(cw2, {}) == [] and xpmod.quests_uncounted(cw2, {}) == 0
+      and not xpmod.quest_in(cw2, 0, 2000) and xpmod.quest_in(cq, 0, 70000),
+      "missões: o fim de uma espera não é entrega (não avisa nem tira o trecho da calibração)")
+# aprender: real − abates − outras missões; a desconhecida aprende, a conhecida só muda se errar mais de 15%
+el = [(0, fr.spawn(52411, "mob", 1124, "Goblin")), (300, fr.skill_damage(ME, 52411, 5000)), (400, fr.vanish(52411, 1)),
+      (1000, fr.quest_done(4242)),
+      (2000, fr.spawn(52412, "mob", 1124, "Goblin")), (2300, fr.skill_damage(ME, 52412, 5000)), (2400, fr.vanish(52412, 1)),
+      (2500, fr.quest_done(3477))]
+cl2 = combat_of(fr.build(ME, el, xp=(7102, 0, 10 ** 12))[0])
+k1, k2 = xpmod._list_xp(cl2, {}, (0, 1500)), xpmod._list_xp(cl2, {}, (1900, 3000))
+cfg_q = {"xp_mode": "lista"}
+xpmod.learn_quests(cl2, cfg_q, [(0, 1500, k1 + 900, "0"), (1900, 3000, k2 + 148560 * 1.1, "1")])
+learned1 = dict(cfg_q["xp_quests"])
+xpmod.learn_quests(cl2, cfg_q, [(1900, 3000, k2 + 148560 * 1.5, "1")])
+check(k1 and k2 and learned1 == {"4242": {"base": 900, "level": 240, "mult": 1.0}}
+      and cfg_q["xp_quests"]["3477"]["base"] == round(148560 * 1.5),
+      "missões: aprende a recompensa desconhecida (900); a da tabela fica se o medido conferir (+10%%) e é trocada "
+      "se errar mais (+50%%) -> %s %s" % (learned1, cfg_q.get("xp_quests")))
+mq = xpmod._measure_log(cq, {}, 0, 70000, 1000, 1.0, "m", "x#0", "2026-11-17 10:00")
+check(mq["quests"] == [5964, 4242] and mq["quest_at"] == [[5964, {"manual": 100, "kafra": 50}],
+                                                          [4242, {"manual": 100, "kafra": 50}]],
+      "registro de aprendizado: cada entrega de missão leva os bônus ativos no instante (manual 100%% e Kafra) -> %s"
+      % mq.get("quest_at"))
 check(xpmod.factor(cq, {})[1][0] == "auto" and xpmod.factor(cq, {"xp_mode": "lista"})[1][0] == "lista",
       "XP: sem nada escolhido o modo é o automático (aproximado até haver medida)")
 xpmod.MAX_AGE_S = None                       # nos testes as gravações são antigas
@@ -1744,7 +2168,7 @@ with tempfile.TemporaryDirectory() as tmp2:
     cfgl = {"xp_mode": "lista"}
     xpmod.calibrate(rfa.combat, cfgl, meter.xp_after)
     check("xp_bonuses" not in cfgl, "XP: no modo \"pela lista\" o programa não mexe no evento do servidor")
-# spotlight do mapa: a mesma gravação (111 pela lista), mas a seguinte mostra +133 = lista × 1,20
+# mapa que rende mais (spotlight): a mesma gravação (111 pela lista), mas a seguinte mostra +133 = lista × 1,20
 for tag, gain in (("spot", 133), ("plain", 111)):
     with tempfile.TemporaryDirectory() as tmp3:
         for name, date, exp, events in (("a.rrf", (2026, 11, 5, 19, 35, 0), 1000, ev),
@@ -1758,11 +2182,11 @@ for tag, gain in (("spot", 133), ("plain", 111)):
             cfgs = {}
             corr = xpmod.calibrate(rfs.combat, cfgs, meter.xp_after)
             ests = xpmod.estimate(rfs.combat, cfgs)
-            spot = (cfgs.get("xp_spot") or {}).get(here) or {}
-            check(spot.get("pct") == 20 and spot.get("auto") and "xp_bonuses" not in cfgs and abs(corr - 1.0) < 0.01
-                  and round(ests["xp"]) == 133 and cfgs["xp_corr"]["7100"]["samples"][0][4] == here,
-                  "XP automática: XP exata = lista × 1,20 marca o mapa como spotlight (e não mexe no evento do "
-                  "servidor) -> %s %s" % (cfgs.get("xp_spot"), corr))
+            check(not cfgs.get("xp_spot") and "xp_bonuses" not in cfgs and abs(corr - 133 / 111.0) < 0.01
+                  and round(ests["xp"]) == 133 and cfgs["xp_corr"]["7100"]["samples"][0][4] == here
+                  and xpmod.own_samples(rfs.combat, cfgs) == 1,
+                  "XP automática: XP exata = lista × 1,20 vira a correção deste mapa (nenhuma marca de mapa, e o "
+                  "evento do servidor fica como está) -> %s %s" % (cfgs.get("xp_spot"), corr))
             lst = xpmod.estimate(rfs.combat, {"xp_mode": "lista", "xp_spot": {here.upper(): {"pct": 20}}})["xp"]
             off = xpmod.estimate(rfs.combat, {"xp_mode": "lista", "xp_spot": {here: {"pct": 20}},
                                               "xp_bonuses": {"spot": {"on": False, "pct": 20}}})["xp"]
@@ -1776,8 +2200,8 @@ for tag, gain in (("spot", 133), ("plain", 111)):
             cfgk = {"xp_spot": {here: {"pct": 20, "when": "2026-11-01", "auto": False}}}
             xpmod.calibrate(rfs.combat, cfgk, meter.xp_after)
             check(not cfgu.get("xp_spot") and here in cfgk["xp_spot"],
-                  "XP automática: mapa marcado pelo programa cuja XP exata já fecha sem o spotlight é desmarcado; o "
-                  "marcado à mão fica -> %s %s" % (cfgu.get("xp_spot"), cfgk.get("xp_spot")))
+                  "XP automática: a marca de spotlight posta pelo programa (versões anteriores) sai; a feita à mão "
+                  "fica -> %s %s" % (cfgu.get("xp_spot"), cfgk.get("xp_spot")))
 # spotlight de +50% (mapas de nível mais baixo): com o evento do servidor em 50% a lista dá 166,5; +250 = x1,5
 with tempfile.TemporaryDirectory() as tmp5:
     for name, date, exp, events in (("a.rrf", (2026, 11, 5, 19, 35, 0), 1000, ev),
@@ -1796,12 +2220,428 @@ with tempfile.TemporaryDirectory() as tmp5:
             "xp_spot": {here5: {"pct": 20, "when": "2026-11-01", "auto": False}}}
     xpmod.calibrate(rf5.combat, cfg7, meter.xp_after)
     custom = xpmod.estimate(rf5.combat, {"xp_mode": "lista", "xp_spot": {here5: {"pct": 75}}})["xp"]
-    check(cfg5["xp_spot"][here5]["pct"] == 50 and cfg5["xp_bonuses"]["server"]["pct"] == 50
-          and cfg6["xp_spot"][here5]["pct"] == 50 and cfg7["xp_spot"][here5]["pct"] == 20
+    c5 = xpmod.stored_correction(rf5.combat, cfg5, here5)
+    c6 = xpmod.stored_correction(rf5.combat, cfg6, here5)
+    c7 = xpmod.stored_correction(rf5.combat, cfg7, here5)
+    check(not cfg5.get("xp_spot") and cfg5["xp_bonuses"]["server"]["pct"] == 50 and abs(c5[0] - 250 / 166.5) < 1e-3
+          and not cfg6.get("xp_spot") and abs(c6[0] - 250 / 166.5) < 1e-3
+          and cfg7["xp_spot"][here5]["pct"] == 20 and abs(c7[0] - 250 / (166.5 * 1.2)) < 1e-3
           and abs(custom - 111 * 1.75) < 1e-6 and 20.0 in xpmod.SPOT_CHOICES and 50.0 in xpmod.SPOT_CHOICES,
-          "XP automática: o spotlight de +50%% também é achado, o mapa marcado pelo programa troca de percentual, o "
-          "marcado à mão fica, e qualquer %% digitado vale -> %s %s %s" % (cfg5.get("xp_spot"), cfg6.get("xp_spot"),
-                                                                        cfg7.get("xp_spot")))
+          "XP automática: mapa que rende +50%% aprende ×1,5 (o evento do servidor fica); a marca automática antiga "
+          "sai, a feita à mão fica e a correção é sobre ela; qualquer %% digitado vale -> %s %s %s" % (c5, c6, c7))
+# cada abate usa a correção do mapa em que aconteceu; mapa sem medida usa o normal do personagem (o grupo de mapas
+# que rendem menos: o spotlight só aumenta a XP)
+cfgm = {"xp_mode": "medido", "xp_corr": {"7300": {"samples": [
+    [2.0, 100, "2026-11-05 10:00", "x#0", "prt_fild08"], [1.0, 100, "2026-11-05 10:00", "y#0", "outro_mapa"]]}}}
+evm2 = []
+for i, aid in enumerate((53101, 53102)):
+    evm2 += [(i * 60000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 60000 + 300, fr.skill_damage(ME, aid, 5000)),
+             (i * 60000 + 400, fr.vanish(aid, 1))]
+evm2.insert(3, (30000, fr.map_move("pay_fild01", 100, 100)))
+cmm = combat_of(fr.build(ME, evm2, xp=(7300, 0, 10 ** 9))[0])
+rows_m = [r["total"] for r in xpmod.estimate(cmm, cfgm)["rows"]]               # as linhas são as mesmas a cada
+lst_m = [r["total"] for r in xpmod.estimate(cmm, dict(cfgm, xp_mode="lista"))["rows"]]   # conta: copiar o total
+ratios_m = [round(a / b, 3) for a, b in zip(rows_m, lst_m)]
+check(ratios_m == [2.0, 1.0] and xpmod.correction(cmm, cfgm) == (1.0, 2) and xpmod.own_samples(cmm, cfgm) == 0
+      and xpmod.map_corrections(cmm, cfgm) == {"prt_fild08": 2.0, "outro_mapa": 1.0}
+      and xpmod.correction_kind(cmm, cfgm) == "personagem",
+      "XP: cada abate usa a correção do mapa em que aconteceu (prt_fild08 ×2); mapa sem medida usa o normal do "
+      "personagem (×1, o mapa que rende menos) -> %s %s" % (ratios_m, xpmod.correction(cmm, cfgm)))
+# o mapa medido por outro personagem vale para este: quanto ele rende a mais sobre o normal de quem mediu
+cfg_x = {"xp_corr": {
+    "1": {"samples": [[1.5, 100, "2026-11-05 10:00", "a#0", "mapa_x", 300], [1.0, 100, "2026-11-05 11:00", "b#0",
+                                                                             "mapa_y", 300]]},
+    "2": {"samples": [[1.1, 100, "2026-11-05 12:00", "c#0", "mapa_y", 300]]}}}
+p_b = xpmod.predict(cfg_x, 2, "mapa_x")
+p_c = xpmod.predict(cfg_x, 3, "mapa_x")
+p_a = xpmod.predict(cfg_x, 1, "mapa_z")
+check(p_b[1] == "personagens" and abs(p_b[0] - 1.65) < 1e-9 and p_c[1] == "personagens" and abs(p_c[0] - 1.5) < 1e-9
+      and p_a == (1.0, "personagem", 2) and xpmod.predict(cfg_x, 3, "mapa_z") is None,
+      "XP: mapa medido por outro personagem vale para este (o outro rende ×1,5 nele sobre o normal; este, normal "
+      "×1,1, fica ×1,65; sem medida nenhuma, ×1,5) -> %s %s %s" % (p_b, p_c, p_a))
+# memória longa (30 dias) e mudança no mapa: medida nova que discorda das antigas do mapa apaga as antigas
+cfg_k = {"xp_corr": {"1": {"samples": [[1.0, 100, "2026-11-01 10:00", "a#0", "mapa_x", 300],
+                                       [1.0, 100, "2026-11-02 10:00", "b#0", "mapa_y", 300]]},
+                     "2": {"samples": [[1.02, 100, "2026-11-03 10:00", "c#0", "mapa_x", 300]]}}}
+same = xpmod._check_change(cfg_k, 1, [1.05, 100, "2026-11-20 10:00", "d#0", "mapa_x", 300])
+moved = xpmod._check_change(cfg_k, 1, [1.25, 100, "2026-11-21 10:00", "e#0", "mapa_x", 300])
+left = sorted((g, x[3]) for g, e in cfg_k["xp_corr"].items() for x in e["samples"])
+old40 = {"xp_corr": {"1": {"samples": [[2.0, 100, "2026-10-01 10:00", "x#0", "m"],
+                                       [1.0, 100, "2026-11-05 10:00", "y#0", "m"]]}}}
+check(not same and moved and left == [("1", "b#0")] and cfg_k["xp_learn"]["changes"][-1]["map"] == "mapa_x"
+      and xpmod.predict(old40, 1, "m") == (1.0, "mapa", 1),
+      "XP: memória de 30 dias; medida nova 25%% acima das antigas do mapa = o mapa mudou: as antigas dele saem (de "
+      "todos os personagens) e a mudança vai para o registro -> %s" % left)
+# drops no registro: só abates isolados, cada item com a morte dele (o aid volta quando o monstro renasce), separados
+# pelos bônus de drop ativos (Chiclete 252 com o %)
+
+
+def _fall(map_id, item, x=100, y=100, count=1):
+    p = bytearray(22)
+    struct.pack_into("<HII", p, 0, rrf.P_ITEM_FALL, map_id, item)
+    struct.pack_into("<HH", p, 13, x, y)
+    struct.pack_into("<H", p, 19, count)
+    return bytes(p)
+
+
+evg = [(0, fr.spawn(54001, "mob", 1124, "Goblin")), (900, fr.skill_damage(ME, 54001, 5000)),
+       (1000, fr.vanish(54001, 1)), (1001, _fall(1, 501)),
+       (3000, fr.spawn(54001, "mob", 1124, "Goblin")), (4900, fr.skill_damage(ME, 54001, 5000)),
+       (5000, fr.vanish(54001, 1)), (5001, _fall(2, 501)),
+       (7000, fr.status(ME, 252, True, 1800000, 1800000, 100)),
+       (8000, fr.spawn(54002, "mob", 1124, "Goblin")), (8900, fr.skill_damage(ME, 54002, 5000)),
+       (9000, fr.vanish(54002, 1)),
+       (19000, fr.spawn(54003, "mob", 1124, "Goblin")), (19001, fr.spawn(54004, "mob", 1124, "Goblin")),
+       (19900, fr.skill_damage(ME, 54003, 5000)), (19901, fr.skill_damage(ME, 54004, 5000)),
+       (20000, fr.vanish(54003, 1)), (20010, fr.vanish(54004, 1)), (20011, _fall(3, 502)),
+       (30000, fr.skill_damage(ME, 77, 1))]
+cg = combat_of(fr.build(ME, evg)[0])
+dl = xpmod.drop_log(cg)
+check(dl == {"1124": {"-": [2, {"501": 2}], "252:100": [1, {}]}},
+      "registro de drops: cada item conta na morte dele (o monstro que renasce com o mesmo número não soma os itens "
+      "das outras vidas), rajada de mortes fica de fora, bônus de drop ativo (Chiclete 100%%) separa -> %s" % dl)
+# aviso de calibrar: mapa sem medida depois de 10 min de farm, gravação em andamento, sem subida de nível
+evh = []
+for i, aid in enumerate(range(54101, 54113)):
+    evh += [(i * 60000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 60000 + 300, fr.skill_damage(ME, aid, 5000)),
+            (i * 60000 + 400, fr.vanish(aid, 1))]
+ch = combat_of(fr.build(ME, evh, xp=(7400, 100, 10 ** 9))[0])
+ch.finished = False
+h_new = xpmod.calibration_hint(ch, {})
+h_own = xpmod.calibration_hint(ch, {"xp_corr": {"7400": {"samples": [[1.0, 100, "2026-10-22 10:00", "x#0",
+                                                                      "prt_fild08", 300]]}}})
+h_list = xpmod.calibration_hint(ch, {"xp_mode": "lista"})
+ch.finished = True
+h_done = xpmod.calibration_hint(ch, {})
+ch2 = combat_of(fr.build(ME, evh[:9], xp=(7400, 100, 10 ** 9))[0])
+ch2.finished = False
+check(h_new == "prt_fild08" and h_own is None and h_list is None and h_done is None
+      and xpmod.calibration_hint(ch2, {}) is None,
+      "XP: aviso de calibrar só em mapa sem medida, depois de 10 min de farm, com a gravação em andamento e no modo "
+      "automático -> %s %s %s %s" % (h_new, h_own, h_list, h_done))
+# relatório: legível e sem nada pessoal (sem o número do personagem, sem nomes de arquivo)
+import xpreport  # noqa: E402
+cfg_r = {"xp_levels": {"4302": {"200": 653047446}}, "xp_learn": {
+    "measures": [dict(src="gravacao secreta de Fulano.rrf#0", date="2026-11-17 03:26", map="abyss_04", mins=28.9,
+                      kills=396, ratio=0.99, char="123456", job=4302, level=200, deaths=1, insured=0, quests=[],
+                      bonus={"vip": [100, 20], "manual": [70, 50]}, mobs=[[20617, 24]], shared=33, party=3,
+                      spot_list=True)],
+    "unknown": {"21533": dict(name="Juncea de Simulação", recs={"gravacao secreta de Fulano.rrf": 1},
+                              maps={"jorlab": 1}, last="2026-11-17")},
+    "drops": {"gravacao secreta de Fulano.rrf": dict(date="2026-11-17", mobs={"20617": {"983": [10, {"1000322": 1}]}})},
+    "changes": [dict(date="2026-11-17", map="abyss_04", old=1.0, new=1.23)], "server": [], "names": {}}}
+rep = xpreport.text(cfg_r, "9.9.9")
+check("123456" not in rep and "Fulano" not in rep and ".rrf" not in rep and "secreta" not in rep
+      and "A: " in rep and "abyss_04" in rep and "1000322" in rep and "21533" in rep and "1,23" in rep,
+      "relatório de aprendizado: personagens como A, B, C, sem o número do personagem e sem nomes de arquivo; com os "
+      "mapas, as mudanças, os monstros sem XP e os drops")
+# bloco de dados do relatório (uma linha "RM|{json}" por registro) e a ferramenta que lê os relatórios mandados
+import importlib.util  # noqa: E402
+_spec = importlib.util.spec_from_file_location("ler_relatorios", os.path.join(HERE, "..", "tools", "ler_relatorios.py"))
+ler = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ler)
+rows_r = [json.loads(ln[3:]) for ln in rep.splitlines() if ln.startswith("RM|")]
+check(rows_r and rows_r[0]["t"] == "report" and {"m", "d", "u", "c"} <= {r["t"] for r in rows_r}
+      and rows_r[1]["char"] == "A" and len(rows_r[1]["date"]) == 10 and "hour" not in rows_r[1]
+      and cfg_r["xp_learn"].get("secret"),
+      "relatório: bloco de dados no fim, uma linha por registro (medidas, drops, monstros sem XP, mudanças), só o dia "
+      "(sem hora), com o sorteio do PC criado se faltava -> %s" % [r["t"] for r in rows_r])
+
+
+def _lrn(secret, measures, drops, unknown):
+    return {"xp_learn": {"secret": secret, "measures": measures, "drops": drops, "unknown": unknown, "changes": [],
+                         "server": [], "names": {}}}
+
+
+def _meas(src, date, mp, ratio):
+    return dict(src=src, date=date, map=mp, mins=30.0, kills=300, ratio=ratio, gain=10 ** 8, char="111", job=4302,
+                level=230, deaths=0, insured=0, quests=[], bonus={}, mobs=[[20617, 90]], shared=0, party=1,
+                spot_list=False)
+
+
+m_1 = _meas("x.rrf#0", "2026-11-15 10:00", "abyss_04", 1.0)
+m_2 = _meas("y.rrf#0", "2026-11-15 11:00", "prt_fild08", 1.02)
+m_3 = _meas("z.rrf#0", "2026-11-16 12:00", "abyss_04", 1.5)
+d_1 = {"x.rrf": dict(date="2026-11-15", mobs={"20617": {"-": [100, {"6608": 2}], "252:100": [100, {"6608": 4}]}})}
+d_2 = dict(d_1, **{"z.rrf": dict(date="2026-11-16", mobs={"20617": {"-": [50, {"6608": 1}]}})})
+u_1 = {"21533": dict(name="Juncea de Simulação", recs={"x.rrf": 3}, maps={"jorlab": 3}, last="2026-11-15")}
+with tempfile.TemporaryDirectory() as tmpr:
+    rep_1 = xpreport.text(_lrn("s1", [m_1, m_2], d_1, u_1), "9.9.9")
+    rep_2 = xpreport.text(_lrn("s1", [m_1, m_2, m_3], d_2, u_1), "9.9.9")       # o mesmo PC, mais tarde
+    rep_3 = xpreport.text(_lrn("s2", [m_1], {}, u_1), "9.9.9")                 # outro PC, o mesmo nome de gravação
+    cut = next(ln for ln in rep_2.splitlines() if '"t":"m"' in ln)
+    rep_2 = rep_2.replace(cut, cut[:70] + "\n" + cut[70:])                      # linha quebrada no e-mail
+    for nm, txt in (("a.txt", rep_1), ("b.txt", rep_2), ("c.txt", rep_3)):
+        with open(os.path.join(tmpr, nm), "w", encoding="utf-8") as f:
+            f.write(txt)
+    lr = ler.load([tmpr])
+    lr_text = ler.summary(lr)
+    lr_item = ler.summary(lr, item="6608", min_kills=10)
+check(len(lr.measures) == 4 and lr.repeated == {"m": 2, "d": 1, "q": 0} and len(lr.drops) == 2 and lr.bad == 0
+      and len({r["pc"] for r in lr.reports}) == 2
+      and "Juncea de Simulação (21533) · 6 abates em 2 gravações, 2 PCs" in lr_text
+      and "×1,471" in lr_text and "fora do normal" in lr_text and "x.rrf" not in lr_text,
+      "ferramenta dos relatórios: o repetido em relatórios seguidos do mesmo PC conta uma vez, o mesmo nome de "
+      "gravação em outro PC é outro registro, linha quebrada no caminho ainda é lida, XP comparada com o normal do "
+      "personagem (dia fora do normal marcado) -> %d medidas, repetidos %s, %d drops, %d linhas ruins"
+      % (len(lr.measures), lr.repeated, len(lr.drops), lr.bad))
+w_lo, w_hi = ler.wilson(5, 100)
+mh = ler.mantel_haenszel([(10, 100, 5, 100), (20, 100, 10, 100)])
+check(abs(w_lo - 0.0215) < 5e-4 and abs(w_hi - 0.1118) < 5e-4 and ler.fisher(5, 100, 5, 100) > 0.999
+      and ler.fisher(10, 100, 1, 100) < 0.05 and abs(mh[0] - 2.0) < 1e-9 and mh[1][0] < 2.0 < mh[1][1]
+      and "Efeito de cada bônus de drop" in lr_item and "×2,00" in lr_item and ler.clean("a\x1b[2Jb") == "a[2Jb",
+      "ferramenta dos relatórios: intervalo de Wilson, teste de Fisher, bônus de drop juntando monstros e PCs "
+      "(Mantel-Haenszel) e texto de outra pessoa sem caracteres de controle -> %.4f %.4f %s" % (w_lo, w_hi, mh))
+# o efeito de um bônus é medido com os outros bônus iguais (Goma 100% + 983 contra só 983); duas gravações pequenas
+# iguais em tudo no mesmo relatório são duas gravações
+be = ler.bonus_effect({"20178": {"983": {"pc": [1000, {"1000322": 15}]},
+                                 "252:100+983": {"pc": [500, {"1000322": 15}]}}})
+same_d = {"p.rrf": dict(date="2026-11-15", mobs={"21853": {"-": [1, {}]}}),
+          "q.rrf": dict(date="2026-11-15", mobs={"21853": {"-": [1, {}]}})}
+with tempfile.TemporaryDirectory() as tmpr2:
+    with open(os.path.join(tmpr2, "r.txt"), "w", encoding="utf-8") as f:
+        f.write(xpreport.text(_lrn("s3", [m_1], same_d, {}), "9.9.9"))
+    lr2 = ler.load([tmpr2])
+qm = [_meas("a.rrf#0", "2026-11-15 10:00", "abyss_04", 1.0), _meas("b.rrf#0", "2026-11-15 11:00", "prt_fild08", 1.0),
+      _meas("c.rrf#0", "2026-11-15 12:00", "abyss_04", 1.0),
+      dict(_meas("d.rrf#0", "2026-11-15 13:00", "abyss_04", 1.5), gain=3 * 10 ** 6, quests=[8721],
+           quest_at=[[8721, {"server": 100, "manual": 50}]])]
+with tempfile.TemporaryDirectory() as tmpr3:
+    with open(os.path.join(tmpr3, "q.txt"), "w", encoding="utf-8") as f:
+        f.write(xpreport.text(_lrn("s4", qm, {}, {}), "9.9.9"))
+    lq = ler.summary(ler.load([tmpr3]))
+check("missão 8721" in lq and "1 medida" in lq and "XP ≈ 1.000.000 (33% do trecho)" in lq
+      and "bônus na entrega: evento do servidor +100%, manual +50%" in lq and "sem bônus ≈ 666.667" in lq,
+      "ferramenta dos relatórios: XP de cada missão (XP real − abates × o normal do personagem) com os bônus ativos "
+      "na entrega e a recompensa sem bônus pela regra do programa (×1,5: só o manual conta)")
+# recompensas que o programa mediu vão no relatório (linhas "q"); a ferramenta junta as dos PCs, compara o que o jogo
+# pagou com as duas regras de bônus de missão e grava o arquivo para o tools/build_quest_exp.py
+full_on = {"server": 100, "vip": 20, "scepter": 30, "kafra": 50, "manual": 50}
+qm2 = qm[:3] + [dict(_meas("e.rrf#0", "2026-11-16 10:00", "abyss_04", 1.5), gain=3 * 148560 * 3.5,
+                     quests=[3477], quest_at=[[3477, full_on]]),
+                dict(_meas("f.rrf#0", "2026-11-16 11:00", "abyss_04", 1.5), gain=3 * 165480 * 3.5,
+                     quests=[8663], quest_at=[[8663, full_on]], edge=[8663])]
+lrn_q = _lrn("s5", qm2, {}, {})
+lrn_q["xp_learn"]["quests"] = [
+    dict(src="g.rrf#0", quest=7893, base=15823920, level=190, mult=2.0, date="2026-11-17"),
+    dict(src="h.rrf#1", quest=7895, base=4000000, level=190, mult=2.0, date="2026-11-17", **{"with": [7897]})]
+rep_q = xpreport.text(lrn_q, "9.9.9")
+rows_q = [json.loads(ln[3:]) for ln in rep_q.splitlines() if ln.startswith("RM|")]
+with tempfile.TemporaryDirectory() as tmpr4:
+    with open(os.path.join(tmpr4, "q.txt"), "w", encoding="utf-8") as f:
+        f.write(rep_q)
+    dq = ler.load([tmpr4])
+    lq2 = ler.summary(dq)
+    build_q = ler.quests_for_build(ler.quest_obs(ler.xp_rows(dq), dq))
+check([r["quest"] for r in rows_q if r["t"] == "q"] == [7893, 7895] and all(r.get("mid") for r in rows_q if r["t"] == "q")
+      and "Recompensas de missão medidas (sem bônus)" in rep_q
+      and "pagou ×3,50 · regra do programa ×2,00 (+75%) · regra alternativa ×3,50 (+0%)" in lq2
+      and "Erro mediano da regra do programa: 75% em 1 medida" in lq2
+      and "Erro mediano da regra alternativa: 0% em 1 medida" in lq2
+      and "junto com 7897: o total dividido" in lq2 and "missão 8663" not in lq2.split("Regra do bônus")[0]
+      and build_q == {"7893": 15823920},
+      "relatório e ferramenta: recompensas medidas pelo programa no relatório; a ferramenta compara o que o jogo pagou "
+      "com as duas regras, deixa de fora a entrega no instante de uma subida e grava só o que é confiável -> %s"
+      % build_q)
+# a leitura da pasta junta as recompensas medidas (sem repetir) e as aprendidas valem para a previsão
+import learnfolder  # noqa: E402
+lm = xpmod._learn({})
+lm["quests"] = [dict(src="a.rrf#0", quest=3477, base=1, date="2026-11-01")]
+learnfolder.merge(lm, {"quests": [dict(src="a.rrf#0", quest=3477, base=2, date="2026-11-01"),
+                                  dict(src="b.rrf#0", quest=3477, base=3, date="2026-11-02")]})
+_spec_b = importlib.util.spec_from_file_location("build_quest_exp", os.path.join(HERE, "..", "tools",
+                                                                                 "build_quest_exp.py"))
+build_quest_exp = importlib.util.module_from_spec(_spec_b)
+_spec_b.loader.exec_module(build_quest_exp)
+with tempfile.TemporaryDirectory() as tmpq:
+    pq = os.path.join(tmpq, "r.json")
+    with open(pq, "w", encoding="utf-8") as f:
+        json.dump({"exp": {"3477": 150000, "x": 5, "8663": -1, "7893": True}}, f)
+    rq = build_quest_exp.reports_exp(pq)
+check([(x["src"], x["base"]) for x in lm["quests"]] == [("a.rrf#0", 1), ("b.rrf#0", 3)] and rq == {3477: 150000},
+      "missões: a leitura da pasta junta as recompensas medidas sem repetir a mesma gravação; o build lê o arquivo da "
+      "ferramenta dos relatórios (só números válidos) -> %s %s" % (lm["quests"], rq))
+check(len(be) == 1 and be[0][:2] == ("1000322", "252:100") and abs(be[0][2][0] - 2.0) < 1e-9
+      and len(lr2.drops) == 2 and lr2.repeated["d"] == 0,
+      "ferramenta dos relatórios: efeito de cada bônus de drop com os outros bônus iguais; gravações pequenas iguais "
+      "não são tomadas por repetidas -> %s, %d gravações" % ([(r[0], r[1], round(r[2][0], 3)) for r in be],
+                                                             len(lr2.drops)))
+# leitura única das gravações que já estavam na pasta (processo à parte): em ordem de data, num rascunho, grava só
+# o aprendizado; o widget junta (o que ele já tinha fica), marca a pasta como lida e não começa de novo
+import learnfolder  # noqa: E402
+evf = []
+for i, aid in enumerate((52701, 52702, 52703)):
+    evf += [(i * 300000, fr.spawn(aid, "mob", 1122, "Goblin")), (i * 300000 + 200, fr.skill_damage(ME, aid, 5000)),
+            (i * 300000 + 400, fr.vanish(aid, 1))]
+age_before = xpmod.MAX_AGE_S
+with tempfile.TemporaryDirectory() as tmpf, tempfile.TemporaryDirectory() as tmpc:
+    os.environ["RODPS_CONFIG"] = os.path.join(tmpc, "config.json")      # caches de nomes fora do seu PC
+    for name, date, exp, events in (("b.rrf", (2026, 11, 5, 19, 45, 40), 1000 + 111, []),
+                                    ("a.rrf", (2026, 11, 5, 19, 35, 0), 1000, evf)):
+        with open(os.path.join(tmpf, name), "wb") as f:
+            f.write(fr.build(ME, events, date=date, xp=(7100, exp, 10 ** 9))[0])
+    with open(os.path.join(tmpc, "config.json"), "w", encoding="utf-8") as f:
+        json.dump({"xp_bonuses": {"server": {"on": False, "pct": 100}}, "xp_mode": "lista"}, f)
+    recs_f = [os.path.basename(p) for _w, p in learnfolder.recordings([tmpf], busy_s=0)]
+    busy_f = learnfolder.recordings([tmpf])                     # acabaram de ser escritas: ficam para o widget
+    with open(os.path.join(tmpc, learnfolder.PROGRESS), "w", encoding="utf-8") as f:
+        json.dump({"done": 3, "total": 10}, f)
+    prog_f = (learnfolder.progress(tmpc), learnfolder.should_start({}, tmpc))   # outro processo lendo: não começa
+    res_f = learnfolder.run([tmpf], tmpc, busy_s=0)
+    cfg_f = {"xp_learn": {"measures": [dict(src="a.rrf#fim", date="2026-11-05 19:35", map="x", ratio=9.0)]}}
+    took = learnfolder.take(cfg_f, tmpc)
+    left_f = [n for n in os.listdir(tmpc) if n.startswith("aprendizado_pasta") or n == "erros.log"]
+    lf = cfg_f["xp_learn"]
+    start_f = (learnfolder.should_start(lf, tmpc), learnfolder.should_start({}, tmpc),
+               learnfolder.should_start({"folder_tries": 3}, tmpc))
+    os.environ.pop("RODPS_CONFIG", None)
+mf = res_f["learn"]["measures"]
+check(recs_f == ["a.rrf", "b.rrf"] and busy_f == [] and res_f["files"] == 2 and res_f["errors"] == 0
+      and [m["src"] for m in mf] == ["a.rrf#fim"] and abs(mf[0]["ratio"] - 1.0) < 0.01
+      and took and left_f == [] and lf["folder_read"]["files"] == 2 and [m["ratio"] for m in lf["measures"]] == [9.0]
+      and start_f == (False, True, False) and xpmod.MAX_AGE_S == age_before and prog_f == ((3, 10), False),
+      "leitura da pasta: gravações em ordem de data (as que ainda podem estar gravando ficam para o widget), o "
+      "rascunho aprende no automático, o widget junta sem trocar o que já tinha, marca a pasta como lida e não "
+      "começa de novo -> %s %s %s %s" % (recs_f, [(m["src"], m["ratio"]) for m in mf], left_f, start_f))
+# o evento do servidor não muda por causa de um mapa só: XP 50% acima da lista aqui, e os outros mapas fecham
+with tempfile.TemporaryDirectory() as tmp9:
+    for name, date, exp, events in (("a.rrf", (2026, 11, 5, 19, 35, 0), 1000, ev),
+                                    ("b.rrf", (2026, 11, 5, 19, 45, 40), 1000 + 333, [])):
+        with open(os.path.join(tmp9, name), "wb") as f:
+            f.write(fr.build(ME, events, date=date, xp=(7100, exp, 10 ** 9))[0])
+    rf9 = meter.ReplayFile(os.path.join(tmp9, "a.rrf"))
+    rf9.poll(max_bytes=1 << 30)
+    here9 = xpmod.map_key(rf9.combat.map)
+    cfg_o = {"xp_bonuses": {"server": {"on": True, "pct": 100}},
+             "xp_corr": {"7100": {"samples": [[1.0, 1000, "2026-11-05 10:00", "z#0", "outro_mapa"]]}}}
+    xpmod.calibrate(rf9.combat, cfg_o, meter.xp_after)
+    cfg_n = {"xp_bonuses": {"server": {"on": True, "pct": 100}}}
+    xpmod.calibrate(rf9.combat, cfg_n, meter.xp_after)
+    c_o = xpmod.stored_correction(rf9.combat, cfg_o, here9)
+    check(cfg_o["xp_bonuses"]["server"]["pct"] == 100 and abs(c_o[0] - 1.5) < 1e-3
+          and cfg_n["xp_bonuses"]["server"]["pct"] == 200,
+          "XP automática: XP acima da lista num mapa com os outros mapas fechando é coisa do mapa (a correção dele "
+          "aprende ×1,5; o evento do servidor fica em 100%%); sem outros mapas medidos, o evento ainda é deduzido "
+          "-> %s %s %s" % (cfg_o["xp_bonuses"]["server"], c_o, cfg_n["xp_bonuses"]["server"]))
+# Monster Spotlight por monstro (lista do evento de 10/11 a 07/12/2026): no Lago do Abismo 4 só Ferus Esqueleto
+# (20616) e Acidus Esqueleto (20617) rendem +50%; Ferus Roxo (20612) não. O mapa marcado vale só para quem está
+# fora da lista, e desligar o bônus desliga os dois
+evs = []
+for i, (aid, mob, nm) in enumerate(((73001, 20616, "Ferus Esqueleto"), (73002, 20612, "Ferus Roxo"),
+                                    (73003, 20617, "Acidus Esqueleto"))):
+    evs += [(i * 1000, fr.spawn(aid, "mob", mob, nm)), (i * 1000 + 300, fr.skill_damage(ME, aid, 5000)),
+            (i * 1000 + 400, fr.vanish(aid, 1))]
+csp = combat_of(fr.build(ME, evs, date=(2026, 11, 17, 3, 26, 41), map_name="abyss_04")[0])
+cso = combat_of(fr.build(ME, evs, date=(2026, 12, 8, 3, 26, 41), map_name="abyss_04")[0])
+
+
+def _spot_ratio(cmb, cfg):
+    on = {r["mob"]: r["total"] for r in xpmod.estimate(cmb, dict(cfg, xp_mode="lista"))["rows"]}
+    off = {r["mob"]: r["total"] for r in xpmod.estimate(cmb, dict(cfg, xp_mode="lista", xp_bonuses={
+        "spot": {"on": False, "pct": 20}}))["rows"]}
+    return [round(on[m] / off[m], 3) for m in (20616, 20612, 20617)]
+
+
+# estimativa guardada: A, depois B (outros bônus), depois A de novo (vem guardada) deixa nas linhas os totais de A
+_cfg_a, _cfg_b = {"xp_mode": "lista"}, {"xp_mode": "lista", "xp_bonuses": {"spot": {"on": False, "pct": 20}}}
+_ea = xpmod.estimate(csp, _cfg_a)
+_ta = [r["total"] for r in _ea["rows"]]
+_eb = xpmod.estimate(csp, _cfg_b)
+_tb = [r["total"] for r in _eb["rows"]]
+_ea2 = xpmod.estimate(csp, _cfg_a)
+check(_ta != _tb and [r["total"] for r in _ea2["rows"]] == _ta and _ea2["xp"] == _ea["xp"] and _ea2 is not _ea,
+      "XP: a estimativa guardada devolve o mesmo resultado e regrava nas linhas os totais dela -> %s %s" % (_ta, _tb))
+sp_plain = _spot_ratio(csp, {})
+sp_mark = _spot_ratio(csp, {"xp_spot": {"abyss_04": {"pct": 20}}})
+sp_late = _spot_ratio(cso, {})
+check(sp_plain == [1.5, 1.0, 1.5] and sp_mark == [1.5, 1.2, 1.5] and sp_late == [1.0, 1.0, 1.0]
+      and xpmod.event_spots(csp).get(21542) == 20
+      and xpmod.spot_kills(csp) == {50.0: {"Ferus Esqueleto": 1, "Acidus Esqueleto": 1}},
+      "XP: Monster Spotlight vale por monstro da lista do evento (+50%% só nos Esqueletos do Lago do Abismo), o mapa "
+      "marcado só para os de fora da lista, e só no período do evento -> %s %s %s" % (sp_plain, sp_mark, sp_late))
+# manual que vence depois de uma morte: a morte encerra os status no medidor, mas o manual segue; quando o jogo
+# avisa que ele acabou (o "desligou" chega depois da morte), a XP para de contar o bônus ali (fdgsrb: 5,8 min,
+# e o programa contava até o fim da gravação)
+evm = [(1000, fr.status(ME, 250, True, 1800000, 1800000, 50)), (5000, fr.vanish(ME, 1)),
+       (20000, fr.status(ME, 250, False, 0, 0, 0)), (30000, fr.skill_damage(ME, 77, 1))]
+cm = combat_of(fr.build(ME, evm)[0])
+cm2 = combat_of(fr.build(ME, evm[:2] + evm[3:])[0])
+man = xpmod.windows(cm, {})["manual"]
+man2 = xpmod.windows(cm2, {})["manual"]
+check(man == [(1000, 20000, 50)] and man2 == [(1000, 30000, 50)] and cm.lasting(250) == [(1000, 20000)],
+      "XP: manual que vence depois de uma morte para de contar quando o jogo avisa (sem o aviso, segue pela duração) "
+      "-> %s %s" % (man, man2))
+# trecho com morte de quem grava não calibra (a morte tira XP e o replay não diz quanto)
+evd2 = []
+for i, aid in enumerate((52601, 52602, 52603, 52604)):
+    evd2 += [(i * 60000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 60000 + 300, fr.skill_damage(ME, aid, 5000)),
+             (i * 60000 + 400, fr.vanish(aid, 1))]
+    if i == 2:
+        evd2.append((i * 60000 + 500, fr.hp(241, rrf.SP_BASELEVEL)))
+cl_ok = combat_of(fr.build(ME, evd2, xp=(7200, 1000 - 204, 1000))[0])
+cl_dead = combat_of(fr.build(ME, sorted(evd2 + [(70000, fr.vanish(ME, 1))], key=lambda x: x[0]),
+                             xp=(7200, 1000 - 204, 1000))[0])
+cl_ins = combat_of(fr.build(ME, sorted(evd2 + [(70000, fr.vanish(ME, 1)), (70010, struct.pack(
+    "<HHIIHB", rrf.P_ITEM_USE, 20, 6413, ME, 43, 1))], key=lambda x: x[0]), xp=(7200, 1000 - 204, 1000))[0])
+sc_ok = xpmod.session_correction(cl_ok, {"xp_mode": "medido"})
+sc_dead = xpmod.session_correction(cl_dead, {"xp_mode": "medido"})
+sc_ins = xpmod.session_correction(cl_ins, {"xp_mode": "medido"})
+check(sc_ok and abs(sc_ok[0] - 2.0) < 1e-9 and sc_dead and abs(sc_dead[0] - 254 / 102.0) < 1e-9
+      and sc_ins and abs(sc_ins[0] - 2.0) < 1e-9 and xpmod.died_in(cl_dead, 0, 130000)
+      and not xpmod.died_in(cl_ok, 0, 130000) and not xpmod.died_in(cl_ins, 0, 130000)
+      and xpmod.lost_deaths(cl_dead) == [70000] and xpmod.lost_deaths(cl_ins) == [],
+      "XP: morte sem seguro tira 5%% do nível, e a medida da subida de nível soma isso de volta (204 + 50 = 254 em "
+      "102 pela lista); com o Seguro Estendido gasto na morte nada muda -> %s %s %s" % (sc_ok, sc_dead, sc_ins))
+# a previsão desconta a morte sem seguro (5% do nível, nunca abaixo de 0) e avisa
+evd3 = []
+for i, aid in enumerate((52701, 52702, 52703)):
+    evd3 += [(i * 60000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 60000 + 300, fr.skill_damage(ME, aid, 5000)),
+             (i * 60000 + 400, fr.vanish(aid, 1))]
+evd3.append((200000, fr.skill_damage(ME, 77, 1)))
+p_ok = xpmod.progress(combat_of(fr.build(ME, evd3, xp=(7200, 500, 1000))[0]), {})
+c_dead3 = combat_of(fr.build(ME, sorted(evd3 + [(90000, fr.vanish(ME, 1))], key=lambda x: x[0]),
+                             xp=(7200, 500, 1000))[0])
+p_dead = xpmod.progress(c_dead3, {})
+p_ins = xpmod.progress(combat_of(fr.build(ME, sorted(evd3 + [(90000, fr.vanish(ME, 1)), (90005, struct.pack(
+    "<HHIIHB", rrf.P_ITEM_USE, 20, 6413, ME, 9, 1))], key=lambda x: x[0]), xp=(7200, 500, 1000))[0]), {})
+p_cap = xpmod.progress(combat_of(fr.build(ME, sorted(evd3 + [(100, fr.vanish(ME, 1))], key=lambda x: x[0]),
+                                          xp=(7200, 10, 1000))[0]), {})
+check(abs(p_ok["xp"] - p_dead["xp"] - 50) < 1e-6 and abs(p_ins["xp"] - p_ok["xp"]) < 1e-6 and p_dead["deaths"] == 1
+      and abs(p_cap["lost"] - 10) < 1e-6 and xpmod.death_note(c_dead3, {}) == (1, 5.0)
+      and xpmod.death_text(1, 5.0) == "morte sem seguro −5%",
+      "XP: a previsão desconta 5%% do nível por morte sem seguro (nada com o Seguro Estendido; nunca mais do que "
+      "havia) e avisa -> %s %s %s %s" % (round(p_ok["xp"]), round(p_dead["xp"]), round(p_ins["xp"]), p_cap["lost"]))
+# no período de um Monster Spotlight conhecido o automático não adivinha mapa: a marca automática antiga sai, a
+# feita à mão fica
+with tempfile.TemporaryDirectory() as tmp8:
+    for name, date, exp, events in (("a.rrf", (2026, 11, 17, 19, 35, 0), 1000, ev),
+                                    ("b.rrf", (2026, 11, 17, 19, 45, 40), 1000 + 133, [])):
+        with open(os.path.join(tmp8, name), "wb") as f:
+            f.write(fr.build(ME, events, date=date, xp=(7100, exp, 10 ** 9))[0])
+    rf8 = meter.ReplayFile(os.path.join(tmp8, "a.rrf"))
+    rf8.poll(max_bytes=1 << 30)
+    here8 = xpmod.map_key(rf8.combat.map)
+    cfg8 = {"xp_spot": {here8: {"pct": 20, "when": "2026-11-12", "auto": True},
+                        "outro": {"pct": 50, "when": "2026-11-12", "auto": False}}}
+    xpmod.calibrate(rf8.combat, cfg8, meter.xp_after)
+    cfg9 = {}
+    xpmod.calibrate(rf8.combat, cfg9, meter.xp_after)
+    check(cfg8["xp_spot"] == {"outro": {"pct": 50, "when": "2026-11-12", "auto": False}} and not cfg9.get("xp_spot"),
+          "XP automática: no período do Monster Spotlight (lista oficial na conta) nenhum mapa é marcado por palpite e "
+          "a marca automática antiga sai; a feita à mão fica -> %s %s" % (cfg8.get("xp_spot"), cfg9.get("xp_spot")))
+# nome de disfarce na instância: os MVPs do Laboratório Central chegam todos como "Criatura não identificada"
+evd = [(0, fr.spawn(71001, "mob", 1087, "\x1c52Z2Bw\x1c", boss=2)), (0, fr.spawn(71002, "mob", 1980, "Rótulo")),
+       (0, fr.spawn(71003, "mob", 2087, "Rótulo")), (0, fr.spawn(71004, "mob", 20641, "Broken Robovac#3")),
+       (0, fr.spawn(71005, "mob", 1002, "Nome do jogo")), (0, fr.spawn(71006, "mob", 20581, "#grn_1")),
+       (0, fr.spawn(71007, "mob", 20639, "2 Zone Patrol#1")), (0, fr.spawn(71008, "mob", 20641, "2 Zone Patrol#1"))]
+cd = combat_of(fr.build(ME, evd)[0])
+got = [cd.name_of(a) for a in (71001, 71002, 71003, 71004, 71005, 71006, 71007, 71008)]
+check(got[:3] == [meter.monster_name(1087), meter.monster_name(1980), meter.monster_name(2087)] and all(got[:3])
+      and got[3] == "Broken Robovac" and got[4] == "Nome do jogo" and got[5] == meter.monster_name(20581) and got[5]
+      and got[6] == got[7] == "2 Zone Patrol",
+      "nomes: disfarce da instância (chave conhecida ou mesmo nome em monstros diferentes) vira o nome de verdade; "
+      "rótulo \"nome#n\" aparece como no jogo, sem o #, mesmo repetido em monstros diferentes; o nome normal "
+      "continua -> %s" % got)
 # monstros do Lago do Abismo 4 (abyss_04) com XP; sem nenhum monstro de XP conhecida a previsão diz isso
 check(all(xpmod.MOB_EXP.get(m) for m in range(20612, 20618)) and xpmod.MOB_EXP[20617][:2] == [207, 249407]
       and xpmod.MOB_EXP[20773][1] == 252562 and xpmod.MOB_EXP[20604][1] == 179251 and xpmod.MOB_EXP[1085][1:] == [0, 0],
@@ -1811,10 +2651,24 @@ check(xpmod.table_need(4239, 163) == 132704283 and xpmod.table_need(4239, 180) =
       and xpmod.table_need(4239, 200) is None and xpmod.table_need(4302, 240) == 45000661693
       and xpmod.table_need(4302, 248) == 220850071960 and xpmod.table_need(999999, 100) is None,
       "XP: a XP do nível vem da tabela também fora da 4ª classe (o %% e o tempo até o nível seguem depois de upar)")
-old_s = {"xp_corr": {"7100": {"samples": [[2.0, 100, "2026-11-01 10:00", "x#0"], [1.0, 100, "2026-11-05 10:00", "y#0"]]}}}
-new_s = {"xp_corr": {"7100": {"samples": [[2.0, 100, "2026-11-03 10:00", "x#0"], [1.0, 100, "2026-11-05 10:00", "y#0"]]}}}
+# 4ª classe do 200 ao 223: o que o jogo mandou no 200 e no 201 (Lago do Abismo) e no 224; do 220 em diante × 1,22
+check(xpmod.table_need(4302, 200) == 653047446 and xpmod.table_need(4302, 201) == 655006588
+      and xpmod.table_need(4253, 219) == 691293473 and xpmod.table_need(4302, 220) == 691293473 * 122 // 100
+      and xpmod.table_need(4302, 224) == 1868364511 and xpmod.table_need(4262, 246) == 148380859958
+      and xpmod.table_need(4302, 249) == 269437087791,
+      "XP: a XP dos níveis 200 a 223 da 4ª classe é conhecida (o %% e o tempo até o nível seguem ao subir do 200 "
+      "para o 201) -> %s" % [xpmod.table_need(4302, lv) for lv in (200, 201, 219, 220, 224)])
+# classes 1 e 2 do 79 ao 98: o LATAM não reduziu a XP como o rAthena (um Ferreiro no 96 recebeu 2.098.423 do jogo;
+# no 76 as duas tabelas conferem); transcendentais pela mesma tabela antiga; o Superaprendiz (23) tem tabela;
+# Doram e 3ª classe continuam a do rAthena
+got = [xpmod.table_need(j, lv) for j, lv in ((10, 76), (10, 78), (10, 79), (10, 96), (10, 97), (10, 98), (10, 99),
+                                              (4011, 96), (23, 96), (4218, 96), (4239, 175))]
+check(got == [149620, 158216, 181403, 2098423, 2465723, 2979788, None, 3567320, 2098423, 890438, 320295193],
+      "XP: classes 1 e 2 do 79 ao 98 pela XP do LATAM (o \"já subiu\" antes da hora num Ferreiro 96→97) -> %s" % got)
+old_s = {"xp_corr": {"7100": {"samples": [[2.0, 100, "2026-10-01 10:00", "x#0"], [1.0, 100, "2026-11-05 10:00", "y#0"]]}}}
+new_s = {"xp_corr": {"7100": {"samples": [[2.0, 100, "2026-10-20 10:00", "x#0"], [1.0, 100, "2026-11-05 10:00", "y#0"]]}}}
 check(xpmod.stored_correction(cq, old_s) == (1.0, 1) and xpmod.stored_correction(cq, new_s) == (1.5, 2),
-      "XP: a correção guardada usa só as medidas de até 3 dias antes da mais nova -> %s %s"
+      "XP: a correção guardada usa as medidas de até 30 dias antes da mais nova -> %s %s"
       % (xpmod.stored_correction(cq, old_s), xpmod.stored_correction(cq, new_s)))
 xpmod.MAX_AGE_S = 24 * 3600
 

@@ -180,6 +180,37 @@ def clean(look):
     return out
 
 
+UNDO_MAX = 50                 # passos que o Desfazer guarda
+
+
+class History:
+    """O Desfazer da aba Visuais: o estado do look depois de cada passo; num passo novo, o de antes vai para a
+    pilha (até UNDO_MAX). Os estados são guardados como vieram (quem chama passa cópias)."""
+
+    def __init__(self):
+        self.past, self.now = [], None
+
+    def reset(self, state):
+        """O look mudou sozinho (outro replay aberto): recomeça daqui, sem nada para desfazer."""
+        self.past, self.now = [], state
+
+    def record(self, state):
+        """Depois de um passo: o estado anterior vai para a pilha (se algo mudou de fato)."""
+        if self.now is not None and state != self.now:
+            self.past = (self.past + [self.now])[-UNDO_MAX:]
+        self.now = state
+
+    def undo(self):
+        """O estado anterior (que passa a ser o atual), ou None se não há o que desfazer."""
+        if not self.past:
+            return None
+        self.now = self.past.pop()
+        return self.now
+
+    def can_undo(self):
+        return bool(self.past)
+
+
 def saved_looks(cfg):
     """{nome: look} dos looks guardados (cfg "looks"), já limpos."""
     return {str(name): clean(look) for name, look in ((cfg or {}).get("looks") or {}).items()

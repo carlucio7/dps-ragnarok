@@ -7,6 +7,7 @@ olhando: cada visual, cada cabelo e cada cor aparece como uma miniatura desenhad
 imagem.
 """
 
+import copy
 import os
 import time
 import tkinter as tk
@@ -27,18 +28,21 @@ REPLAY = "Personagem do replay"
 CW, CH = 220, 240             # tamanho da prévia, em pixels do jogo (alguns visuais são enormes)
 SEARCH_MS = 180               # espera depois da última tecla para refazer a grade da busca
 # o que dá para escolher na grade: (chave, nome, célula da miniatura (l, a), com o corpo?)
-ICON_KEYS = ("top", "mid", "low")     # nestas a célula mostra o ícone do item (a cabeça do personagem escondia
-#                                       visuais como as piscadelas); capa, cabelo e cores seguem com o personagem
-CATEGORIES = [("top", "Topo", (60, 60), False), ("mid", "Meio", (60, 60), False), ("low", "Baixo", (60, 60), False),
+ICON_KEYS = ("top", "mid", "low")     # nestas a célula mostra o desenho do chapéu sozinho, o mesmo da animação (a
+#                                       cabeça do personagem escondia visuais como as piscadelas; o ícone de 24 px
+#                                       ampliado ficava pixelado); os minúsculos e os sem desenho mostram o ícone
+CATEGORIES = [("top", "Topo", (76, 76), False), ("mid", "Meio", (76, 76), False), ("low", "Baixo", (76, 76), False),
               ("robe", "Capa", (76, 104), True), ("hair", "Cabelo", (76, 76), False),
               ("hair_color", "Cor do cabelo", (76, 76), False), ("cloth_color", "Cor da roupa", (76, 104), True),
               ("effects", "Pedras e efeitos", (178, 50), False)]
-FX_MS = 66                    # com um efeito ligado a prévia é redesenhada neste ritmo (15 vezes por segundo)
 NO_GROUND, GRID = "Nenhum", "Grade de células"
 SHADOW_AT = (14, -26)         # onde a cópia da pedra Sombra fica em relação ao personagem (pixels do jogo)
 SLOT_KEYS = tuple(k for k, _n in visuals.SLOTS)
 WORK_S = 0.012                # quanto tempo por vez o programa gasta desenhando miniaturas (a janela segue leve)
 MAX_THUMBS = 1500             # miniaturas guardadas; passou disso, recomeça
+# o chão, os efeitos e os ícones leem pastas que ficam quase todas dentro de data\texture\: um índice só do
+# data.grf para os três (cada índice separado era uma passada a mais pela tabela do jogo, com a janela esperando)
+VIS_PREFIXES = ground.PREFIXES + streffect.PREFIXES + (sprites.ITEM_ICON, sprites.ITEM_ART)
 
 
 class ThumbGrid:
@@ -137,7 +141,18 @@ class ThumbGrid:
                                    font=self.win.f["small"])
         self.queue = want
         if want and self.after is None:
-            self.after = self.win.top.after(1, self.work)
+            self.schedule()
+
+    def schedule(self):
+        """A próxima leva de miniaturas só depois que o Tk redesenhar a tela. Ele desenha nas tarefas ociosas, que não
+        rodam enquanto houver um after vencido: com after(1) direto as levas emendavam e a aba só aparecia (e a
+        janela só se redesenhava) com todas as miniaturas prontas."""
+        def soon():
+            try:
+                self.after = self.win.top.after(1, self.work)
+            except tk.TclError:                   # janela fechada nesse meio-tempo
+                self.after = None
+        self.after = self.win.top.after_idle(soon)
 
     def work(self):
         """Faz as miniaturas que faltam das células à vista, um pouco por vez."""
@@ -154,7 +169,7 @@ class ThumbGrid:
         if done:
             self.redraw()                 # redesenha e põe na fila o que ainda falta
         elif self.queue:
-            self.after = self.win.top.after(1, self.work)
+            self.schedule()
 
 
 class VisualsTab:
@@ -165,10 +180,13 @@ class VisualsTab:
         nb.add(tab, text=_("Visuais"))
         self.tab = tab
         self.look = dict(visuals.DEFAULT_LOOK)
+        self.history = visuals.History()   # o Desfazer: o estado depois de cada passo
         self.items = {}               # posição -> item escolhido (para mostrar o nome certo)
         self.held = {}                # posição -> (item, desenho, nome) do visual de várias posições que a ocupa
         self.icons = None             # os ícones dos itens no data.grf (aberto na primeira vez)
-        self.base_id = None           # o replay de onde veio o look de partida
+        self.icon_art = {}            # item -> nome do desenho dele (iteminfo do jogo)
+        self.vis = None               # o índice do data.grf do chão, dos efeitos e dos ícones (vis_grf)
+        self.base_id = None          # o replay de onde veio o look de partida
         self.touched = False          # a pessoa já mexeu no look? (replay novo só troca o look se não mexeu)
         self.catalog = None
         self.jobs = {}                # nome da classe -> id
@@ -179,24 +197,32 @@ class VisualsTab:
         self.fx_names = {}            # efeito -> nome para mostrar
         self.t0 = time.monotonic()    # começo da animação (o quadro do personagem e o dos efeitos saem do relógio)
         self.delay = 100.0
+        self.speed = None             # velocidade de andar do personagem do replay (a da pose "Andando (rápido)")
+        self.extents = {}             # (look, pose, direção, cabeça) -> retângulo de todos os quadros (pés fixos)
         self.fx_photos = []           # as imagens dos efeitos à vista (o Tk precisa que alguém as segure)
         self.ground = None            # ground.Ground, aberto quando a prévia pede um terreno
         self.ground_img = (None, None)   # (o que foi pedido, a imagem do chão)
 
         bar = tk.Frame(tab, bg=c["panel"])
-        bar.pack(fill="x", padx=10, pady=(10, 4))
+        bar.pack(fill="x", padx=10, pady=(8, 2))
         win.label(bar, _("Look:"), color="muted", bg="panel").pack(side="left")
         self.saved = tk.StringVar(win.top, _(REPLAY))
         self.saved_box = ttk.Combobox(bar, textvariable=self.saved, width=30, state="readonly", style="An.TCombobox",
                                       font=win.f["text"])
         self.saved_box.pack(side="left", padx=6)
         self.saved_box.bind("<<ComboboxSelected>>", lambda e: self.pick_saved())
+        self.undo_btn = ttk.Button(bar, text=_("↶ Desfazer"), style="An.TButton", command=self.undo)
+        self.undo_btn.pack(side="left")
+        ttk.Button(bar, text=_("Original do replay"), style="An.TButton",
+                   command=self.reset_look).pack(side="left", padx=(6, 12))
         ttk.Button(bar, text=_("Salvar look…"), style="An.TButton", command=self.save_look).pack(side="left")
         ttk.Button(bar, text=_("Excluir"), style="An.TButton", command=self.delete_look).pack(side="left", padx=6)
         ttk.Button(bar, text=_("Copiar imagem"), style="An.TButton",
                    command=lambda: win.copy_image(self.canvas)).pack(side="left")
-        self.info = win.label(bar, "", "small", "muted", "panel", anchor="w")
-        self.info.pack(side="left", padx=12)
+        # cabelo, cores, direção e o que faltou no jogo: numa linha própria (na barra, com Desfazer e Original do
+        # replay, era cortado na largura padrão da janela)
+        self.info = win.label(tab, "", "small", "muted", "panel", anchor="w")
+        self.info.pack(fill="x", padx=12, pady=(0, 2))
 
         body = tk.Frame(tab, bg=c["panel"])
         body.pack(fill="both", expand=True, padx=6, pady=(2, 8))
@@ -212,7 +238,7 @@ class VisualsTab:
         ttk.Button(ctr, text="⟳", width=3, style="An.TButton",
                    command=lambda: self.turn(-1)).pack(side="left", padx=(4, 0))
         self.action = tk.StringVar(win.top, _("Parado"))
-        box = ttk.Combobox(ctr, textvariable=self.action, values=[_(n) for _a, n in sprites.ACTIONS], width=13,
+        box = ttk.Combobox(ctr, textvariable=self.action, values=[_(n) for _a, n in sprites.ACTIONS], width=17,
                            state="readonly", style="An.TCombobox", font=win.f["text"])
         box.pack(side="left", padx=(8, 0))
         box.bind("<<ComboboxSelected>>", lambda e: self.restart())
@@ -295,13 +321,15 @@ class VisualsTab:
                                  highlightbackground=c["track"], highlightcolor=c["accent"],
                                  disabledbackground=c["panel"], disabledforeground=c["muted"])
         self.find_ent.pack(side="left", padx=(6, 10), ipady=2)
-        self.query.trace_add("write", lambda *_a: self.search_soon())
+        self.win.trace(self.query, lambda *_a: self.search_soon())
         self.count = win.label(find, "", "small", "muted", "panel", anchor="w")
         self.count.pack(side="left", fill="x", expand=True)
         self.count_text = ""
         holder = tk.Frame(right, bg=c["panel"])
         holder.pack(fill="both", expand=True, padx=(0, 4))
         self.grid = ThumbGrid(holder, win, self.thumb, self.chosen, self.hovered)
+        self.history.reset(self.snapshot())
+        self.show_undo()
 
     # ------------------------------------------------------------ dados
 
@@ -336,12 +364,16 @@ class VisualsTab:
         """Chamado quando a aba fica à vista ou o replay muda."""
         grf = clientdata.NAMES.grf
         sprites.LOADER.start(grf)
+        # "Andando (rápido)" anda na velocidade do personagem do replay quando ele tinha acréscimo
+        self.speed = c.session.stats.get("speed") if c is not None else None
         ident = id(c) if c is not None else 0
         ready = sprites.LOADER.wardrobe is not None
         if (ident, ready) != self.base_id and not self.touched:
             # replay novo (ou as tabelas do jogo ficaram prontas): parte de novo do personagem do replay
             self.base_id = (ident, ready)
             self.set_look(self.replay_look(c), mark=False)
+            self.history.reset(self.snapshot())        # nada para desfazer: o look mudou sozinho
+            self.show_undo()
         names = [_(REPLAY)] + sorted(visuals.saved_looks(self.win.app.cfg))
         if list(self.saved_box["values"]) != names:
             self.saved_box["values"] = names
@@ -352,7 +384,7 @@ class VisualsTab:
         self.items = {}
         self.held = {}
         self.touched = mark
-        self.images, self.frame = {}, 0
+        self.images, self.frame, self.extents = {}, 0, {}
         self.show_look()
         self.show_category(keep_scroll=True)
 
@@ -365,12 +397,22 @@ class VisualsTab:
             self.show_slot(key)
         self.show_effects()
 
+    def vis_grf(self, path):
+        """O índice do data.grf que o chão, os efeitos e os ícones dividem (aberto na primeira vez que um deles pede).
+        None se o arquivo não abrir: aí cada um tenta o seu (e cai no que já fazia quando falha)."""
+        if self.vis is None:
+            try:
+                self.vis = sprites.Grf(path, prefixes=VIS_PREFIXES)
+            except Exception:  # noqa: BLE001 - .grf estranho ou que sumiu
+                self.vis = False
+        return self.vis or None
+
     def grounds(self):
         """Os terrenos do jogo (aberto na primeira vez); a caixa "Chão" ganha os nomes deles."""
         w = sprites.LOADER.wardrobe
         if self.ground is None and w is not None:
             try:
-                self.ground = ground.Ground(w.grf.path)
+                self.ground = ground.Ground(w.grf.path, self.vis_grf(w.grf.path))
             except (OSError, ValueError, KeyError, IndexError):
                 self.ground = False
             names = [n for n, _m, _c in self.ground.places()] if self.ground else []
@@ -428,7 +470,7 @@ class VisualsTab:
         w = sprites.LOADER.wardrobe
         if self.fx is None and w is not None:
             try:
-                self.fx = streffect.HatEffects(w.grf.path)
+                self.fx = streffect.HatEffects(w.grf.path, self.vis_grf(w.grf.path))
             except (OSError, ValueError, KeyError, IndexError):
                 self.fx = False
             names = {visuals.SHRINK: _("Miniatura (personagem pela metade)")}
@@ -493,6 +535,49 @@ class VisualsTab:
         self.saved.set("")
         self.frame = 0
         self.t0 = time.monotonic()
+        self.remember()
+
+    # ------------------------------------------------------------ desfazer e voltar ao do replay
+
+    def snapshot(self):
+        """O estado do look para o Desfazer (cópias: o look é mexido no lugar)."""
+        return (copy.deepcopy(self.look), dict(self.items), dict(self.held), self.saved.get())
+
+    def remember(self):
+        """Depois de um passo (vestir, tirar, classe, cabelo, cores, efeitos, look guardado): o de antes vai
+        para o Desfazer."""
+        self.history.record(self.snapshot())
+        self.show_undo()
+
+    def show_undo(self):
+        try:
+            self.undo_btn.state(["!disabled"] if self.history.can_undo() else ["disabled"])
+        except (tk.TclError, AttributeError):
+            pass
+
+    def undo(self):
+        """Desfaz o último passo."""
+        state = self.history.undo()
+        if state is None:
+            return
+        look, items, held, saved = state
+        self.look, self.items, self.held = copy.deepcopy(look), dict(items), dict(held)
+        self.touched = True
+        self.saved.set(saved)
+        self.frame, self.t0 = 0, time.monotonic()
+        self.show_look()
+        self.show_category(keep_scroll=True)
+        self.show_undo()
+        self.draw()
+
+    def reset_look(self):
+        """Volta ao visual do personagem do replay (o Desfazer traz de volta o que estava)."""
+        c = self.win.combat()
+        self.set_look(self.replay_look(c), mark=False)
+        self.base_id = (id(c) if c is not None else 0, sprites.LOADER.wardrobe is not None)
+        self.saved.set(_(REPLAY))
+        self.remember()
+        self.draw()
 
     def changed(self):
         """Classe ou sexo mudou."""
@@ -592,7 +677,9 @@ class VisualsTab:
                 if view in seen:
                     continue
                 seen.add(view)
-                cell_key = ("icon", item, view) if key in ICON_KEYS else (key, view) + ctx
+                # o desenho do chapéu muda com o sexo e com a raça (doram)
+                cell_key = (("icon", item, view, look["sex"], look["job"] in sprites.DORAM_JOBS) if key in ICON_KEYS
+                            else (key, view) + ctx)
                 items.append(dict(key=cell_key, name=nm, value=view, row=(nm, item, view)))
             self.count_text = _("%d visuais") % len(items)
         elif key == "hair":
@@ -617,11 +704,11 @@ class VisualsTab:
         if w is None:
             return None
         kind, value = key[0], key[1]
-        if kind == "icon":                         # topo, meio e baixo: o ícone do item, ampliado
-            photo = self.icon(value, cell)
+        if kind == "icon":                         # topo, meio e baixo: o desenho do chapéu (senão o ícone do item)
+            photo = self.sprite_thumb(key[2], cell) or self.icon(value, cell)
             if photo is not None:
                 return photo
-            kind, value = "top", key[2]            # item sem ícone no jogo: a cabeça com ele, como antes
+            kind, value = "top", key[2]            # item sem desenho nem ícone: a cabeça com ele, como antes
         base = dict(self.look, top=0, mid=0, low=0, robe=0, weapon=0, shield=0)
         base[kind] = value
         with_body = next(b for k, _n, _c, b in CATEGORIES if k == kind)
@@ -646,6 +733,22 @@ class VisualsTab:
             return None
         return photo.zoom(zoom) if zoom > 1 else photo
 
+    def sprite_thumb(self, view, cell):
+        """O desenho do chapéu sozinho (o mesmo da animação) no maior tamanho que cabe na célula, ou None (sem
+        desenho, ou minúsculo como uma piscadela: aí vale o ícone)."""
+        w = sprites.LOADER.wardrobe
+        if w is None:
+            return None
+        try:
+            got = w.item_thumb(view, self.look, cell[0] - 8, cell[1] - 8)
+            if got is None:
+                return None
+            _tw, _th, data, zoom = got
+            photo = tk.PhotoImage(master=self.win.top, data=data, format="png")
+        except Exception:  # noqa: BLE001 - desenho estranho: vale o ícone
+            return None
+        return photo.zoom(zoom) if zoom > 1 else photo
+
     def icon(self, item, cell):
         """O ícone do item (24 x 24 no jogo) como imagem do Tk, no maior tamanho inteiro que cabe na célula."""
         w = sprites.LOADER.wardrobe
@@ -653,9 +756,12 @@ class VisualsTab:
             return None
         try:
             if self.icons is None:
-                self.icons = sprites.Grf(w.grf.path, prefixes=(sprites.ITEM_ICON, sprites.ITEM_ART))
                 self.icon_art = gamecache.items(os.path.join(os.path.dirname(w.grf.path), "System",
                                                              "iteminfo_new.lub")).get("art") or {}
+                self.icons = self.vis_grf(w.grf.path) or sprites.Grf(w.grf.path, prefixes=(sprites.ITEM_ICON,
+                                                                                            sprites.ITEM_ART))
+            if not self.icons:
+                return None
             art = self.icon_art.get(item)
             data = self.icons.read(sprites.ITEM_ICON + art + ".bmp") if art else None
             if not data:
@@ -715,14 +821,13 @@ class VisualsTab:
     def pick_saved(self):
         name = self.saved.get()
         if name == _(REPLAY):
-            self.touched = False
-            self.base_id = None
-            self.refresh(self.win.combat())
+            self.reset_look()
             return
         look = visuals.saved_looks(self.win.app.cfg).get(name)
         if look:
             self.set_look(look)
             self.saved.set(name)
+            self.remember()
             self.draw()
 
     def save_look(self):
@@ -804,63 +909,77 @@ class VisualsTab:
         action, head = self.choice()
         look = self.look
         elapsed = (time.monotonic() - self.t0) * 1000.0
-        moving = action not in (sprites.IDLE, sprites.SIT)
-        self.frame = int(elapsed / max(20.0, self.delay)) % self.n if moving else 0
+        lk = tuple(sorted((k, v) for k, v in look.items() if k != "effects"))
+        # cada parte no quadro dela neste instante (chapéus e capas animados no próprio ritmo, o passo do corpo na
+        # velocidade do personagem) e quanto falta para o próximo quadro mudar
+        fast = self.action.get() == _(sprites.FAST_WALK)
+        st = w.clock(look, action, self.dir, head, elapsed, sprites.walk_speed(fast, self.speed))
+        step, idx, wait = st if st else (0, (), None)
+        self.frame = step
         on = list(look.get("effects") or [])
         table = self.effects() if on else None
         zoom = max(1, sc // 2) if visuals.SHRINK in on else sc
         pale, shadow = visuals.PALE in on, visuals.SHADOW in on
-        key = (tuple(sorted((k, v) for k, v in look.items() if k != "effects")), action, self.dir, head, self.frame,
-               zoom, pale, shadow)
+        key = (lk, action, self.dir, head, idx, zoom, pale, shadow)
         img = self.images.get(key)
         if img is None:
-            r = w.render(look, action, self.dir, self.frame, head)
+            # montado pelo GDI+ (a Sombra e a Palidez já vêm prontas)
+            r = w.render_png(look, action, self.dir, step, head, elapsed, pale, shadow)
             if r is None:
                 cv.create_text(W / 2, H / 2, text=_("Sem sprite para esta classe."), fill=col["muted"],
                                font=win.f["text"], width=W - 20)
                 self.info.configure(text="")
                 return
-            iw, ih, px, ox, oy, delay, nframes, missing = r
+            iw, ih, data, ox, oy, delay, nframes, missing, dark_data = r
             dark = None
-            if shadow:                             # Sombra: a mesma figura, escura e meio transparente
-                dark = tk.PhotoImage(master=win.top, format="png", data=sprites.png_b64(
-                    iw, ih, [(r0 // 5, g0 // 5, b0 // 5, a0 * 5 // 9) for r0, g0, b0, a0 in px]))
+            if dark_data:                          # Sombra: a mesma figura, escura e meio transparente
+                dark = tk.PhotoImage(master=win.top, format="png", data=dark_data)
                 dark = dark.zoom(zoom) if zoom > 1 else dark
-            if pale:                               # Palidez: as cores vão quase todas para o branco
-                px = [(r0 + (255 - r0) * 3 // 5, g0 + (255 - g0) * 3 // 5, b0 + (255 - b0) * 3 // 5, a0)
-                      for r0, g0, b0, a0 in px]
-            photo = tk.PhotoImage(master=win.top, data=sprites.png_b64(iw, ih, px), format="png")
+            photo = tk.PhotoImage(master=win.top, data=data, format="png")
             if zoom > 1:
                 photo = photo.zoom(zoom)
-            if len(self.images) > 120:
+            if len(self.images) > 160:
                 self.images = {}
             img = self.images[key] = (photo, ox * zoom, oy * zoom, delay, nframes, missing, dark)
         photo, ox, oy, delay, nframes, missing, dark = img
         self.n, self.delay = max(1, nframes), float(delay or 100)
         # os pés ficam perto de baixo; um visual muito alto (um dragão em volta do personagem) desce o que der
-        # para caber inteiro, e um que sobra para baixo dos pés sobe
+        # para caber inteiro, e um que sobra para baixo dos pés sobe. A conta usa o retângulo de TODOS os quadros
+        # da animação: com o de cada quadro, o personagem subia e descia quando o visual mudava de tamanho (e o chão
+        # era redesenhado a cada quadro)
+        ek = (lk, action, self.dir, head)
+        ext = self.extents.get(ek)
+        if ext is None:
+            if len(self.extents) > 200:
+                self.extents = {}
+            ext = self.extents[ek] = w.extent(look, action, self.dir, head) or (
+                -ox / zoom, -oy / zoom, (photo.width() - ox) / zoom, (photo.height() - oy) / zoom)
+        above, below = -ext[1] * zoom, ext[3] * zoom
         fx, fy = W / 2, H - (70 if on else 30) * sc     # com efeito ligado sobra chão para o que fica nos pés
-        below = photo.height() - oy
         fy = min(fy, H - 2 - below) if below > 30 * sc - 2 else fy
-        if fy - oy < 2:
-            fy = min(H - 2 - below, oy + 2) if photo.height() <= H - 4 else (H - photo.height()) / 2 + oy
+        if fy - above < 2:
+            fy = min(H - 2 - below, above + 2) if above + below <= H - 4 else (H - (above + below)) / 2 + above
+        fx, fy = int(fx), int(fy)
         self.draw_floor(W, H, fx, fy)
         cv.create_oval(fx - 14 * zoom, fy - 4 * zoom, fx + 14 * zoom, fy + 4 * zoom, outline="",
                        fill=_shade(col["tile"]), stipple="gray50")
         # efeitos: os de trás do personagem primeiro, os outros por cima (cada um no próprio ritmo)
         photos, front = [], []
+        waits = [wait] if wait is not None else []
         for name in on:
             anim = table.frames(name) if (table and name not in visuals.SPECIAL) else None
             if not anim:
                 continue
-            data = anim["frames"][int(elapsed / anim["ms"]) % len(anim["frames"])]
+            waits.append(anim["ms"] - elapsed % anim["ms"])
+            data, dx, dy = anim["frames"][int(elapsed / anim["ms"]) % len(anim["frames"])]
             try:
                 ph = tk.PhotoImage(master=win.top, data=data, format="png")
                 ph = ph.zoom(sc) if sc > 1 else ph
             except tk.TclError:
                 continue
             photos.append(ph)
-            spot = (fx - anim["cx"] * sc, fy - anim["cy"] * sc, ph)
+            # cada quadro guarda só o pedaço desenhado: (dx, dy) é onde ele fica no quadrado do efeito
+            spot = (fx + (dx - anim["cx"]) * sc, fy + (dy - anim["cy"]) * sc, ph)
             if anim["behind"]:
                 cv.create_image(spot[0], spot[1], image=ph, anchor="nw")
             else:
@@ -878,8 +997,10 @@ class VisualsTab:
                      "mid": _("chapéu do meio"), "top": _("chapéu de cima"), "robe": _("capa")}
             info.append(_("sem sprite no jogo: %s") % ", ".join(names.get(m, m) for m in missing))
         self.info.configure(text=" · ".join(info))
-        if self.visible() and (photos or (moving and nframes > 1)):
-            self.after = win.top.after(FX_MS if photos else int(max(20, delay)), self.tick)
+        if self.visible() and waits:
+            # o próximo desenho na hora em que algum quadro muda (antes: o delay do corpo DEPOIS de desenhar, o que
+            # somava o tempo do desenho e pulava quadros)
+            self.after = win.top.after(max(10, int(min(waits)) + 1), self.tick)
 
     def tick(self):
         self.after = None

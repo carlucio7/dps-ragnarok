@@ -157,7 +157,7 @@ def mob_frames(master, part, action, direction, box_w, box_h, layers):
             zx, qx = _layer_ratio(abs(ly.sx) or 1.0)
             zy, qy = _layer_ratio(abs(ly.sy) or 1.0)
             dw, dh = max(1, -(-size[0] * zx // qx)), max(1, -(-size[1] * zy // qy))
-            items.append((int(round(ly.x - dw / 2.0)), int(round(ly.y - dh / 2.0)), dw, dh, ly, (zx, qx, zy, qy)))
+            items.append(sprites.put_at(ly.x, ly.y, dw, dh) + (dw, dh, ly, (zx, qx, zy, qy)))
         picked.append(items)
     boxes = [it for items in picked for it in items]
     if not boxes:

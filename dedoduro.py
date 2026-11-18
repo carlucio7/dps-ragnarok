@@ -51,6 +51,8 @@ LONG_CD_MS, BIG_AP = 20000, 50
 HARD_CD_MS = 60000            # perdido ao morrer só é "difícil de renovar" com recarga longa ou AP alto
 ALWAYS_MIN = 0.9              # buffs que têm que ficar o tempo todo (Manejo Perfeito, Talismã dos Elementos)
 SHORT_MS = 60000              # buffs de 60 s ou menos: renovar toda hora é difícil, então faltar é só atenção
+BURST_DUTY = 0.25             # buff da classe que dura até 1/4 da recarga é de rajada (Despertar do Balaio de Gato:
+                              # 12 s a cada 180 s): não dá para ficar ativo o tempo todo, então não se cobra
 UNKNOWN = "?"
 SEV_TEXT = {2: _("● grave"), 1: _("◐ atenção"), 0: _("○ info")}
 
@@ -196,7 +198,8 @@ GROUP_BUFFS = _rules([
     ((1200,), dict(single=True)), ((1199,), dict(scope="W", single=True)), ((1198,), dict(scope="M", single=True)),
     ((331,), dict(short=True)), ((332,), dict(short=True)),
     ((24,), dict(scope="W", always=True)), ((30,), dict(scope="W", split_death=True)),
-    ((1357,), dict(scope="W", core=False)), ((340,), dict(scope="W", core=False)), ((920,), dict(scope="W", core=False)),
+    ((1357,), dict(scope="W", core=False)), ((340,), dict(scope="W", core=False)),
+    ((920,), dict(core=False)),            # Chuva de Mariscos: ATQ e ATQM +10% (texto do jogo), vale para todos
     ((23,), dict(scope="W", only_seen=True)), ((445,), dict(scope="W", only_seen=True, single=True)),
     ((1358,), dict(scope="M", core=False)), ((1271,), dict(scope="M")),
     ((1263,), dict(core=False)), ((1262,), dict(core=False)), ((1261,), dict(core=False)),
@@ -365,7 +368,7 @@ class Ctx:
     def __init__(self, c, key, rng):
         self.c = c
         self.key = key
-        hits = [h for h in c.hits if h.out and h.dst == key and an._in(rng, h.t)]
+        hits = [h for h in an.out_hits(c, rng) if h.dst == key]     # os golpes do recorte já ficam guardados
         self.hits = hits
         first, last = {}, {}
         for h in hits:
@@ -676,10 +679,18 @@ def _class_buffs(x, alerts):
             known = [u for u in ups if isinstance(u, float)]
             if not known:
                 continue
+            longest = max((e - s for ef, s, e in x.st.get(a, ()) if ef == efst), default=0)
+            burst = bool(rule.cd) and longest <= BURST_DUTY * rule.cd
+            note = rule.cost_note()
+            if burst:
+                note = _("de rajada: dura %s e tem recarga de %d s, não fica ativo o tempo todo") % (
+                    _secs(longest), round(rule.cd / 1000))
             row = dict(key="classe|%d|%d" % (efst, a), aid=a, name=c.name_of(a), job=meter.job_name(x.jobs[a]),
-                       buff=rule.name, kind="da classe", me=a == c.me, note=rule.cost_note())
+                       buff=rule.name, kind="da classe", me=a == c.me, note=note)
             _phase_cols(row, ups)
             rows.append(row)
+            if burst:
+                continue
             best = max(known)
             for p, u in zip(x.phases, ups):
                 if isinstance(u, float) and u < 0.2 and best >= BAD:
@@ -1248,7 +1259,32 @@ def _elo(x, alerts, aids):
     return rows
 
 
-SYNC_MS = 500                 # golpe forte de um DPS mais que isso antes do golpe forte seguinte dos outros = atacou antes
+BLESSING_SKILL, BLESSING = 5448, 1378   # Bênção da Natureza (Animista) e o status em quem recebe
+BLESSING_MS = 10000                     # dura 10 s: a usada logo antes de a luta começar ainda vale
+
+
+def _blessing(x, alerts, aids):
+    """Animista que não usou a Bênção da Natureza em nenhum momento da luta: grave (pedido do usuário). Conta o uso
+    da skill; sem o uso à vista, o status em alguém quando só um Animista poderia ter dado."""
+    c = x.c
+    name = meter.skill_name(BLESSING_SKILL)
+    t0 = x.start - BLESSING_MS
+    able = [a for a in aids if BLESSING_SKILL in JOB_SKILLS.get(job_id(c, a), set())]
+    if not able:
+        return
+    used = {u[2] for u in c.uses if u[4] == BLESSING_SKILL and t0 <= u[0] <= x.end}
+    group = set(aids)
+    seen = any(ef == BLESSING and a_ in group and e >= t0 and s <= x.end for a_, ef, s, e in c.statuses())
+    for a in able:
+        if a in used or (seen and len(able) == 1):
+            continue
+        if not x.dmg.get(a) and not any(u[2] == a and t0 <= u[0] <= x.end for u in c.uses):
+            continue                      # não estava na luta (nem bateu nem usou nada)
+        _alert(alerts, 2, x.whole, _("%s não foi usada") % name, c.name_of(a),
+               _("não usou %s em nenhum momento da luta (P.ATQ e S.ATQM +50 por 10 s num aliado do grupo)") % name)
+
+
+SYNC_MS = 500                # golpe forte de um DPS mais que isso antes do golpe forte seguinte dos outros = atacou antes
 EARLY_RED_MS = 1000           # até isso antes dos outros é atenção; mais que isso é grave
 SYNC_JOIN_MS = 1000           # golpes adiantados mais perto que isso um do outro contam como um episódio
 
@@ -1472,8 +1508,13 @@ def _deaths(x, aids, alerts, party):
 
 
 def weapon_element(x, aid, t):
-    """Elemento que algum status pôs na arma no instante t (None = nenhum à vista)."""
-    for efst, s, e in x.st.get(aid, ()):
+    """Elemento que algum status pôs na arma no instante t (None = nenhum à vista). Olha só os status de arma do
+    jogador, separados uma vez por luta: perguntado a cada golpe, varrer todos os status dele custava ~0,3 ms."""
+    sep = x.__dict__.setdefault("_weapon_st", {})
+    mine = sep.get(aid)
+    if mine is None:
+        mine = sep[aid] = [st for st in x.st.get(aid, ()) if st[0] in ENDOWS or st[0] == WEAPONPROPERTY]
+    for efst, s, e in mine:
         if s <= t <= e:
             if efst in ENDOWS:
                 return ENDOWS[efst]
@@ -1650,6 +1691,7 @@ def analyze(c, key, rng=None):
     buffs += _buff_rows(x, DEFENSE_BUFFS, "proteção", alerts)
     buffs += _class_buffs(x, alerts)
     buffs += _elo(x, alerts, x.party)
+    _blessing(x, alerts, x.party)
     refl = reflect_info(x)
     poison_rows, poisoned = _poison(x, alerts)
     claw, claw_execs = _claw(x, alerts, refl, x.party, True)
@@ -1671,6 +1713,7 @@ def analyze(c, key, rng=None):
     o_claw, o_claw_execs = _claw(x, o_alerts, refl, x.others, False)
     _before_claw(x, o_alerts, refl, x.others)
     _elo(x, o_alerts, x.others)
+    _blessing(x, o_alerts, x.others)
     _hate(x, o_alerts, x.others)
     total = x.total or 1
     party_rows = [dict(key=a, aid=a, name=c.name_of(a), job=meter.job_name(x.jobs[a]), me=a == c.me,

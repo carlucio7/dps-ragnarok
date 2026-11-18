@@ -158,7 +158,22 @@ def translate_pt(name):
     return t if t != name else None
 
 
+_SKILL_NAMES = {}
+
+
 def skill_name(sid, fallback=None):
+    """Nome da skill para mostrar (guardado até os nomes do jogo mudarem: a Linha do tempo pedia ~130 mil)."""
+    key = (sid, fallback, i18n.LANG)
+    hit = _SKILL_NAMES.get(key)
+    version = clientdata.NAMES.version
+    if hit is not None and hit[0] == version:
+        return hit[1]
+    name = _skill_name(sid, fallback)
+    _SKILL_NAMES[key] = (version, name)
+    return name
+
+
+def _skill_name(sid, fallback=None):
     if sid == 0:
         return _("Ataque básico")
     e = SKILLS.get(str(sid))
@@ -181,6 +196,11 @@ def _aegis_name(sid):
         _aegis.update({k: (v.get("d") if v.get("d") and not v["d"].isupper() else None) or pretty_aegis(v.get("n"))
                        for k, v in (_load("rathena.json").get("skills") or {}).items()})
     return _aegis.get(str(sid))
+
+
+# Nomes de disfarce que instâncias dão a monstros (a chave do texto do jogo): o programa mostra o nome de verdade.
+# 52Z2Bw = "Criatura não identificada", os MVPs do Laboratório Central.
+DISGUISE_KEYS = {"\x1c52Z2Bw\x1c"}
 
 
 def monster_name(mob_id):
@@ -512,6 +532,9 @@ class Combat:
         self.me = session.aid
         self.gap_ms = gap_ms
         self.entities = {}
+        self._ent_rev = 0             # muda a cada entidade nova ou trocada (o cache de nomes vale enquanto não mudar)
+        self._names = {}              # aid -> (marca, nome para mostrar): name_of era chamado ~260 mil vezes na Linha
+        self.name_jobs = {}           # nome que o jogo mandou -> ids de monstro que o usam (disfarces)
         self.owner = {}               # unidade/invocacao -> dono
         self.skill_aegis = {}         # nomes da lista de skills do proprio jogador
         self.current = None
@@ -539,7 +562,11 @@ class Combat:
         self.casts = []               # (t, fonte, fonte_original, alvo, skill, ms de conjuracao)
         self.deaths = {}              # AID -> quando morreu (a ultima vez)
         self.death_log = []           # (t, AID) de todas as mortes
+        # o jogo reaproveita o AID: o mesmo monstro ao renascer e, depois de trocar de mapa, outro monstro qualquer.
+        # Na hora de cada morte fica anotado quem era: (t, AID) -> (tipo, id do monstro)
+        self.death_who = {}
         self.off_dmg = {}             # AID -> [dano de quem grava, dano de todos] nos monstros fora do filtro de dano
+        self.off_life = {}            # (t, AID) -> o off_dmg da vida que acabou nessa morte
         self.off_last = None          # quando quem grava bateu por último num monstro fora do filtro (ms do replay)
         self.boss_points = []         # (t, pontos) da dificuldade anunciada na sala do chefe (Betelgeuse)
         # drops: itens que caíram ou estavam no chão, o que entrou na bolsa de quem grava e prêmios de MVP
@@ -563,6 +590,10 @@ class Combat:
         self.miracles = []            # [início, fim previsto, último proc, "a confirmar" desde (ou None)]
         self._miracle = None          # o que está valendo agora
         self.status_len = {}          # (aid, efst, início) -> duração prevista (ms)
+        # status encerrados por uma morte e o "acabou" que o jogo mandou depois (manual, VIP... seguem depois da
+        # morte, e o aviso de que venceram chega mais tarde): (aid, efst, início) -> quando acabou de verdade
+        self.status_after = {}
+        self._died_with = {}          # (aid, efst) -> início do status que a morte encerrou
         self.alert_seq = 0
         self.death_alerts = {}        # nº do aviso de morte -> (aid, t), para o resumo da morte no widget
         self.boss_alerts = {}         # nº do aviso -> o que mudou no chefe (propriedade, imunidade, tamanho)
@@ -615,6 +646,30 @@ class Combat:
         if old and not e.name and old.name:
             e.name = old.name
         self.entities[e.aid] = e
+        self._ent_rev += 1
+        if e.kind == "mob" and e.name and "#" not in e.name:
+            # o mesmo nome em monstros diferentes: é um rótulo da instância, não o nome deles (os rótulos "nome#n"
+            # ficam de fora: o jogo mostra o rótulo, "2 Zone Patrol", e é por ele que o jogador conhece o monstro)
+            self.name_jobs.setdefault(e.name, set()).add(e.job)
+
+    def disguised(self, e):
+        """O nome que o jogo mandou para este monstro é um disfarce (e o nome de verdade é o do id dele)? Um
+        disfarce conhecido, o mesmo nome em monstros diferentes, ou um rótulo de script sem nada antes do "#"."""
+        name = e.name or ""
+        return (name in DISGUISE_KEYS or len(self.name_jobs.get(name, ())) > 1
+                or (name.startswith("#") and not name.startswith("\x1c")))
+
+    def mob_name(self, e):
+        """Nome para mostrar de um monstro: o que o jogo mostra (o nome mandado, sem o "#..." dos rótulos de script)
+        ou, se for disfarce, o de verdade pelo id; sem nenhum dos dois, "Monstro 1234"."""
+        if e.name and self.disguised(e):
+            real = monster_name(e.job)
+            if real:
+                return real
+        name = clientdata.NAMES.resolve(e.name) if e.name else None
+        if name and "#" in name:
+            name = name.split("#", 1)[0].strip()             # o jogo esconde o que vem depois do "#"
+        return name or monster_name(e.job) or _("Monstro %d") % e.job
 
     def owner_of(self, aid):
         o = self.owner.get(aid)
@@ -659,7 +714,22 @@ class Combat:
         self._mask[aid] = (len(self.entities), name)
         return name
 
+    def names_stamp(self):
+        """O que muda os nomes para mostrar (as contas guardadas que levam nomes se refazem quando isto muda)."""
+        return (self._ent_rev, clientdata.NAMES.version, HIDE_NAMES, self.session.player, i18n.LANG)
+
     def name_of(self, aid):
+        """Nome para mostrar (guardado enquanto nenhuma entidade mudar, os nomes do jogo não terminarem de carregar
+        e a opção "sem nomes" não trocar)."""
+        stamp = (self._ent_rev, clientdata.NAMES.version, HIDE_NAMES, self.session.player, i18n.LANG)
+        hit = self._names.get(aid)
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
+        name = self._name_of(aid)
+        self._names[aid] = (stamp, name)
+        return name
+
+    def _name_of(self, aid):
         if HIDE_NAMES:
             masked = self.masked_name(aid)
             if masked:
@@ -668,11 +738,11 @@ class Combat:
             return self.session.player or _("Você")
         e = self.entities.get(aid)
         if e:
+            if e.kind == "mob":
+                return self.mob_name(e)
             name = clientdata.NAMES.resolve(e.name) if e.name else None
             if name:
                 return name
-            if e.kind == "mob":
-                return monster_name(e.job) or _("Monstro %d") % e.job   # nem o jogo nem a base conhecem
         return "#%d" % aid
 
     def is_mvp(self, aid):
@@ -846,6 +916,10 @@ class Combat:
                     self.dead.add(aid)
                     self.deaths[aid] = t
                     self.death_log.append((t, aid))
+                    if e is not None:
+                        self.death_who[(t, aid)] = (e.kind, e.job)
+                    if aid in self.off_dmg:        # a próxima vida desse AID começa do zero
+                        self.off_life[(t, aid)] = self.off_dmg.pop(aid)
                     self.version += 1
                     if aid == self.me:
                         self.on_my_death(t)
@@ -1254,6 +1328,7 @@ class Combat:
             self.status_first[key] = (t, bool(on))
         cur = self.status_on.get(key)
         if on:
+            self._died_with.pop(key, None)
             self.status_seen[key] = t
             if total and total > self.status_total.get(efst, 0):
                 self.status_total[efst] = total
@@ -1267,6 +1342,11 @@ class Combat:
                     self.status_val[(aid, efst, cur[0])] = val1
             return
         if cur is None:
+            start = self._died_with.pop(key, None)
+            if start is not None:
+                # a morte já tinha encerrado: este é o fim de verdade (o manual venceu depois da morte)
+                self.status_after[(aid, efst, start)] = t
+                return
             # acabou sem o início ter aparecido: o jogador já estava com ele quando a gravação começou
             # (só os seus buffs vêm prontos no início; os dos outros só aparecem quando acabam)
             e = self.entities.get(aid)
@@ -1289,8 +1369,7 @@ class Combat:
         for a, ef, st, e in (self.statuses(self.me) if sts is None else sts):
             if ef != efst:
                 continue
-            ln = self.status_len.get((a, ef, st))
-            out.append((st, min(self.now, max(e, st + ln)) if ln else self.now))
+            out.append((st, self.lasting_end(a, ef, st, e)))
         merged = []
         for st, e in sorted(out):
             if merged and st <= merged[-1][1]:
@@ -1298,6 +1377,15 @@ class Combat:
             else:
                 merged.append((st, e))
         return merged
+
+    def lasting_end(self, aid, efst, st, e):
+        """Fim de um status que não acaba com a morte: o "acabou" que o jogo mandou depois da morte, senão a
+        duração que ele mandou (contada do início), senão agora."""
+        after = self.status_after.get((aid, efst, st))
+        if after is not None:
+            return min(self.now, after)
+        ln = self.status_len.get((aid, efst, st))
+        return min(self.now, max(e, st + ln)) if ln else self.now
 
     def on_miracle(self, t, left):
         """Milagre ligou. Um novo proc no meio do efeito volta a contar 1 hora (e confirma que ele estava ativo).
@@ -1357,6 +1445,7 @@ class Combat:
         for key in [k for k in self.status_on if k[0] == aid]:
             start = self.status_on.pop(key)[0]
             self.status_log.append((aid, key[1], start, max(start, t)))
+            self._died_with[key] = start
 
     def in_party(self, aid):
         return aid == self.me or aid in self.party
@@ -1583,7 +1672,8 @@ class Combat:
         self.ground_cells = {}
         self.deaths = {}
         self.death_log = []
-        self.off_dmg, self.off_last = {}, None
+        self.death_who = {}
+        self.off_dmg, self.off_last, self.off_life = {}, None, {}
         self.drops, self.pickups, self.mvp_items, self.drop_ids = [], [], [], {}
         self._pending_pickups, self._gone_by_item = [], {}
         self.was_reset = True
@@ -1608,7 +1698,7 @@ class Combat:
         e = d.get("mob_ent")
         if e is None:
             return d["mob"]
-        return (clientdata.NAMES.resolve(e.name) if e.name else None) or monster_name(e.job) or d["mob"]
+        return self.mob_name(e) if (e.name or monster_name(e.job)) else d["mob"]
 
     def add_pickup(self, t, item, count):
         p = dict(t=t, item=item, count=count, used=False)

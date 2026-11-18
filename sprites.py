@@ -39,8 +39,9 @@ SEX = {0: "여", 1: "남"}
 
 # grupos de ação do .act de jogador (cada grupo tem 8 direções)
 IDLE, WALK, SIT, PICK, READY, ATTACK, HURT, FREEZE, DEAD, FREEZE2, ATTACK2, ATTACK3, CAST = range(13)
-ACTIONS = [(IDLE, "Parado"), (WALK, "Andando"), (SIT, "Sentado"), (READY, "Em guarda"), (ATTACK, "Atacando"),
-           (CAST, "Conjurando"), (HURT, "Levando dano"), (DEAD, "Caído")]
+FAST_WALK = "Andando (rápido)"   # pose: anda com acréscimo de velocidade (como a maioria dos personagens no jogo)
+ACTIONS = [(IDLE, "Parado"), (WALK, "Andando"), (WALK, FAST_WALK), (SIT, "Sentado"), (READY, "Em guarda"),
+           (ATTACK, "Atacando"), (CAST, "Conjurando"), (HURT, "Levando dano"), (DEAD, "Caído")]
 HEAD_DIRS = [(0, "Frente"), (1, "Esquerda"), (2, "Direita")]
 BACK_DIRS = {3, 4, 5}                 # de costas: capa e escudo por cima do corpo
 DIRECTIONS = ["↓", "↙", "←", "↖", "↑", "↗", "→", "↘"]   # para onde o boneco olha (↓ = de frente)
@@ -146,10 +147,67 @@ def _round(b):
         b[i] ^= tp[i]
 
 
-def _des_block(buf, off):
+def _des_block_bits(buf, off):
+    """A cifra de um bloco, bit a bit (a conta de referência; o programa usa _des_block, com tabelas)."""
     b = _perm(buf[off:off + 8], _IP)
     _round(b)
     buf[off:off + 8] = _perm(b, _FP)
+
+
+_FAST = []
+
+
+def _fast_tables():
+    """Tabelas da cifra do .grf (uma rodada só, sem chave): as permutações inicial e final byte a byte (8 consultas
+    em vez de 64 testes de bit) e a rodada (S-box mais a permutação P) por pedaço de 6 bits. Montadas na primeira
+    vez (~10 ms): a conta bit a bit era 3/4 do tempo de abrir um sprite cifrado."""
+    if _FAST:
+        return _FAST
+
+    def byte_tables(table):
+        dest = {}
+        for i, j in enumerate(table):
+            dest[j - 1] = i                        # o bit j-1 da entrada vai para o bit i da saída
+        out = []
+        for byte in range(8):
+            row = []
+            for v in range(256):
+                x = 0
+                for k in range(8):
+                    if v & (0x80 >> k):
+                        x |= 1 << (63 - dest[byte * 8 + k])
+                row.append(x)
+            out.append(row)
+        return out
+
+    def tp32(x):
+        y = 0
+        for i, j in enumerate(_TP):
+            if x & (1 << (31 - (j - 1))):
+                y |= 1 << (31 - i)
+        return y
+    sp = []
+    for k in range(8):
+        i, high = k // 2, k % 2 == 0
+        sp.append([tp32(((_S[i * 64 + e] & (0xF0 if high else 0x0F)) << (24 - 8 * i))) for e in range(64)])
+    _FAST.extend((byte_tables(_IP), byte_tables(_FP), sp))
+    return _FAST
+
+
+def _des_block(buf, off):
+    """A cifra de um bloco de 8 bytes do .grf, no lugar (mesmo resultado de _des_block_bits)."""
+    ip, fp, sp = _fast_tables()
+    b0, b1, b2, b3, b4, b5, b6, b7 = buf[off:off + 8]
+    y = (ip[0][b0] | ip[1][b1] | ip[2][b2] | ip[3][b3] | ip[4][b4] | ip[5][b5] | ip[6][b6] | ip[7][b7])
+    r4, r5, r6, r7 = (y >> 24) & 255, (y >> 16) & 255, (y >> 8) & 255, y & 255
+    f = (sp[0][((r7 << 5) | (r4 >> 3)) & 0x3F] | sp[1][((r4 << 1) | (r5 >> 7)) & 0x3F]
+         | sp[2][((r4 << 5) | (r5 >> 3)) & 0x3F] | sp[3][((r5 << 1) | (r6 >> 7)) & 0x3F]
+         | sp[4][((r5 << 5) | (r6 >> 3)) & 0x3F] | sp[5][((r6 << 1) | (r7 >> 7)) & 0x3F]
+         | sp[6][((r6 << 5) | (r7 >> 3)) & 0x3F] | sp[7][((r7 << 1) | (r4 >> 7)) & 0x3F])
+    y ^= f << 32
+    buf[off:off + 8] = (fp[0][y >> 56] | fp[1][(y >> 48) & 255] | fp[2][(y >> 40) & 255] | fp[3][(y >> 32) & 255]
+                        | fp[4][(y >> 24) & 255] | fp[5][(y >> 16) & 255] | fp[6][(y >> 8) & 255]
+                        | fp[7][y & 255]).to_bytes(8, "big")
 
 
 def decode(buf, flags, packed):
@@ -181,12 +239,23 @@ def _key(name):
     return name.encode("cp949", "replace").lower()
 
 
+def _folders(prefixes):
+    """As pastas pedidas como chaves (cp949, minúsculas), da mais curta para a mais longa, sem as que já estão dentro
+    de outra da lista (data\\texture\\ cobre data\\texture\\effect\\)."""
+    out = []
+    for k in sorted({_key(p) for p in prefixes}, key=len):
+        if not any(k.startswith(o) for o in out):
+            out.append(k)
+    return out
+
+
 class Grf:
-    """Índice só das pastas de sprites, paletas e tabelas do .grf; lê (e decifra) um arquivo por vez."""
+    """Índice só das pastas pedidas do .grf (sprites, paletas, tabelas...); lê (e decifra) um arquivo por vez."""
 
     def __init__(self, path, prefixes=PREFIXES):
         self.path = path
-        self.index = {}
+        self.folders = _folders(prefixes)
+        self.index = {}               # nome (cp949, minúsculas) -> a entrada da tabela, nos bytes crus
         with open(path, "rb") as f:
             head = f.read(46)
             version = struct.unpack_from("<I", head, 42)[0]
@@ -199,14 +268,27 @@ class Grf:
             f.seek(table)
             packed, _size = struct.unpack("<II", f.read(8))
             raw = zlib.decompress(f.read(packed))
-        # só os nomes que começam com as pastas pedidas, achados por expressão regular (em C): a tabela tem
-        # centenas de milhares de arquivos, e passar por todos num laço levava uns 0,3 s com a janela esperando
-        pres = sorted({_key(p) for p in prefixes}, key=len, reverse=True)
-        wanted = re.compile(b"(?:" + b"|".join(re.escape(p) for p in pres) + b")[^\\x00]*\\x00", re.I)
-        limit = len(raw) - entry.size
-        for m in wanted.finditer(raw):
-            if m.end() <= limit:
-                self.index[m.group()[:-1].lower()] = entry.unpack_from(raw, m.end())
+        self.entry = entry
+        if not self.folders:
+            return
+        # a tabela tem centenas de milhares de arquivos: os nomes das pastas pedidas são achados por expressão
+        # regular (em C) numa cópia da tabela em minúsculas, com o começo comum das pastas fora das alternativas
+        # (atrás de um começo fixo a busca corre 2 a 3 vezes mais rápido que com re.I); cada nome guarda os bytes
+        # crus da entrada, que read() desempacota: em tuplas de números o índice do guarda-roupa ocupava 32 MB, assim 21
+        low = raw.lower()
+        common = os.path.commonprefix(self.folders)
+        rest = sorted((k[len(common):] for k in self.folders), key=len, reverse=True)
+        wanted = re.compile(re.escape(common) + b"(?:" + b"|".join(re.escape(r) for r in rest) + b")[^\\x00]*\\x00")
+        index, size = self.index, entry.size
+        limit = len(raw) - size
+        for m in wanted.finditer(low):
+            e = m.end()
+            if e <= limit:
+                index[low[m.start():e - 1]] = raw[e:e + size]
+
+    def covers(self, prefixes):
+        """Se todas as pastas `prefixes` estão dentro das deste índice."""
+        return all(any(k.startswith(o) for o in self.folders) for k in _folders(prefixes))
 
     def has(self, name):
         return _key(name) in self.index
@@ -215,7 +297,7 @@ class Grf:
         e = self.index.get(_key(name))
         if e is None:
             return None
-        packed, aligned, real, flags, offset = e
+        packed, aligned, real, flags, offset = self.entry.unpack(e)
         if not flags & 1:
             return None
         with open(self.path, "rb") as f:
@@ -401,14 +483,16 @@ class Layer:
 class Act:
     """Ações de um .act: actions[i] = [(camadas, âncoras)], delays[i] = ms por quadro."""
 
-    def __init__(self, data):
+    def __init__(self, data, actions=None):
+        """`actions`: lê só as primeiras (a miniatura de um chapéu só precisa da 0, e um .act inteiro tem 104
+        ações); aí os delays ficam no padrão."""
         if data[:2] != b"AC":
             raise ValueError("não é .act")
         ver = data[2] | data[3] << 8
         n_act = struct.unpack_from("<H", data, 4)[0]
         pos = 16
         self.actions = []
-        for _a in range(n_act):
+        for _a in range(n_act if actions is None else min(n_act, actions)):
             n_fr = struct.unpack_from("<I", data, pos)[0]
             pos += 4
             frames = []
@@ -448,6 +532,8 @@ class Act:
                 frames.append((layers, anchors))
             self.actions.append(frames)
         self.delays = [150.0] * n_act
+        if len(self.actions) < n_act:                  # lido só o começo: o resto do arquivo não foi percorrido
+            return
         try:
             if ver >= 0x201:
                 n_ev = struct.unpack_from("<i", data, pos)[0]
@@ -472,11 +558,64 @@ class Part:
 
 # ------------------------------------------------------------------ montagem
 
+def put_at(x, y, w, h):
+    """Canto de cima à esquerda de uma imagem w x h com o centro na posição (x, y) da camada, como o jogo faz:
+    metade da largura em divisão inteira. Com round() (que no Python leva o .5 para o número par) uma imagem de
+    tamanho ímpar caía 1 pixel para um lado ou para o outro conforme o quadro: era o Olho do Necromante saltando
+    a cada passo (37 de altura, e a âncora do corpo sobe e desce)."""
+    return int(x) - int(w) // 2, int(y) - int(h) // 2
+
+
 def frame_of(action, count, frame, head_dir=0):
     """Quadro a usar: parado e sentado mostram a direção da cabeça (0 frente, 1 esq., 2 dir.); o resto anima."""
     if count <= 0:
         return 0
     return min(head_dir, count - 1) if action in (IDLE, SIT) else frame % count
+
+
+WALK_SPEED = 150              # velocidade normal de andar (ms por célula): o delay do .act vale para ela
+FAST_SPEED = 112              # com acréscimo de velocidade: a da maioria dos replays (o andar fica 150/112 mais rápido)
+
+
+def walk_speed(fast, replay_speed=None):
+    """ms por célula da pose de andar: normal (150) ou rápido (a do personagem do replay, se ele andava mais rápido
+    que o normal; senão 112, a mais comum com acréscimo de velocidade)."""
+    if not fast:
+        return WALK_SPEED
+    return replay_speed if replay_speed and 40 <= replay_speed < WALK_SPEED else FAST_SPEED
+
+
+def part_delay(part, act_i):
+    """ms por quadro da ação na parte (cada chapéu e capa animados têm o seu: 100, 125, 175, 200, 250, 300...)."""
+    d = part.act.delays
+    return float(d[act_i] if act_i < len(d) else (d[act_i % len(d)] if d else 100.0))
+
+
+def own_clock(count, action, body_count):
+    """A parte anima no próprio ritmo? Parado e sentado: sim, quando cada direção da cabeça tem mais de um quadro
+    (os chapéus e capas animados: 3 grupos de 8, 12, 16...) ou quando os quadros não se dividem por direção;
+    nas outras ações: quando ela não tem tantos quadros quanto o corpo (aí não dá para acompanhar o passo)."""
+    if count <= 1:
+        return False
+    if action in (IDLE, SIT):
+        return count % 3 != 0 or count > 3
+    return count != body_count
+
+
+def part_frame(part, act_i, action, head_dir, body_frame, body_count, t_ms):
+    """O quadro de uma parte, como o jogo escolhe. Parado e sentado, os quadros vêm em 3 grupos (cabeça de frente,
+    para a esquerda e para a direita): o chapéu comum tem um quadro por grupo, e o animado anima dentro do grupo no
+    ritmo dele (varredura de 2026-11-17: 371 chapéus e 16 capas assim). Nas outras ações, a parte com tantos
+    quadros quanto o corpo acompanha o passo do corpo; a que tem outra quantidade anima no próprio ritmo."""
+    count = len(part.act.frames(act_i))
+    if count <= 1:
+        return 0
+    if action in (IDLE, SIT) and count % 3 == 0:
+        k = count // 3
+        return min(max(head_dir, 0), 2) * k + (int(t_ms // part_delay(part, act_i)) % k if k > 1 else 0)
+    if own_clock(count, action, body_count):
+        return int(t_ms // part_delay(part, act_i)) % count
+    return body_frame % count
 
 
 def smooth_frames(part, frames, cache=None, with_origin=False):
@@ -501,7 +640,7 @@ def smooth_frames(part, frames, cache=None, with_origin=False):
             rot = getattr(ly, "rot", 0) % 360
             flip = -1.0 if ly.mirror else 1.0
             if rot == 0 and abs(sx - 1.0) < 0.005 and abs(sy - 1.0) < 0.005:
-                left, top = int(round(ly.x - sw / 2.0)), int(round(ly.y - sh / 2.0))
+                left, top = ly.x - sw // 2, ly.y - sh // 2         # como o jogo (veja put_at)
                 m = (flip, 0.0, 0.0, 1.0, left + sw / 2.0, top + sh / 2.0, False)
                 box = (left, top, left + sw, top + sh)
             else:
@@ -542,21 +681,23 @@ def smooth_frames(part, frames, cache=None, with_origin=False):
     return (w, h, out, -x0, -y0) if with_origin else (w, h, out)
 
 
-def compose(order, body, action, direction, frame, head_dir=0):
-    """Desenha as partes na ordem `order`; cabeça e chapéus se prendem à âncora do corpo `body`.
+def compose(order, body, action, direction, frame, head_dir=0, t_ms=0.0):
+    """Desenha as partes na ordem `order`; cabeça e chapéus se prendem à âncora do corpo `body`. `frame` é o passo
+    do corpo; `t_ms`, o relógio das partes que animam no próprio ritmo (part_frame).
     Devolve (w, h, pixels [(r, g, b, a)], x da origem, y da origem) ou None."""
     act_i = action * 8 + direction
     frames = body.act.frames(act_i)
     if not frames:
         return None
-    anchors = frames[frame_of(action, len(frames), frame, head_dir)][1]
+    body_n = len(frames)
+    anchors = frames[part_frame(body, act_i, action, head_dir, frame, body_n, t_ms)][1]
     body_anchor = anchors[0] if anchors else None
     draws = []
     for part in order:
         frames = part.act.frames(act_i)
         if not frames:
             continue
-        layers, anchors = frames[frame_of(action, len(frames), frame, head_dir)]
+        layers, anchors = frames[part_frame(part, act_i, action, head_dir, frame, body_n, t_ms)]
         ox = oy = 0
         if part is not body and part.anchored and body_anchor and anchors:
             ox, oy = body_anchor[0] - anchors[0][0], body_anchor[1] - anchors[0][1]
@@ -569,8 +710,7 @@ def compose(order, body, action, direction, frame, head_dir=0):
             w, h, px = img
             sx, sy = abs(ly.sx) or 1.0, abs(ly.sy) or 1.0
             dw, dh = max(1, int(round(w * sx))), max(1, int(round(h * sy)))
-            left = int(round(ox + ly.x - dw / 2.0))
-            top = int(round(oy + ly.y - dh / 2.0))
+            left, top = put_at(ox + ly.x, oy + ly.y, dw, dh)
             draws.append((left, top, dw, dh, w, h, px, sx, sy, ly.mirror, ly.color))
     if not draws:
         return None
@@ -609,6 +749,162 @@ def compose(order, body, action, direction, frame, head_dir=0):
                     out[i] = (int(r * k + br * (1 - k)), int(g * k + bg_ * (1 - k)), int(b * k + bb * (1 - k)),
                               max(a, ba))
     return W, H, out, -x0, -y0
+
+
+def compose_gdi(order, body, action, direction, frame, head_dir=0, t_ms=0.0, cache=None):
+    """O mesmo quadro de `compose`, montado pelo GDI+ (gdip.py): os mesmos lugares, ~5x mais rápido, e a mistura
+    das partes translúcidas é a certa (o compose pixel a pixel escurecia o que é meio transparente sobre o vazio,
+    como o brilho do Olho do Necromante). (w, h, bytes RGBA, x da origem, y da origem) ou None (aí vale compose).
+    `cache` guarda as imagens do GDI+ já feitas (uma por imagem do .spr, paleta e cor da camada)."""
+    if not gdip.ready():
+        return None
+    act_i = action * 8 + direction
+    frames = body.act.frames(act_i)
+    if not frames:
+        return None
+    body_n = len(frames)
+    anchors = frames[part_frame(body, act_i, action, head_dir, frame, body_n, t_ms)][1]
+    body_anchor = anchors[0] if anchors else None
+    cache = {} if cache is None else cache
+    items = []
+    for part in order:
+        frames = part.act.frames(act_i)
+        if not frames:
+            continue
+        layers, anchors = frames[part_frame(part, act_i, action, head_dir, frame, body_n, t_ms)]
+        ox = oy = 0
+        if part is not body and part.anchored and body_anchor and anchors:
+            ox, oy = body_anchor[0] - anchors[0][0], body_anchor[1] - anchors[0][1]
+        for ly in layers:
+            size = part.spr.size(ly.kind, ly.index) if ly.index >= 0 else None
+            if size is None:
+                continue
+            w, h = size
+            sx, sy = abs(ly.sx) or 1.0, abs(ly.sy) or 1.0
+            dw, dh = max(1, int(round(w * sx))), max(1, int(round(h * sy)))
+            items.append((part, ly, w, h, dw, dh) + put_at(ox + ly.x, oy + ly.y, dw, dh))
+    if not items:
+        return None
+    x0, y0 = min(i[6] for i in items), min(i[7] for i in items)
+    W, H = max(i[6] + i[4] for i in items) - x0, max(i[7] + i[5] for i in items) - y0
+    if W * H > 4000000:
+        return None
+    draws = []
+    try:
+        for part, ly, w, h, dw, dh, left, top in items:
+            tint = tuple(ly.color) if tuple(ly.color) != (255, 255, 255, 255) else None
+            pal = part.palette if ly.kind == 0 else None
+            key = (id(part.spr), ly.kind, ly.index, pal, tint)
+            img = cache.get(key)
+            if img is None:
+                got = part.spr.bgra(ly.kind, ly.index, pal, tint)
+                if got is None:
+                    continue
+                img = cache[key] = gdip.Image(*got)
+            flip = -1.0 if ly.mirror else 1.0
+            draws.append((img, flip * dw / float(w), 0.0, 0.0, dh / float(h), left - x0 + dw / 2.0,
+                          top - y0 + dh / 2.0, (dw, dh) != (w, h)))
+        data = gdip.render(W, H, draws) if draws else None
+    except (ValueError, TypeError, OSError):
+        return None
+    if data is None:
+        return None
+    return W, H, gdip.swap_rb(data), -x0, -y0
+
+
+TINY_SPRITE = 10              # chapéu com o desenho até isto de largura e de altura: o ícone (ou a ilustração) diz mais
+TINY_PIXELS = 80              # ...ou com tão poucos pixels pintados (dois tracinhos, dois pontos de bochecha)
+
+
+def alpha_box(w, h, rgba):
+    """(x0, y0, x1, y1) do que tem pixel (alfa > 0) numa imagem RGBA, ou None. Linha a linha com strip (rápido)."""
+    alpha = rgba[3::4]
+    x0, x1, y0, y1 = w, 0, None, 0
+    for y in range(h):
+        row = alpha[y * w:(y + 1) * w]
+        rest = row.lstrip(b"\0")
+        if not rest:
+            continue
+        x0, x1 = min(x0, w - len(rest)), max(x1, len(row.rstrip(b"\0")))
+        y0 = y if y0 is None else y0
+        y1 = y + 1
+    return None if y0 is None else (x0, y0, x1, y1)
+
+
+def crop_rgba(w, rgba, box):
+    """O retângulo `box` (x0, y0, x1, y1) de uma imagem RGBA de largura w."""
+    x0, y0, x1, y1 = box
+    return b"".join(rgba[(y * w + x0) * 4:(y * w + x1) * 4] for y in range(y0, y1))
+
+
+_DIV5 = bytes(v // 5 for v in range(256))
+_A59 = bytes(v * 5 // 9 for v in range(256))
+_WHITEN = bytes(v + (255 - v) * 3 // 5 for v in range(256))
+
+
+def shade(rgba):
+    """A pedra Sombra: a mesma figura escura e meio transparente (bytes RGBA)."""
+    out = bytearray(rgba)
+    for ch in (0, 1, 2):
+        out[ch::4] = rgba[ch::4].translate(_DIV5)
+    out[3::4] = rgba[3::4].translate(_A59)
+    return bytes(out)
+
+
+def whiten(rgba):
+    """A pedra Palidez: as cores vão quase todas para o branco (bytes RGBA)."""
+    out = bytearray(rgba)
+    for ch in (0, 1, 2):
+        out[ch::4] = rgba[ch::4].translate(_WHITEN)
+    return bytes(out)
+
+
+def extent(order, body, action, direction, head_dir=0):
+    """O retângulo (x0, y0, x1, y1), com a origem (os pés) no zero, que cobre TODOS os quadros da animação: a
+    prévia põe os pés num lugar só a partir dele (antes, um visual grande como o Jaow Pirun mudava de tamanho a cada
+    quadro e o personagem inteiro subia e descia). Só conta camadas, sem desenhar."""
+    act_i = action * 8 + direction
+    bframes = body.act.frames(act_i)
+    if not bframes:
+        return None
+    bn = len(bframes)
+    moving = action not in (IDLE, SIT)
+    bidx = range(bn) if moving else [part_frame(body, act_i, action, head_dir, 0, bn, 0)]
+    box = None
+    for b in bidx:
+        banc = bframes[b][1]
+        ba = banc[0] if banc else None
+        for part in order:
+            frames = part.act.frames(act_i)
+            if not frames:
+                continue
+            n = len(frames)
+            if part is body:
+                cand = [b]
+            elif action in (IDLE, SIT) and n % 3 == 0:
+                k = n // 3
+                h = min(max(head_dir, 0), 2)
+                cand = range(h * k, h * k + k)
+            elif own_clock(n, action, bn):
+                cand = range(n)
+            else:
+                cand = [b % n]
+            for f in cand:
+                layers, anchors = frames[f]
+                ox = oy = 0
+                if part is not body and part.anchored and ba and anchors:
+                    ox, oy = ba[0] - anchors[0][0], ba[1] - anchors[0][1]
+                for ly in layers:
+                    size = part.spr.size(ly.kind, ly.index) if ly.index >= 0 else None
+                    if size is None:
+                        continue
+                    sx, sy = abs(ly.sx) or 1.0, abs(ly.sy) or 1.0
+                    dw, dh = max(1, int(round(size[0] * sx))), max(1, int(round(size[1] * sy)))
+                    left, top = put_at(ox + ly.x, oy + ly.y, dw, dh)
+                    r = (left, top, left + dw, top + dh)
+                    box = r if box is None else (min(box[0], r[0]), min(box[1], r[1]), max(box[2], r[2]),
+                                                 max(box[3], r[3]))
+    return box
 
 
 def png(w, h, px):
@@ -661,6 +957,7 @@ class Wardrobe:
         self.acc, self.robe, self.weapon, self.weapon_base, self.classnum = {}, {}, {}, {}, {}
         self._parts = {}
         self._pal = {}
+        self._gdi = {}                # imagens do GDI+ já montadas (compose_gdi)
 
         def table(name, glob):
             data = self.grf.read(LUA + name)
@@ -749,13 +1046,7 @@ class Wardrobe:
             if not view or view in seen:
                 continue
             seen.add(view)
-            name = self.acc.get(view)
-            p = None
-            if name:
-                for folder in ((sex + "_doram",) if race == DORAM else ()) + (sex,):
-                    p = self.part(key, "%s%s\\%s%s" % (ACC, folder, sex, name))
-                    if p:
-                        break
+            p = self.accessory(view, look, key)
             if p:
                 hats.append(p)
             else:
@@ -782,6 +1073,63 @@ class Wardrobe:
         if robe and back:
             order.append(robe)
         return order, body, missing
+
+    def accessory(self, view, look, key="top", light=False):
+        """O sprite de um chapéu (topo, meio ou baixo) no sexo e na raça do look, ou None. `light`: só a ação 0
+        e fora do cache (a miniatura descarta o desenho logo; guardar o de cada chapéu da lista pesaria dezenas de
+        MB)."""
+        name = self.acc.get(view)
+        if not name:
+            return None
+        sex = SEX.get(look.get("sex", 1), "남")
+        race = DORAM if look.get("job") in DORAM_JOBS else HUMAN
+        for folder in ((sex + "_doram",) if race == DORAM else ()) + (sex,):
+            base = "%s%s\\%s%s" % (ACC, folder, sex, name)
+            if light:
+                full = self._parts.get((base, None, None))
+                if full is not None:
+                    return full
+                spr, act = self.grf.read(base + ".spr"), self.grf.read(base + ".act")
+                if spr and act:
+                    try:
+                        return Part(key, Sprite(spr), Act(act, actions=1))
+                    except (ValueError, struct.error, IndexError):
+                        return None
+                continue
+            p = self.part(key, base)
+            if p:
+                return p
+        return None
+
+    def item_thumb(self, view, look, box_w, box_h):
+        """Miniatura de um chapéu só com o desenho dele, o mesmo da animação (parado, de frente), recortada no que
+        tem pixel e no maior tamanho que cabe na caixa: 2x como na prévia se couber, senão 1x, e o que passa da
+        caixa reduzido com suavização. (w, h, PNG em base64, zoom) ou None (sem sprite, ou tão pequeno, como uma
+        piscadela, que o ícone diz mais)."""
+        p = self.accessory(view, look, light=True)
+        if p is None:
+            return None
+        # sem o cache de imagens: o desenho é descartado logo (e um id() reaproveitado acharia a imagem de outro)
+        res = compose_gdi([p], p, IDLE, 0, 0, 0, 0.0)
+        if res is None:
+            return None
+        w, h, rgba, _ox, _oy = res
+        box = alpha_box(w, h, rgba)
+        if box is None or max(box[2] - box[0], box[3] - box[1]) <= TINY_SPRITE:
+            return None
+        cw, ch = box[2] - box[0], box[3] - box[1]
+        rgba = crop_rgba(w, rgba, box)
+        if cw * ch - rgba[3::4].count(0) < TINY_PIXELS:
+            return None
+        zoom = 2 if cw * 2 <= box_w and ch * 2 <= box_h else 1
+        if cw > box_w or ch > box_h:               # grande (um dragão, umas asas): reduzido com suavização
+            k = min(box_w / float(cw), box_h / float(ch))
+            tw, th = max(1, int(cw * k)), max(1, int(ch * k))
+            small = gdip.resize(cw, ch, gdip.swap_rb(rgba), tw, th)
+            if small is None:
+                return None
+            rgba, cw, ch = gdip.swap_rb(small), tw, th
+        return cw, ch, base64.b64encode(png_rgba(cw, ch, rgba)).decode("ascii"), zoom
 
     def robe_part(self, view, job, sex, race):
         """Capa/visual de capa: <nome>\\<sexo>\\<classe>_<sexo>; algumas têm uma subpasta repetida
@@ -847,17 +1195,70 @@ class Wardrobe:
         s, name = SEX.get(sex, "남"), job_sprite(job, option)
         return [0] + [k for k in range(1, 40) if name and self.grf.has("%s몸\%s_%s_%d.pal" % (PAL, name, s, k))]
 
-    def render(self, look, action, direction, frame=0, head_dir=0):
-        """Quadro montado: (w, h, pixels, x da origem, y da origem, delay em ms, nº de quadros, faltou) ou None."""
+    def render(self, look, action, direction, frame=0, head_dir=0, t_ms=0.0):
+        """Quadro montado: (w, h, pixels, x da origem, y da origem, delay em ms, nº de quadros, faltou) ou None.
+        `frame`: o passo do corpo; `t_ms`: o relógio dos chapéus e capas que animam no próprio ritmo (clock)."""
         order, body, missing = self.parts(look, direction)
         if body is None:
             return None
-        res = compose(order, body, action, direction, frame, head_dir)
+        res = compose(order, body, action, direction, frame, head_dir, t_ms)
         if res is None:
             return None
         act_i = action * 8 + direction
         delay = body.act.delays[act_i] if act_i < len(body.act.delays) else 150.0
         return res + (delay, max(1, len(body.act.frames(act_i))), missing)
+
+    def render_png(self, look, action, direction, frame=0, head_dir=0, t_ms=0.0, pale=False, shadow=False):
+        """O quadro pronto para o Tk: (w, h, PNG em base64, x da origem, y da origem, delay em ms, nº de quadros,
+        faltou, PNG da sombra ou None). Pelo GDI+ quando dá (compose_gdi), senão pixel a pixel. `pale`/`shadow`:
+        as pedras Palidez e Sombra."""
+        order, body, missing = self.parts(look, direction)
+        if body is None:
+            return None
+        if len(self._gdi) > 600:                  # as imagens do GDI+ de looks que já passaram
+            self._gdi = {}
+        res = compose_gdi(order, body, action, direction, frame, head_dir, t_ms, self._gdi)
+        if res is None:
+            slow = compose(order, body, action, direction, frame, head_dir, t_ms)
+            if slow is None:
+                return None
+            res = slow[:2] + (b"".join(bytes(p) for p in slow[2]),) + slow[3:]
+        w, h, rgba, ox, oy = res
+        dark = base64.b64encode(png_rgba(w, h, shade(rgba))).decode("ascii") if shadow else None
+        data = base64.b64encode(png_rgba(w, h, whiten(rgba) if pale else rgba)).decode("ascii")
+        act_i = action * 8 + direction
+        delay = body.act.delays[act_i] if act_i < len(body.act.delays) else 150.0
+        return w, h, data, ox, oy, delay, max(1, len(body.act.frames(act_i))), missing, dark
+
+    def clock(self, look, action, direction, head_dir, t_ms, speed=WALK_SPEED):
+        """O instante `t_ms` da animação: (passo do corpo, quadro de cada parte, ms até o próximo quadro mudar ou
+        None se nada anima). Andando, o passo segue a velocidade do personagem (`speed`, ms por célula: com 112 o
+        andar é 150/112 vezes mais rápido que o .act, como no jogo)."""
+        order, body, _missing = self.parts(look, direction)
+        if body is None:
+            return None
+        act_i = action * 8 + direction
+        bn = max(1, len(body.act.frames(act_i)))
+        moving = action not in (IDLE, SIT)
+        bdelay = part_delay(body, act_i)
+        if action == WALK:
+            bdelay *= max(40, min(400, speed or WALK_SPEED)) / float(WALK_SPEED)
+        bdelay = max(20.0, bdelay)
+        step = int(t_ms // bdelay) % bn if moving else 0
+        waits = [bdelay - t_ms % bdelay] if moving and bn > 1 else []
+        idx = []
+        for p in order:
+            n = len(p.act.frames(act_i))
+            idx.append(part_frame(p, act_i, action, head_dir, step, bn, t_ms))
+            if p is not body and own_clock(n, action, bn):
+                d = max(20.0, part_delay(p, act_i))
+                waits.append(d - t_ms % d)
+        return step, tuple(idx), (min(waits) if waits else None)
+
+    def extent(self, look, action, direction, head_dir=0):
+        """O retângulo de todos os quadros da animação (veja `extent`), ou None."""
+        order, body, _missing = self.parts(look, direction)
+        return extent(order, body, action, direction, head_dir) if body is not None else None
 
 
 # ------------------------------------------------------------------ carga em segundo plano

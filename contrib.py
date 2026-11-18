@@ -40,6 +40,16 @@ EFFECTS = {
     1319: ("boss", _("+5% no dano físico de longe em chefe (+10% nos outros)"),
            lambda h, v, b: _mul(5 if b else 10) if h["phys"] and not h["short"] else None),
     1403: ("me", _("+5% por nível no dano físico"), lambda h, v, b: _mul(5 * (v or 10)) if h["phys"] else None),
+    # buffs que o Animista (e o Invocador) dão: status em quem bate, crédito para quem deu, só se ele estiver no grupo
+    # (pedido do usuário). O ganho depende da build, que o replay não mostra: o valor é o que a calculadora da LATAM
+    # Tools dá com a build de Mestre Celestial do usuário (Firmamento de fogo no Betelgeuse).
+    920: ("given", _("≈ +0,6% no dano (ATQ e ATQM +10%; estimativa da calculadora com uma build de Mestre Celestial)"),
+          lambda h, v, b: _mul(0.6) if h["phys"] or h["magic"] else None),
+    953: ("given", _("≈ +4,6% no dano (ATQ e ATQM +100; estimativa da calculadora com uma build de Mestre Celestial)"),
+          lambda h, v, b: _mul(4.6) if h["phys"] or h["magic"] else None),
+    1378: ("given", _("≈ +15% no dano no nível 5 (P.ATQ e S.ATQM +10 por nível; estimativa da calculadora com uma "
+                      "build de Mestre Celestial)"),
+           lambda h, v, b: _mul(15.1 * (v if v and 1 <= v <= 5 else 5) / 5.0) if h["phys"] or h["magic"] else None),
 }
 NAME = {1142: None}          # nomes vêm de meter.status_name (com o nome do simulador, ex.: Cometa)
 
@@ -55,8 +65,13 @@ AREAS = {-285: ("src", "Fire"), -286: ("src", "Water"), -287: ("src", "Wind"),
 AREA_KIND = _("Área no chão")
 
 
+SKILL_NAMED = {1378: 5448}    # o ícone se chama Bênção do Espírito Animal; a skill, que todos conhecem, Bênção da Natureza
+
+
 def effect_name(key):
     """Nome de um efeito: status (id positivo) ou área no chão (−skill)."""
+    if key in SKILL_NAMED:
+        return meter.skill_name(SKILL_NAMED[key])
     return meter.skill_name(-key) if key < 0 else meter.status_name(key)
 
 
@@ -114,49 +129,92 @@ def area_uptime(c, x, key, areas, player=None):
     return [sp for a in areas for sp in c.area_spans(a)]
 
 
+# Corpo a corpo ou de longe, como no rAthena (battle_range_type): alcance menor que 5 é corpo a corpo e alcance
+# negativo é o da arma (corpo a corpo, menos nas skills de arco e de arma de fogo e nas do Animista, que a calculadora
+# do latam-tools põe como de longe). Algumas fogem da regra: chegam de longe mas contam como corpo a corpo (a
+# calculadora concorda no Impacto Brutal, Revoada Sombria, Avanço Sísmico e Salto Revés) ou o contrário.
+LONG_WEAPON = ("AC_", "HT_", "SN_", "RA_", "WH_", "MA_", "GS_", "RL_", "NW_", "SH_")
+ALWAYS_SHORT = {"NJ_KIRIKAGE", "DK_SERVANT_W_PHANTOM", "SHC_SAVAGE_IMPACT", "SHC_FATAL_SHADOW_CROW", "MT_RUSH_QUAKE",
+                "ABC_UNLUCKY_RUSH", "MH_THE_ONE_FIGHTER_RISES"}
+ALWAYS_LONG = {"KN_BRANDISHSPEAR", "ML_BRANDISH", "SR_RAMPAGEBLASTER", "NW_THE_VIGILANTE_AT_NIGHT",
+               "BO_ACIDIFIED_ZONE_WATER_ATK", "BO_ACIDIFIED_ZONE_FIRE_ATK", "BO_ACIDIFIED_ZONE_GROUND_ATK",
+               "BO_ACIDIFIED_ZONE_WIND_ATK"}
+
+
+def melee(skill):
+    """O golpe desta skill conta como corpo a corpo (vale a Garra Sombria, não o Esporo)? Ataque básico: sim."""
+    if not skill:
+        return True
+    sk = dd.SKILL_DB.get(str(skill)) or {}
+    name = sk.get("n") or ""
+    if name in ALWAYS_SHORT or name in ALWAYS_LONG:
+        return name in ALWAYS_SHORT
+    rng = sk.get("r", 1) or 0
+    if rng < 0:                                  # o alcance da arma (Firmamento: −9, Golpe Fulminante: −1)
+        return not name.startswith(LONG_WEAPON)
+    return rng < 5
+
+
 def classify(x, h):
     """Tipo do golpe: físico/mágico, corpo a corpo e elemento (como o Dedo Duro vê)."""
     sk = (dd.SKILL_DB.get(str(h.skill)) or {}) if h.skill else {}
     kind = sk.get("t", "W") if h.skill else "W"
-    rng = sk.get("r", 1) if h.skill else 1
     el = dd.hit_element(h.skill)
     if el == "Weapon":
         el = dd.weapon_element(x, h.src, h.t) if h.raw == h.src else None
-    return dict(phys=kind == "W", magic=kind == "M", short=kind == "W" and 0 <= (rng or 0) < 5, el=el)
+    return dict(phys=kind == "W", magic=kind == "M", short=kind == "W" and melee(h.skill), el=el)
 
 
 def _spans(c, aid, efst):
     return sorted((s, e, c.status_val.get((a, ef, s))) for a, ef, s, e in c.statuses(aid) if ef == efst)
 
 
-def lex_consumed(c, x):
-    """Golpes (id) que gastaram uma Lex Aeterna: cada aplicação no chefe dobra o próximo golpe com dano nele.
+def lex_applications(c, x):
+    """Cada Lex Aeterna posta no chefe e o que houve com ela: [dict(t, src, skill, hit, end)] em ordem de tempo.
+    Cada aplicação no chefe dobra o próximo golpe com dano nele: `hit` é esse golpe. Sem golpe, `end` diz por quê:
+    "replaced" (outra Lex foi posta antes do próximo golpe: não acumula, e o golpe fica com a mais nova, como no
+    crédito de dano), "off" (o status desligou sem golpe à vista: gasta fora da tela) ou "left" (ficou pendente até
+    o fim). `src`: quem lançou (None quando só o status apareceu, sem o uso da skill à vista).
 
     A aplicação é o uso da skill no chefe (Lex Aeterna, Vituperatum) ou o status ligando sem uso visto. Não dá para
     usar só o status: com o Cardeal lançando várias por segundo, o jogo liga o status uma vez e só desliga no fim da
     sequência, embora cada Lex seja gasta pelo golpe seguinte (no replay de 4 min, 2 trechos de status e 21 Lex
     gastas, cada uma até ~200 ms depois do uso). Lex de novo num alvo que ainda tem uma não acumula."""
     aids = set(x.boss_aids)
-    events = [(u[0], 0, u[3]) for u in c.uses if u[4] in LEX_SKILLS and u[3] in aids]
-    seen = {(t, a) for t, _k, a in events}
+    apps = [dict(t=u[0], src=u[2], skill=u[4], target=u[3], hit=None, end="left")
+            for u in c.uses if u[4] in LEX_SKILLS and u[3] in aids]
+    events = [(a["t"], 0, a) for a in apps]
+    seen = {(a["t"], a["target"]) for a in apps}
     for a, ef, s, e in c.statuses():
         if ef == LEX and a in aids:
             if not any(abs(s - t) <= 300 and a == b for t, b in seen):
-                events.append((s, 0, a))
-            events.append((e, 2, a))                 # o status desligou: a Lex foi gasta (talvez fora da tela)
+                app = dict(t=s, src=None, skill=None, target=a, hit=None, end="left")
+                apps.append(app)
+                events.append((s, 0, app))
+            events.append((e, 2, None))              # o status desligou: a Lex foi gasta (talvez fora da tela)
     events += [(h.t, 1, h) for h in x.hits if h.dmg > 0]
     events.sort(key=lambda e: (e[0], e[1]))          # no mesmo ms: uso, golpe e só depois o status desligando
     # as fases do chefe nunca estão vivas juntas: uma Lex pendente vale para a luta
-    pending, out = False, set()
+    pending = None
     for _t, kind, obj in events:
         if kind == 0:
-            pending = True
+            if pending is not None:
+                pending["end"] = "replaced"
+            pending = obj
         elif kind == 2:
-            pending = False
-        elif pending:
-            pending = False
-            out.add(id(obj))
-    return out
+            if pending is not None:
+                pending["end"] = "off"
+            pending = None
+        elif pending is not None:
+            pending["hit"], pending["end"] = obj, None
+            pending = None
+    apps.sort(key=lambda a: a["t"])
+    return apps
+
+
+def lex_consumed(c, x):
+    """Golpes (id) que gastaram uma Lex Aeterna (ver lex_applications)."""
+    return {id(a["hit"]) for a in lex_applications(c, x) if a["hit"] is not None}
 
 
 def fight(c, key, rng=None, player=None):
@@ -177,6 +235,13 @@ def fight(c, key, rng=None, player=None):
         if k not in spans:
             spans[k] = _spans(c, aid, efst)
         return next((v for s, e_, v in spans[k] if s <= t < e_), False)
+    given = {}
+
+    def given_on(aid, efst, t):                     # buff dado por alguém do grupo (Animista)
+        k = (aid, efst)
+        if k not in given:
+            given[k] = given_spans(c, x, aid, efst)
+        return next((v for s, e_, v, _w in given[k] if s <= t < e_), False)
     lex_hits = lex_consumed(c, x)
     live = live_areas(c, x)
     for h in hits:
@@ -185,7 +250,10 @@ def fight(c, key, rng=None, player=None):
         info = classify(x, h)
         ele, mul = {}, {}
         for efst, (where, _rule, fn) in EFFECTS.items():
-            v = active(h.dst_raw if where == "boss" else h.src, efst, h.t)
+            if where == "given":
+                v = given_on(h.src, efst, h.t)
+            else:
+                v = active(h.dst_raw if where == "boss" else h.src, efst, h.t)
             if v is False:
                 continue
             r = fn(info, v, boss)
@@ -214,6 +282,8 @@ def fight(c, key, rng=None, player=None):
         where = EFFECTS[efst][0] if efst in EFFECTS else "boss"
         if where == "boss":
             on = [(s, e_) for p in x.phases for s, e_, _v in _spans(c, p["aid"], efst)]
+        elif where == "given":
+            on = [(s, e_) for a in ([player] if player else x.party) for s, e_, _v, _w in given_spans(c, x, a, efst)]
         else:
             on = [(s, e_) for a in ([player] if player else x.party) for s, e_, _v in _spans(c, a, efst)]
         up = dd._total(dd._intersect(dd._merge(on), wins)) / float(win_ms) if on else 0.0
@@ -226,7 +296,7 @@ def fight(c, key, rng=None, player=None):
             rule = _("usada, mas o status nunca apareceu no chefe: imune")
         if efst == LEX:
             up = None           # o status fica ligado na sequência inteira de Lex: "ativo" não diz nada aqui
-        rows.append(dict(key=efst, efst=efst, name=meter.status_name(efst), where=where, rule=rule,
+        rows.append(dict(key=efst, efst=efst, name=effect_name(efst), where=where, rule=rule,
                          uptime=up, affected=affected[efst], contrib=contrib[efst], hits=n[efst],
                          share=contrib[efst] / float(total) if total else 0.0))
     for akey, areas in live.items():
@@ -282,6 +352,27 @@ def appliers(c, x, efst):
     return out
 
 
+def given_spans(c, x, aid, efst):
+    """[(início, fim, val1, quem deu)] de um buff que outro jogador põe em `aid` (Chuva de Mariscos, Despertar, Bênção
+    da Natureza): quem usou a skill que põe o buff logo antes de ele aparecer (de preferência nele); sem o uso à
+    vista, o único membro do grupo cuja classe tem a skill. Só fica o que veio de alguém do grupo."""
+    sk = _apply_skills(efst)
+    party = set(x.party)
+    acts = sorted((u[0], u[2], u[3]) for u in c.uses if u[4] in sk)
+    able = [a for a in x.party if dd.JOB_SKILLS.get(dd.job_id(c, a), set()) & sk]
+    before, after = APPLY_WINDOW
+    out = []
+    for s, e, v in _spans(c, aid, efst):
+        near = [(t, a, tgt) for t, a, tgt in acts if s - before <= t <= s + after]
+        on_him = [a for t, a, tgt in near if tgt == aid]
+        who = on_him[-1] if on_him else (near[-1][1] if near else None)
+        if who is None and len(able) == 1:
+            who = able[0]
+        if who in party:
+            out.append((s, e, v, who))
+    return out
+
+
 def credit(c, key, rng=None):
     """Dano creditado a cada jogador numa luta contra `key`: a parte do dano que é dele (os golpes dele sem os
     efeitos dos outros) mais o que os efeitos que ele pôs renderam nos golpes de todo mundo.
@@ -317,12 +408,13 @@ def credit(c, key, rng=None):
                 who, v = on[-1]
             else:
                 k = (h.src, efst)
-                if k not in me_spans:
-                    me_spans[k] = _spans(c, h.src, efst)
-                v = next((vv for s, e_, vv in me_spans[k] if s <= h.t < e_), False)
-                if v is False:
+                if k not in me_spans:           # "me": buff no próprio jogador (ex.: Investida do Engenheiro);
+                    me_spans[k] = (given_spans(c, x, h.src, efst) if where == "given"   # "given": quem deu
+                                   else [(s, e_, vv, h.src) for s, e_, vv in _spans(c, h.src, efst)])
+                on = next(((vv, w) for s, e_, vv, w in me_spans[k] if s <= h.t < e_), None)
+                if on is None:
                     continue
-                who = h.src                     # buff no próprio jogador (ex.: Investida do Engenheiro)
+                v, who = on
             r = fn(info, v, boss)
             if r is not None:
                 (ele if r[0] == "ele" else mul).append((efst, who, r[1]))

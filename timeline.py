@@ -12,8 +12,10 @@ Os dados saem daqui prontos para a aba "Linha do tempo" (analysis_ui), que sobre
 import collections
 
 import analysis as an
+import contrib
 import dedoduro as dd
 import meter
+from fmt import dec
 from i18n import _
 
 PAD_MS = 3000                 # folga antes e depois da luta
@@ -31,14 +33,35 @@ DEFAULT_ON = {dd.DARK_CLAW, dd.FLORESCER, 1402, dd.MAX_PAIN}
 LANE_COLORS = {dd.DARK_CLAW: "#a78bfa", dd.FLORESCER: "#4ade80", 1402: "#f59e0b", dd.MAX_PAIN: "#ef4444",
                1142: "#22d3ee", dd.VENOM_IMPRESS: "#a3e635"}
 EVENT_COLORS = {"boss": "#f97316", "reflect": "#ef4444", "claw": "#a78bfa", "strong": "#fbbf24", "elo": "#38bdf8",
-                "res": "#4ade80"}
+                "res": "#4ade80", "lex": "#e879f9"}
+# força de cada golpe no chefe pela fração do HP que ele tirou: abaixo de 0,5%, de 0,5% a 1%, acima de 1% e acima
+# de 5% (o 0,5% é o mesmo limite dos golpes fortes). Cores do mais fraco ao mais forte: no tema escuro cinza,
+# amarelo, laranja e vermelho; no claro (amarelo e laranja não se distinguem em texto no fundo claro) cinza e um
+# vermelho cada vez mais escuro
+STRENGTH_LIMITS = (dd.STRONG_HIT, 0.01, 0.05)
+STRENGTH_COLORS = {"dark": ("#94a3b8", "#fde047", "#fb923c", "#f43f5e"),
+                   "light": ("#64748b", "#ef4444", "#b91c1c", "#7f1d1d")}
+LEX_END = {"replaced": _("não dobrou nada: outra Lex foi posta antes do próximo golpe"),
+           "off": _("gasta sem golpe à vista (fora da tela)"), "left": _("não foi gasta")}
 # áreas no chão: cor de cada skill, as que começam desligadas e o que apaga uma área (skills usadas numa célula)
 AREA_COLORS = {285: "#fb923c", 286: "#38bdf8", 287: "#bef264", 288: "#94a3b8", 405: "#e2e8f0", 2465: "#f87171",
-               2466: "#60a5fa", 2467: "#a3e635", 2468: "#d6a38f"}
+               2466: "#3b82f6", 2467: "#059669", 2468: "#d6a38f"}    # as mesmas do gráfico de dano creditado
 AREA_OFF = {288}              # Proteger Terreno não muda o dano: fica na lista, desligado
 CHANGE_COLORS = {"bossel": "#f472b6", "bosssize": "#22d3ee"}
 FORM_JOIN_MS = 300            # Mudar Propriedade junto com a troca de forma: vale para a forma nova
 SIZE_PT = {"S": _("pequeno"), "M": _("médio"), "L": _("grande")}
+
+
+def strength(pct):
+    """Faixa de força de um golpe que tirou `pct` (fração) do HP do chefe: 0 (abaixo de 0,5%), 1 (de 0,5% a 1%),
+    2 (acima de 1%) ou 3 (acima de 5%)."""
+    lo, mid, hi = STRENGTH_LIMITS
+    return 0 if pct < lo else 1 if pct <= mid else 2 if pct <= hi else 3
+
+
+def of_hp(pct):
+    """"2,41% do HP": a fração do HP do chefe que um golpe tirou, no detalhe do golpe."""
+    return _("%s do HP") % dec("%.2f%%" % (pct * 100))
 
 
 def fights(c, rng=None):
@@ -242,31 +265,81 @@ def build(c, key, rng=None):
             for t, _cd in dd.claw_casts(x, a):
                 if t0 <= t <= t1:
                     ev(t, "claw", "claw", a, _("usou %s") % meter.skill_name(5001))
+    # Lex Aeterna (e Vituperatum) no chefe: cada uma dobra o próximo golpe com dano nele. Um ponto por Lex posta,
+    # com quem lançou e o golpe que ela dobrou, ou por que não dobrou nada (a mesma conta do crédito de dano)
+    for app in contrib.lex_applications(c, x):
+        if not t0 <= app["t"] <= t1:
+            continue
+        lex = meter.skill_name(app["skill"] or contrib.LEX_SKILLS[0])
+        h = app["hit"]
+        if h is not None:
+            detail = _("dobrou %s de %s: %s (a Lex rendeu %s)") % (
+                meter.skill_name(h.skill) if h.skill else _("ataque básico"), c.name_of(h.src), an._full(h.dmg),
+                an._full(h.dmg // 2))
+        else:
+            detail = LEX_END[app["end"]]
+        ev(app["t"], "lex", "lex", app["src"], _("usou %s") % lex if app["src"] is not None else
+           _("%s no chefe (sem o uso à vista)") % lex, detail, value=h.dmg / 2.0 if h is not None else None)
+        events[-1]["used"] = h is not None
+        if h is not None:
+            events[-1]["target"] = h.src           # em "Quem", a Lex aparece também para quem teve o golpe dobrado
+            events[-1]["hit_t"] = h.t              # na curva de HP, a Lex fica no golpe que ela dobrou,
+            if x.hp:                               # com a cor da força dele (fração do HP que o golpe tirou)
+                events[-1]["hit_pct"] = h.dmg / x.hp
     # golpes fortes (mesmo limite do Dedo Duro) e Elo Celestial
     limit = dd.STRONG_HIT * x.hp
     for h in x.hits:
         if limit and h.dmg >= limit:
-            ev(h.t, "strong", "strong", h.src, meter.skill_name(h.skill), an._full(h.dmg), value=h.dmg)
+            ev(h.t, "strong", "strong", h.src, meter.skill_name(h.skill),
+               an._full(h.dmg) + " · " + of_hp(h.dmg / x.hp), value=h.dmg)
+            events[-1]["pct"] = h.dmg / x.hp      # fração do HP do chefe que o golpe tirou (cor pela força)
     for u in c.uses:
         if t0 <= u[0] <= t1 and u[4] == dd.ELO_SKILL and u[2] in pset:
             ev(u[0], "elo", "elo", u[2], _("usou %s") % meter.skill_name(dd.ELO_SKILL))
-    # eventos individuais (só na lista): cada golpe e cada skill, dos jogadores e dos monstros
-    for h in c.hits:
-        if not t0 <= h.t <= t1:
-            continue
-        what = meter.skill_name(h.skill) if h.skill else _("ataque básico")
-        if h.miss:
-            detail = _("errou %s") % c.name_of(h.dst_raw)
-        else:
-            detail = _("%s em %s") % (an._full(h.dmg), c.name_of(h.dst_raw)) + (_(" (crítico)") if h.crit else "")
-        if h.out and h.src in pset:
-            if limit and h.dmg >= limit and h.dst == key:
-                detail += " · " + _("golpe forte")
-            ev(h.t, "hit", "hits", h.src, what, detail, value=h.dmg)
-            events[-1]["target"] = h.dst_raw
-        elif not h.out:
-            ev(h.t, "mobhit", "mobhits", None, what, detail, value=h.dmg)
-            events[-1].update(who=c.name_of(h.raw), mob=True, target=h.dst)
+    # eventos individuais (só na lista): cada golpe, dos jogadores e dos monstros. Numa luta longa são mais de cem
+    # mil, e as duas faixas começam desligadas: os eventos são montados na primeira vez que alguém liga uma delas
+    # (hit_events); aqui só se vê se existem, para as faixas aparecerem na lista
+    fight_hits = [h for h in c.hits if t0 <= h.t <= t1]
+    hit_lanes = set()
+    if any(h.out and h.src in pset for h in fight_hits):
+        hit_lanes.add("hits")
+    if any(not h.out for h in fight_hits):
+        hit_lanes.add("mobhits")
+    made = []
+
+    def hit_events():
+        """Os eventos de cada golpe da luta (faixas "golpe a golpe"), feitos uma vez e guardados."""
+        if not made:
+            names, out_ = {}, []
+
+            def name(a):
+                n = names.get(a)
+                if n is None:
+                    n = names[a] = c.name_of(a)
+                return n
+            for h in fight_hits:
+                what = meter.skill_name(h.skill) if h.skill else _("ataque básico")
+                if h.miss:
+                    detail = _("errou %s") % name(h.dst_raw)
+                else:
+                    detail = _("%s em %s") % (an._full(h.dmg), name(h.dst_raw)) + (_(" (crítico)") if h.crit else "")
+                if h.out and h.src in pset:
+                    # golpe no chefe: a fração do HP que ele tirou (cor pela força) vai também no detalhe
+                    pct = h.dmg / x.hp if x.hp and h.dst == key and not h.miss else None
+                    if limit and h.dmg >= limit and h.dst == key:
+                        detail += " · " + _("golpe forte")
+                    if pct is not None:
+                        detail += " · " + of_hp(pct)
+                    out_.append(dict(t=h.t, kind="hit", lane="hits", aid=h.src, who=name(h.src), what=what,
+                                     detail=detail, value=h.dmg, target=h.dst_raw))
+                    if pct is not None:
+                        out_[-1]["pct"] = pct
+                elif not h.out:
+                    out_.append(dict(t=h.t, kind="mobhit", lane="mobhits", aid=None, who=name(h.raw), what=what,
+                                     detail=detail, value=h.dmg, mob=True, target=h.dst))
+            out_.sort(key=lambda e: e["t"])
+            made.append(out_)
+        return made[0]
     effects = collections.defaultdict(list)       # curado -> [(status, início, fim)] dos efeitos que curam sozinhos
     for a, ef, st, en in c.statuses():
         if ef in dict(HEAL_EFFECTS):
@@ -290,6 +363,8 @@ def build(c, key, rng=None):
                 ev(u[0], "pskill", "pskills", u[1] if u[1] in pset else u[2], _("usou %s") % dd.use_name(c, u),
                    ((c.name_of(u[2]) if u[2] != u[1] else "") + tgt).strip())
                 events[-1]["target"] = u[3]
+                if u[4] in contrib.LEX_SKILLS and u[3] in x.boss_aids:
+                    events[-1]["lex"] = True        # a faixa da Lex já mostra este uso, com o que houve com ela
             else:
                 on = an.ground_use_on(c, u, pset) if u[3] == 0 else []
                 if on:
@@ -312,11 +387,12 @@ def build(c, key, rng=None):
             e_["mob"] = True
     events.sort(key=lambda e: e["t"])
 
-    used = {e["lane"] for e in events}
+    used = {e["lane"] for e in events} | hit_lanes
     for k, name, color in (("deaths", _("Mortes"), None),            # None: cor do texto do tema
                            ("boss", _("Skills do chefe"), EVENT_COLORS["boss"]),
                            ("reflect", _("Dano refletido"), EVENT_COLORS["reflect"]),
                            ("claw", _("Usos da %s") % meter.skill_name(5001), EVENT_COLORS["claw"]),
+                           ("lex", meter.skill_name(contrib.LEX_SKILLS[0]), EVENT_COLORS["lex"]),
                            ("strong", _("Golpes fortes (≥ 0,5% do HP)"), EVENT_COLORS["strong"]),
                            ("elo", meter.skill_name(dd.ELO_SKILL), EVENT_COLORS["elo"])):
         if k in used:
@@ -346,7 +422,7 @@ def build(c, key, rng=None):
     return dict(key=key, name=c.target_name(key), t0=t0, t1=t1, start=x.start, end=x.end, killed=x.killed,
                 out=out, taken=taken, hp=hp, hp_known=True, hp_max=x.hp, hp_label=x.hp_label, lanes=lanes,
                 regen=regen, regen_fit=fitted,
-                events=events,
+                events=events, hit_events=hit_events,
                 marks=sorted(marks), players=order, party=set(x.party), dmg=dmg,
                 names={a: c.name_of(a) for a in order}, starts=starts, phase_dmg=dd.phase_damage(x),
                 lane_events=status_events(c, lanes) + area_events)

@@ -6,8 +6,10 @@ Ctrl + roda (ou Ctrl + / −) muda o tamanho de tudo; o layout se reorganiza com
 """
 
 import collections
+import gc
 import os
 import re
+import sys
 import threading
 import time
 import tkinter as tk
@@ -33,7 +35,9 @@ from i18n import _
 # cor de cada efeito no gráfico "Por jogador" (o dano próprio usa a cor do jogador)
 EFFECT_COLORS = {1142: "#22d3ee", 1183: "#4ade80", 730: "#a78bfa", 1402: "#f59e0b", 1403: "#fbbf24", 22: "#f472b6",
                  1182: "#a3e635", 608: "#ef4444", 1319: "#94a3b8",
-                 -285: "#fb923c", -2468: "#d6a38f", -286: "#38bdf8", -287: "#bef264"}   # áreas no chão (−skill)
+                 -285: "#fb923c", -2468: "#d6a38f", -286: "#38bdf8", -287: "#bef264",   # áreas no chão (−skill)
+                 -2465: "#f87171", -2466: "#3b82f6", -2467: "#059669",   # Insígnias do Fogo, da Água e do Vento
+                 920: "#2dd4bf", 953: "#818cf8", 1378: "#e879f9"}   # Animista: Chuva de Mariscos, Despertar, Bênção
 # cores bem diferentes entre si; cada jogador fica com a mesma cor em todas as tabelas e gráficos
 PALETTE = ["#ff7a59", "#5b9cff", "#4ade80", "#c084fc", "#fbbf24", "#22d3ee", "#f472b6",
            "#a3e635", "#d6a38f", "#94a3b8", "#e11d48", "#2dd4bf"]
@@ -183,22 +187,25 @@ class Table:
         kept = [iid for iid in self._order if iid in shown]
         in_place = want[:len(kept)] == kept  # as que ficam seguem na mesma ordem: as novas entram no fim
         self._order = want
+        # direto no Tcl, com a tupla de valores virando lista do Tcl: o insert/item do ttk formata cada valor em
+        # Python e era 6x mais lento (9 mil eventos da Linha do tempo: 180 ms -> 30 ms), com o mesmo resultado
+        call, w = tree.tk.call, tree._w
         for i, (iid, r) in enumerate(zip(want, rows)):
             values = tuple(_fmt(kind, r.get(key)) for key, _t, _w, _a, kind in self.columns)
             tags = ["odd"] if i % 2 else []
             if self.tag_fn:
                 tags += self.tag_fn(r)
-            kw = dict(values=values, tags=tags)
             image = None
             if self.swatch and self.color_fn:
-                image = kw["image"] = self.win.swatch(self.color_fn(r))
-            state = (values, tuple(tags), str(image) if image is not None else None)
+                image = str(self.win.swatch(self.color_fn(r)))
+            state = (values, tuple(tags), image)
+            opts = ("-values", values, "-tags", tags) + (("-image", image) if image is not None else ())
             old = shown.get(iid)
             if old is None:
-                tree.insert("", "end" if in_place else i, iid=iid, **kw)
+                call(w, "insert", "", "end" if in_place else i, "-id", iid, *opts)
             else:
                 if old != state:
-                    tree.item(iid, **kw)
+                    call(w, "item", iid, *opts)
                 if not in_place and tree.index(iid) != i:
                     tree.move(iid, "", i)
             shown[iid] = state
@@ -328,9 +335,12 @@ class ScrollFrame:
 
     def _fit(self):
         c = self.canvas
-        need = self.inner.winfo_reqheight()
-        c.itemconfigure(self.item, width=c.winfo_width(), height=max(need, c.winfo_height()))
-        c.configure(scrollregion=(0, 0, c.winfo_width(), max(need, c.winfo_height())))
+        need, room = self.inner.winfo_reqheight(), c.winfo_height()
+        # conteúdo mais alto que a área: o quadro fica com a altura que pede (0) e cresce sozinho quando algo cresce
+        # depois (com a altura fixada aqui, o que crescesse ficava cortado no fim, sem <Configure> para refazer a
+        # rolagem); mais baixo que a área: ocupa a área toda
+        c.itemconfigure(self.item, width=c.winfo_width(), height=0 if need > room else room)
+        c.configure(scrollregion=(0, 0, c.winfo_width(), max(need, room)))
 
     def _wheel(self, e):
         if e.state & 0x4 or isinstance(e.widget, ttk.Treeview):
@@ -679,9 +689,33 @@ def _nice_time(ms):
     return 3600000
 
 
+_CLOCK = []                   # o intervalo de troca do Python antes de fine_clock(True) (vazio: relógio normal)
+
+
+def fine_clock(on):
+    """Relógio de 1 ms para o programa enquanto a análise está aberta. Desde o Windows 10 2004, quem não pede fica com
+    15,6 ms; com uma tarefa em segundo plano rodando (guarda-roupa, missões, os outros replays da pasta), cada chamada
+    da janela ao Tk esperava um tique inteiro desses para o Python voltar a ela (o XP abria em 0,45 s; assim, 0,16 s).
+    A vez do Python também passa a trocar a cada 2 ms (eram 5). Só com a análise aberta: com o relógio fino o Windows
+    acorda mais vezes."""
+    try:
+        import ctypes
+        if on and not _CLOCK:
+            ctypes.windll.winmm.timeBeginPeriod(1)
+            _CLOCK.append(sys.getswitchinterval())
+            sys.setswitchinterval(0.002)
+        elif not on and _CLOCK:
+            ctypes.windll.winmm.timeEndPeriod(1)
+            sys.setswitchinterval(_CLOCK.pop())
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
 class AnalysisWindow:
     def __init__(self, app):
         self.app = app
+        self._traces = []             # (variável, comando) de cada trace: o close desfaz (ver trace)
+        fine_clock(True)
         self.top = tk.Toplevel(app.root)
         self.top.withdraw()                  # só aparece depois de montada e preenchida (veja o fim do __init__)
         self.top.title(_("Análise — Replay Master   (Ctrl + roda do mouse: tamanho)"))
@@ -910,6 +944,12 @@ class AnalysisWindow:
     def label(self, parent, text, font="text", color="fg", bg="bg", **kw):
         return tk.Label(parent, text=text, font=self.f[font], fg=self.c[color], bg=self.c[bg], **kw)
 
+    def trace(self, var, callback):
+        """var.trace_add("write", callback) que o close desfaz. O Tcl guarda o comando do trace até alguém tirá-lo,
+        e o comando segura a janela: sem isso, cada análise fechada ficava inteira na memória (com o índice do .grf
+        dos Visuais, uns 20 MB por abertura)."""
+        self._traces.append((var, var.trace_add("write", callback)))
+
     # ------------------------------------------------------------ montagem
 
     def build(self):
@@ -1117,7 +1157,7 @@ class AnalysisWindow:
         ttk.Button(ctr, text="\u27f3", width=3, style="An.TButton",
                    command=lambda: self.eq_turn(-1)).pack(side="left", padx=(4, 0))
         self.eq_action = tk.StringVar(self.top, _("Andando"))      # anda por padrão, como no jogo
-        box = ttk.Combobox(ctr, textvariable=self.eq_action, values=[_(n) for _a, n in sprites.ACTIONS], width=13,
+        box = ttk.Combobox(ctr, textvariable=self.eq_action, values=[_(n) for _a, n in sprites.ACTIONS], width=17,
                            state="readonly", style="An.TCombobox", font=self.f["text"])
         box.pack(side="left", padx=(8, 0))
         box.bind("<<ComboboxSelected>>", lambda e: self.eq_restart())
@@ -1134,6 +1174,8 @@ class AnalysisWindow:
         self.eq_info.pack(fill="x", padx=10, pady=(6, 10))
         self.eq_dir, self.eq_frame, self.eq_after = 0, 0, None
         self.eq_n = 1                 # quadros da animação à vista (o quadro dá a volta: as imagens se repetem)
+        self.eq_t0 = time.monotonic()     # relógio da animação (os chapéus animados correm no ritmo deles)
+        self.eq_speed = None              # velocidade de andar de quem gravou (a da pose "Andando (rápido)")
         self.eq_look, self.eq_images, self.eq_loader_v = None, {}, -1
 
     def refresh_equip(self, c):
@@ -1166,9 +1208,11 @@ class AnalysisWindow:
         w = sprites.LOADER.wardrobe
         worn = c.worn_at(t)
         look = sprites.look_at(c.session.look, worn, w.classnum) if (w and worn) else dict(c.session.look)
+        self.eq_speed = c.session.stats.get("speed")
         if look != self.eq_look:
             self.eq_look = look
             self.eq_frame = 0
+            self.eq_t0 = time.monotonic()
             if len(self.eq_images) > 300:
                 self.eq_images = {}
         self.eq_draw()
@@ -1179,6 +1223,7 @@ class AnalysisWindow:
 
     def eq_restart(self):
         self.eq_frame = 0
+        self.eq_t0 = time.monotonic()
         self.eq_draw()
 
     def eq_choice(self):
@@ -1212,16 +1257,21 @@ class AnalysisWindow:
             return
         action, head = self.eq_choice()
         look = self.eq_look
-        key = (tuple(sorted(look.items())), action, self.eq_dir, head, self.eq_frame)
+        elapsed = (time.monotonic() - self.eq_t0) * 1000.0
+        fast = self.eq_action.get() == _(sprites.FAST_WALK)
+        st = w.clock(look, action, self.eq_dir, head, elapsed, sprites.walk_speed(fast, self.eq_speed))
+        step, idx, wait = st if st else (0, (), None)
+        self.eq_frame = step
+        key = (tuple(sorted(look.items())), action, self.eq_dir, head, idx)
         img = self.eq_images.get(key)
         if img is None:
-            r = w.render(look, action, self.eq_dir, self.eq_frame, head)
+            r = w.render_png(look, action, self.eq_dir, step, head, elapsed)      # montado pelo GDI+
             if r is None:
                 cv.create_text(W / 2, H / 2, text=_("Sem sprite para esta classe."), fill=col["muted"],
                                font=self.f["text"], width=W - 20)
                 return
-            iw, ih, px, ox, oy, delay, nframes, missing = r
-            photo = tk.PhotoImage(master=self.top, data=sprites.png_b64(iw, ih, px), format="png")
+            iw, ih, data, ox, oy, delay, nframes, missing, _dark = r
+            photo = tk.PhotoImage(master=self.top, data=data, format="png")
             if sc > 1:
                 photo = photo.zoom(sc)
             if len(self.eq_images) > 300:      # muitas poses e direções vistas: recomeça o cache
@@ -1242,14 +1292,14 @@ class AnalysisWindow:
                      "mid": _("chapéu do meio"), "top": _("chapéu de cima"), "robe": _("capa")}
             info.append(_("sem sprite no jogo: %s") % ", ".join(names.get(m, m) for m in missing))
         self.eq_info.configure(text="\n".join(x for x in info if x))
-        if action not in (sprites.IDLE, sprites.SIT) and nframes > 1 and self.tab_name() == "equip":
-            self.eq_after = self.top.after(int(delay), self.eq_tick)
+        if wait is not None and self.tab_name() == "equip":
+            # na hora em que algum quadro muda (chapéus e capas animados também parados, cada um no seu ritmo)
+            self.eq_after = self.top.after(max(10, int(wait) + 1), self.eq_tick)
 
     def eq_tick(self):
         self.eq_after = None
         if self.tab_name() != "equip":
             return
-        self.eq_frame = (self.eq_frame + 1) % self.eq_n
         self.eq_draw()
 
     def eq_wait_loader(self):
@@ -1445,7 +1495,7 @@ class AnalysisWindow:
         self.drop_hidden_btn.configure(text=_("Itens ocultos (%d) ▾") % len(hidden) if hidden else _("Nenhum item oculto"),
                                        state="normal" if hidden else "disabled")
         if itemkind.loading():                      # cores dos equipamentos e cartas: o jogo ainda está sendo lido
-            self.top.after(800, lambda: self.refresh(force=True) if self.tab_name() == "drops" else None)
+            self.refresh_when("itemkind", "drops", lambda: not itemkind.loading(), 800)
         mine_rows, other_rows, ground_rows = [], [], []
         for i, d in enumerate(drops):
             row = dict(key=i, t=d["t"], time=dur(d["t"]), name=meter.item_name(d["item"]), count=d["count"],
@@ -1615,7 +1665,7 @@ class AnalysisWindow:
             if item in app.ping_items():
                 app.toggle_ping(item)
             fill_marked()
-        query.trace_add("write", search_soon)
+        self.trace(query, search_soon)
         add_btn.configure(command=add)
         del_btn.configure(command=remove)
         found.bind("<Double-Button-1>", add)
@@ -1691,7 +1741,11 @@ class AnalysisWindow:
             ("kills", _("Abates")), ("factor", _("Fator de bônus")), ("level", _("Nível")),
             ("eta", _("Até o próximo nível")), ("real", _("XP real até a próxima gravação"))], min_w=140, dense=True)
         self.xp_tiles.pack(fill="x", padx=10, pady=(10, 0))
-        self.label(tab, _("O replay não grava a XP ganha: só a XP total no início de cada gravação. A estimativa soma "
+        # mapa sem medida depois de 10 min de farm: o aviso de calibrar (só nesta aba e na aba XP do widget)
+        self.xp_hint = self.label(tab, "", "text", "fg", "panel", anchor="w", justify="left", wraplength=1150)
+        self.xp_hint.configure(fg="#f59e0b")
+        self.xp_hint_shown = False
+        self.xp_hint_before = self.label(tab, _("O replay não grava a XP ganha: só a XP total no início de cada gravação. A estimativa soma "
                           "a XP de cada monstro que você ajudou a matar (rAthena e Divine Pride), com a penalidade de "
                           "nível e a sua parte do dano, vezes os bônus. Evento do servidor, VIP e Cetro somam entre "
                           "si; os bônus dos itens e o Banquete de Njord multiplicam esse grupo; manual e Kafra Buff "
@@ -1701,8 +1755,8 @@ class AnalysisWindow:
                           "Milagre estão ativos, mas não o evento do servidor: marque-o. \"Medido\" corrige a lista "
                           "com a XP exata: cada subida de nível (a XP de cada nível é conhecida) e duas gravações "
                           "seguidas do mesmo personagem; trechos com menos de 10 min não contam."),
-                   "small", "muted", "panel", anchor="w", justify="left", wraplength=1150).pack(fill="x", padx=12,
-                                                                                               pady=(6, 2))
+                   "small", "muted", "panel", anchor="w", justify="left", wraplength=1150)
+        self.xp_hint_before.pack(fill="x", padx=12, pady=(6, 2))
         pw = ttk.PanedWindow(tab, orient="horizontal", style="An.TPanedwindow")
         pw.pack(fill="both", expand=True, pady=(4, 0))
         left = tk.Frame(pw, bg=c["tile"])
@@ -1725,7 +1779,7 @@ class AnalysisWindow:
             self.xp_mode_btns[key] = rb
             if key == "fixo":
                 self.xp_fixed = tk.StringVar(self.top, "")
-                self.xp_fixed.trace_add("write", lambda *_a: self.xp_save_soon())
+                self.trace(self.xp_fixed, lambda *_a: self.xp_save_soon())
                 ent = tk.Entry(row, textvariable=self.xp_fixed, width=6, font=self.f["text"], bg=c["btn"],
                                fg=c["fg"], insertbackground=c["fg"], relief="flat")
                 ent.pack(side="left", padx=6, ipady=2)
@@ -1767,7 +1821,7 @@ class AnalysisWindow:
             seen = self.label(lst, "", "small", "muted", "tile", anchor="w")
             seen.grid(row=i, column=3, sticky="w", padx=(10, 0))
             self.xp_on[bdef["key"]], self.xp_pct[bdef["key"]], self.xp_seen[bdef["key"]] = var, pv, seen
-            pv.trace_add("write", lambda *_a: self.xp_save_soon())     # o % digitado vale sem precisar de Enter
+            self.trace(pv, lambda *_a: self.xp_save_soon())     # o % digitado vale sem precisar de Enter
             if bdef["key"] == "spot":                  # o % é o do mapa: o botão marca e desmarca os mapas
                 pv.set(_("auto"))
                 ent.grid_remove()
@@ -1792,7 +1846,13 @@ class AnalysisWindow:
         box.pack(side="left", padx=6)
         box.bind("<<ComboboxSelected>>", lambda e: self.xp_pick_manual())
         self.xp_compare = self.label(left, "", "small", "muted", "tile", anchor="w", justify="left", wraplength=440)
-        self.xp_compare.pack(fill="x", padx=10, pady=(6, 10))
+        self.xp_compare.pack(fill="x", padx=10, pady=(6, 4))
+        row = tk.Frame(left, bg=c["tile"])
+        row.pack(fill="x", padx=10, pady=(0, 10))
+        ttk.Button(row, text=_("Relatório de aprendizado…"), style="An.TButton",
+                   command=lambda: self.app.open_report()).pack(side="left")
+        self.label(row, _("o que o programa aprendeu sobre XP e drops; você lê e manda se quiser"), "small", "muted",
+                   "tile").pack(side="left", padx=6)
         self.xp_chart_title = self.section(right, _("XP ao longo do tempo"))
         self.xp_chart = tk.Canvas(right, height=int(210 * self.dpi * self.zoom), bg=c["panel"], highlightthickness=0,
                                   bd=0)
@@ -1816,9 +1876,11 @@ class AnalysisWindow:
             ("when", _("Quando"), 90, "w", "text"), ("name", _("Missão"), 250, "w", "text"),
             ("xp_txt", _("XP"), 120, "e", "text"), ("how", _("Como conta"), 260, "w", "text")], height=6)
         self.t_xp_quests.pack(fill="both", expand=True, padx=6, pady=(6, 2))
-        self.label(qtab, _("O replay mostra a entrega e o progresso das caças, mas não quanto cada missão rende. Por "
-                           "enquanto a XP das missões fica fora da estimativa: depois de uma entrega, o nível mostrado "
-                           "fica abaixo do real até a próxima subida de nível ou a próxima gravação."), "small",
+        self.label(qtab, _("O replay mostra a entrega e o progresso das caças, mas não quanto cada missão rende. A "
+                           "recompensa vem do que o programa aprendeu quando uma missão fechou um nível, ou de uma "
+                           "tabela (o próprio jogo e o rAthena), e entra no nível atual e no tempo até o próximo, com "
+                           "o bônus de missão (manual, Kafra, Njord e Milagre). Missão de recompensa desconhecida "
+                           "fica fora da conta até ser aprendida."), "small",
                    "muted", "tile", anchor="w", justify="left", wraplength=640).pack(fill="x", padx=8, pady=(0, 6))
         cmp_tab = tk.Frame(sub, bg=c["tile"])
         sub.add(cmp_tab, text=_("Comparar com outra gravação"))
@@ -1934,14 +1996,26 @@ class AnalysisWindow:
             self.xp_load()
         f = self.app.watcher.file
         # as outras gravações da pasta são lidas num fio à parte; enquanto isso a aba aparece sem a medida exata
-        scanned = meter.xp_scan(os.path.dirname(getattr(c, "path", None) or ""))
-        if not scanned and not getattr(self, "_xp_scan_wait", None):
-            self._xp_scan_wait = self.top.after(400, self.xp_scan_done)
+        folder = os.path.dirname(getattr(c, "path", None) or "")
+        scanned = meter.xp_scan(folder)
+        if not scanned:
+            self.refresh_when("scan", "xp", lambda: meter.xp_scan(folder), 400)
         if (scanned and xp.gear_ready() and f is not None and f.ready and f.combat is c and f.pos >= f.size
                 and c.finished and id(c) not in self.xp_calibrated):
             self.xp_calibrated.add(id(c))
             self.app.xp_calibrate(c)
         cfg = self.app.cfg
+        hint = xp.calibration_hint(c, cfg)
+        if hint:
+            self.xp_hint.configure(text=_("⟳ %s ainda não tem medida de XP exata. Para a previsão valer neste mapa: "
+                                          "pare a gravação no jogo e comece outra em até 1 minuto (as duas seguidas "
+                                          "dão a XP exata).") % hint)
+            if not self.xp_hint_shown:
+                self.xp_hint.pack(fill="x", padx=12, pady=(6, 0), before=self.xp_hint_before)
+                self.xp_hint_shown = True
+        elif self.xp_hint_shown:
+            self.xp_hint.pack_forget()
+            self.xp_hint_shown = False
         series, est = xp.timeline(c, cfg, self.rng)
         put = self.xp_tiles.put
         put("est", full(round(est["xp"])), short=num(est["xp"]), color=self.c["accent"])
@@ -1966,19 +2040,27 @@ class AnalysisWindow:
             put("eta", _("calculando…"), _("depois de 10 min de farm ou 1% do nível"))
         elif eta is None:
             put("eta", "—", _("sem ritmo de XP no recorte"))
-        elif eta and xp.quests_uncounted(c, cfg):
-            put("eta", xp.span_text(eta), _("pode ser menos: a XP das missões entregues não entra na conta"))
         else:
-            put("eta", xp.span_text(eta) if eta else _("já subiu"),
-                (_("faltam %s XP") % full(round(left))) if left else _("pela XP estimada"))
+            dn = xp.death_note(c, cfg)                 # morte sem seguro: a previsão já desconta os 5%
+            dead = (" · " + xp.death_text(*dn)) if dn else ""
+            if eta and xp.quests_uncounted(c, cfg):
+                put("eta", xp.span_text(eta), _("pode ser menos: falta a XP de %d missão(ões) entregue(s)")
+                    % xp.quests_uncounted(c, cfg) + dead)
+            else:
+                put("eta", xp.span_text(eta) if eta else _("já subiu"),
+                    ((_("faltam %s XP") % full(round(left))) if left else _("pela XP estimada")) + dead)
         per = (_("%s por minuto") % dec("%.1f" % est["kills_per_min"])) if est["kills_per_min"] is not None else ""
         if est["unknown"]:
             per = (per + " · " if per else "") + _("%d sem XP conhecida") % est["unknown"]
         put("kills", "%d" % est["kills"], per)
         kind, info = est["source"]
-        if kind == "medido":
-            how = _("lista × %s, da subida de nível desta gravação") % dec("%.3f" % est["correction"]) \
-                if info == "nivel" else _("lista × %s, de %d medidas") % (dec("%.3f" % est["correction"]), info)
+        if kind == "medido" and info == "nivel":
+            how = _("lista × %s, da subida de nível desta gravação") % dec("%.3f" % est["correction"])
+        elif kind == "medido":                  # cada mapa usa as medidas dele; senão as de outros personagens nele
+            how = {"mapa": _("lista × %s, de %d medidas neste mapa"),
+                   "personagens": _("lista × %s, deste mapa medido por outros personagens (%d medidas)")}.get(
+                xp.correction_kind(c, cfg), _("lista × %s, de %d medidas de outros mapas")) % (
+                dec("%.3f" % est["correction"]), info)
         elif kind == "fixo":
             how = _("valor fixo: +%g%%") % info
         elif kind == "auto":
@@ -1990,8 +2072,11 @@ class AnalysisWindow:
         prog = meter.level_progress(ses)
         pr = xp.progress(c, cfg)
         if pr is not None and pr["pct"] is not None:   # agora: o último ponto exato + a XP estimada desde ele
-            put("level", "%d" % pr["level"], (_("%s agora (sem a XP das missões)") if xp.quests_uncounted(c, cfg)
-                                             else _("%s agora (estimado)")) % dec("%.2f%%" % min(100.0, pr["pct"])))
+            sub = (_("%s agora (sem a XP das missões)") if xp.quests_uncounted(c, cfg)
+                   else _("%s agora (estimado)")) % dec("%.2f%%" % min(100.0, pr["pct"]))
+            if pr.get("deaths") and pr.get("need"):
+                sub += " · " + xp.death_text(pr["deaths"], 100.0 * pr["lost"] / pr["need"])
+            put("level", "%d" % pr["level"], sub)
         else:
             put("level", "%d" % ses.base_level if ses.base_level else "—",
                 dec("%.2f%%" % (100 * prog)) if prog is not None else "")
@@ -2028,11 +2113,16 @@ class AnalysisWindow:
                 self.xp_event_btn.configure(state="normal" if ev else "disabled")
             elif b["key"] == "spot":
                 spots = xp.spot_maps(cfg)
+                listed = xp.spot_kills(c, self.rng)       # monstros da lista do evento abatidos
+                parts = ["%s +%g%%" % (", ".join(sorted(names, key=lambda n: -names[n])), pct)
+                         for pct, names in sorted(listed.items(), reverse=True)]
+                text = (_("%s (lista do evento)") % "; ".join(parts)) if parts else ""
                 if seen.get("spot"):
                     names = sorted({xp.map_key(m) for _s, _e, m in c.map_spans()} & set(spots))
-                    text = _("%s: +%g%% em %s da gravação") % (", ".join(names), max(spots[n] for n in names),
+                    more = _("%s: +%g%% em %s da gravação") % (", ".join(names), max(spots[n] for n in names),
                                                              dec("%.0f%%" % (100 * seen["spot"])))
-                else:
+                    text = (text + " · " + more) if text else more
+                elif not text:
                     text = _("%s não está marcado como spotlight (botão Mapas)") % xp.map_key(c.map or c.session.map)
             elif b["status"] is None:
                 text = _("marque se valia")
@@ -2040,7 +2130,7 @@ class AnalysisWindow:
                 pct, who = xp.gear_bonus(c.worn_at(self.rng[1] if self.rng else c.now), event_on, event_off=off)
                 if xp.GEAR.loading or xp.GEAR.table is None:
                     text = _("lendo os itens do jogo…")
-                    self.top.after(800, lambda: self.refresh(force=True) if self.tab_name() == "xp" else None)
+                    self.refresh_when("gear", "xp", lambda: not xp.GEAR.loading, 800)
                 elif pct:
                     text = _("+%d%%: %s") % (pct, ", ".join(meter.item_name(i) for i in who))
                 else:
@@ -2063,7 +2153,10 @@ class AnalysisWindow:
         if corr and how == "nivel":
             text = _("lista × %s (subida de nível nesta gravação)") % dec("%.3f" % corr)
         elif corr:
-            text = _("lista × %s (%d medidas de 10 min ou mais)") % (dec("%.3f" % corr), how)
+            text = {"mapa": _("lista × %s (%d medidas neste mapa)"),
+                    "personagens": _("lista × %s (este mapa medido por outros personagens: %d medidas)")}.get(
+                xp.correction_kind(c, cfg), _("lista × %s (%d medidas de outros mapas; este mapa ainda sem medida)")) % (
+                dec("%.3f" % corr), how)
         else:
             text = _("ainda sem subida de nível ou duas gravações seguidas de 10 min ou mais")
         self.xp_measured.configure(text=text)
@@ -2093,8 +2186,9 @@ class AnalysisWindow:
             qrows.append(dict(key="d%d" % i, when=dur(q["t"]), name=quests.title(q["quest"]), known=q["xp"] is not None,
                               xp_txt=full(round(q["xp"])) if q["xp"] is not None else _("fora da conta"),
                               how=(_("recompensa %s, sem bônus") % full(round(q["base"])) if not extra else
-                                   _("recompensa %s +%d%% (manual e Kafra)") % (full(round(q["base"])), extra))
-                              if q["base"] else _("entregue: a XP desta missão ainda não entra na estimativa")))
+                                   _("recompensa %s × %s (manual, Kafra, Njord e Milagre)") % (
+                                       full(round(q["base"])), dec("%.2f" % q["mult"])))
+                              if q["base"] else _("recompensa desconhecida: aprendida quando ela fechar um nível")))
         for h in xp.hunts(c):
             qrows.append(dict(key="h%d" % h["quest"], when=_("em andamento"), name=quests.title(h["quest"]), known=True,
                               xp_txt=" · ".join("%d/%d" % p for p in h["parts"]),
@@ -2126,8 +2220,14 @@ class AnalysisWindow:
             sub.add_command(label=_("Outro %…"), command=lambda n=name: self.xp_ask_spot(n))
             m.add_cascade(label=(_("%s em spotlight (+%g%%)") % (name, cur)) if cur else name, menu=sub)
         m.add_separator()
-        m.add_command(label=_("O programa marca o mapa sozinho quando a XP exata fecha com o spotlight."),
-                      state="disabled")
+        ev = xp.spot_event(c) if c is not None else None
+        if ev:                                     # a lista oficial do evento já está na conta, monstro a monstro
+            m.add_command(label=_("Monster Spotlight até %s: os %d monstros da lista do evento já contam sozinhos.")
+                          % ("%02d/%02d" % (ev[1].day, ev[1].month), len(ev[2])), state="disabled")
+            m.add_command(label=_("O mapa marcado vale só para os monstros fora da lista."), state="disabled")
+        else:
+            m.add_command(label=_("Cada mapa aprende sozinho quanto rende, com a XP exata; marcar aqui fixa um "
+                                  "percentual."), state="disabled")
         self._menu = m
         b = self.xp_spot_btn
         m.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
@@ -2181,15 +2281,6 @@ class AnalysisWindow:
             self.xp_on["gear_event"].set(True)
         self.xp_save()
 
-    def xp_scan_done(self):
-        """A leitura das outras gravações acabou? Refaz a aba; senão olha de novo daqui a pouco."""
-        self._xp_scan_wait = None
-        try:
-            if self.top.winfo_exists():
-                self.refresh(force=True)
-        except tk.TclError:
-            pass
-
     def refresh_xp_compare(self, c):
         """Aba "Comparar": esta gravação (ou recorte) contra outra do mesmo personagem."""
         if (self.xp_cmp_for != (getattr(c, "path", None), c.session.gid)
@@ -2229,7 +2320,7 @@ class AnalysisWindow:
             other = "lendo"
         if other == "lendo":
             self.xp_cmp_status.configure(text=_("lendo a gravação…"))
-            self.top.after(400, lambda: self.refresh(force=True) if self.tab_name() == "xp" else None)
+            self.refresh_when("cmp", "xp", lambda: self.xp_cmp_cache.get(path) != "lendo", 400)
             return
         if other == "erro":
             self.xp_cmp_status.configure(text=_("não consegui ler essa gravação"))
@@ -2429,7 +2520,32 @@ class AnalysisWindow:
             self.app.cfg["an_tab"] = self.tab_name()
         except tk.TclError:
             pass
+        # ao abrir a janela o caderno avisa duas vezes (a primeira aba entrando e a última usada): a mesma aba, acabada
+        # de refazer, não precisa ser refeita de novo
+        if self.tab_name() == getattr(self, "_refreshed_tab", None) and time.monotonic() - self._last < 0.5:
+            return
         self.refresh(force=True)
+
+    def refresh_when(self, key, tab, ready, ms=400):
+        """Refaz a aba `tab` quando `ready()` ficar verdade (algo carregando em segundo plano: os itens do jogo, as
+        outras gravações da pasta, a gravação da comparação). Até lá só confere, sem refazer a aba inteira (antes
+        ela era refeita a cada espera, ~0,3 s cada vez num replay grande). Uma espera por `key`."""
+        waits = self.__dict__.setdefault("_waits", {})
+        if key in waits:
+            return
+
+        def poll():
+            waits.pop(key, None)
+            try:
+                if not self.top.winfo_exists():
+                    return
+            except tk.TclError:
+                return
+            if not ready():
+                waits[key] = self.top.after(ms, poll)
+            elif self.tab_name() == tab:
+                self.refresh(force=True)
+        waits[key] = self.top.after(ms, poll)
 
     def tick(self):
         """Chamado pelo widget a cada leitura do replay. Com dados novos, refaz a aba no máximo 1 vez por segundo,
@@ -2476,6 +2592,7 @@ class AnalysisWindow:
             self.mvp_var.set(self.app.cfg.get("targets") == "mvp")       # mudou pelo menu do widget
         self.update_scope_list(c)
         tab = self.tab_name()
+        self._refreshed_tab = tab
         if tab == "testes":
             self.refresh_tests()              # o histórico não depende do replay aberto
         elif tab == "cartoes":
@@ -2738,7 +2855,7 @@ class AnalysisWindow:
             if self.rng:
                 buff_rng = (max(buff_rng[0], self.rng[0]), min(buff_rng[1], self.rng[1]))
         brows, btotal = an.buff_uptime(c, who, buff_rng)
-        est = {r["efst"]: r for r in rows if r["where"] == "me"}
+        est = {r["efst"]: r for r in rows if r["where"] in ("me", "given")}
         out = []
         for r in brows:
             e = est.pop(r.get("efst"), None)
@@ -3460,8 +3577,17 @@ class AnalysisWindow:
             self.app.save()
         except tk.TclError:
             pass
+        for var, name in self._traces:
+            try:
+                var.trace_remove("write", name)
+            except tk.TclError:
+                pass
+        self._traces = []
         self.top.destroy()
         self.app.analysis = None
+        fine_clock(False)
+        # solta a janela agora, na thread principal (uns 30 ms), em vez de esperar o coletor rodar sozinho
+        self.app.root.after(150, gc.collect)
 
 
 def _lum(h):

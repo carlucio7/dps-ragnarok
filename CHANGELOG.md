@@ -2,6 +2,27 @@
 
 Português · [English](#english) · [Español](#español)
 
+## 1.10.0
+
+Previsão de nível com as missões, a força de cada golpe na Linha do tempo e a análise mais rápida.
+
+- XP: a XP das missões entregues entra no nível atual e no tempo até o próximo. O programa conhece a recompensa de centenas de missões e aprende as outras.
+- XP: tabela de XP do LATAM nas classes 1 e 2 (níveis 79 a 98) e na 4ª classe (200 a 223). A previsão não diz mais "já subiu" antes da hora.
+- XP: o Monster Spotlight vale por monstro, pela lista oficial do evento, e cada mapa aprende a própria correção.
+- XP: a morte sem seguro desconta 5% do nível, e o programa avisa.
+- XP: os abates contam o monstro certo depois de trocar de mapa.
+- Relatório de aprendizado: o que o programa aprendeu (XP, drops e missões por mapa), sem nada pessoal, para mandar a quem desenvolve.
+- Linha do tempo: cada golpe na cor da força dele, pela % da vida do chefe que tirou.
+- Linha do tempo: golpes fortes e Lex Aeterna que dobraram golpe forte aparecem como bolinhas na curva de HP, e a faixa da Lex mostra quais dobraram um golpe.
+- Resumo: o dano de cada jogador por fase da luta.
+- Dano creditado: as quatro Insígnias e os buffs do Animista (Chuva de Mariscos, Despertar e Bênção da Natureza) quando ele está no grupo.
+- Dedo Duro: avisa quando o Animista não usa a Bênção da Natureza.
+- A Garra Sombria passa a contar em mais skills corpo a corpo, como o Firmamento.
+- Visuais: chapéus e capas animados, o andar na velocidade do replay, "Andando (rápido)", "Desfazer" e "Original do replay".
+- A análise abre bem mais rápido, e cada aba também.
+- Abrir e fechar a análise muitas vezes não acumula mais memória.
+- Os MVPs disfarçados de instância, como no Laboratório Central, aparecem com o nome certo.
+
 ## 1.9.1
 
 Correção na previsão de nível e monstros novos na estimativa de XP.
@@ -228,6 +249,27 @@ Primeira versão pública.
 
 ## English
 
+### 1.10.0
+
+Level forecast with quests, the strength of each hit on the Timeline and a faster analysis.
+
+- XP: the XP of turned-in quests counts toward the current level and the time to the next one. The program knows the reward of hundreds of quests and learns the others.
+- XP: LATAM's level XP table for 1st and 2nd classes (levels 79 to 98) and 4th classes (200 to 223). The forecast no longer says "already up" too early.
+- XP: Monster Spotlight counts per monster, from the event's official list, and each map learns its own correction.
+- XP: a death without insurance takes 5% of the level, and the program tells you.
+- XP: kills count the right monster after a map change.
+- Learning report: what the program learned (XP, drops and quests per map), with nothing personal, to send to the developer.
+- Timeline: each hit in the colour of its strength, by the % of the boss's HP it took.
+- Timeline: strong hits and the Lex Aeterna that doubled a strong hit show as dots on the HP curve, and the Lex lane shows which ones doubled a hit.
+- Summary: each player's damage per phase of the fight.
+- Credited damage: all four Insignias, and the Spirit Handler's buffs (Bunch of Shrimp, Chattering and Blessing of the Spirit Creature) when they're in the party.
+- Snitch: warns when the Spirit Handler doesn't use the Blessing of the Spirit Creature.
+- Dark Claw now counts on more melee skills.
+- Costumes: animated hats and garments, walking at the replay's speed, "Walking (fast)", "Undo" and "Replay's original".
+- The analysis opens much faster, and so does each tab.
+- Opening and closing the analysis many times no longer builds up memory.
+- MVPs disguised by an instance, as in the Central Laboratory, show their real name.
+
 ### 1.9.1
 
 Fix in the level forecast and new monsters in the XP estimate.
@@ -453,6 +495,27 @@ First public version.
 ---
 
 ## Español
+
+### 1.10.0
+
+Previsión de nivel con las misiones, la fuerza de cada golpe en la Línea de tiempo y un análisis más rápido.
+
+- XP: la XP de las misiones entregadas entra en el nivel actual y en el tiempo hasta el próximo. El programa conoce la recompensa de cientos de misiones y aprende las demás.
+- XP: tabla de XP de LATAM en las clases 1 y 2 (niveles 79 a 98) y en la 4ª clase (200 a 223). La previsión ya no dice "ya subió" antes de tiempo.
+- XP: el Monster Spotlight vale por monstruo, según la lista oficial del evento, y cada mapa aprende su propia corrección.
+- XP: la muerte sin seguro descuenta el 5% del nivel, y el programa avisa.
+- XP: las muertes de monstruos cuentan el monstruo correcto después de cambiar de mapa.
+- Informe de aprendizaje: lo que el programa aprendió (XP, drops y misiones por mapa), sin nada personal, para enviar a quien lo desarrolla.
+- Línea de tiempo: cada golpe en el color de su fuerza, según el % de la vida del jefe que quitó.
+- Línea de tiempo: los golpes fuertes y las Lex Aeterna que duplicaron un golpe fuerte aparecen como puntos en la curva de HP, y la franja de la Lex muestra cuáles duplicaron un golpe.
+- Resumen: el daño de cada jugador por fase de la pelea.
+- Daño acreditado: las cuatro Insignias y los buffs del Animista (Manojo de Camarones, Parloteo y Bendición del Espíritu Animal) cuando está en el grupo.
+- Soplón: avisa cuando el Animista no usa la Bendición del Espíritu Animal.
+- La Garra Tenebrosa cuenta en más habilidades cuerpo a cuerpo.
+- Visuales: sombreros y capas animados, caminar a la velocidad del replay, "Caminando (rápido)", "Deshacer" y "Original de la repetición".
+- El análisis abre mucho más rápido, y cada pestaña también.
+- Abrir y cerrar el análisis muchas veces ya no acumula memoria.
+- Los MVPs disfrazados por una instancia, como en el Laboratorio Central, aparecen con su nombre real.
 
 ### 1.9.1
 

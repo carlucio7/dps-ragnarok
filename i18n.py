@@ -313,6 +313,8 @@ CATALOG = {
     "Personagem do replay": ("Character from the replay", "Personaje de la repetición"),
     "Look:": ("Look:", "Look:"),
     "Salvar look…": ("Save look…", "Guardar look…"),
+    "↶ Desfazer": ("↶ Undo", "↶ Deshacer"),
+    "Original do replay": ("Replay's original", "Original de la repetición"),
     "Salvar look": ("Save look", "Guardar look"),
     "Nome do look:": ("Name of the look:", "Nombre del look:"),
     "Classe:": ("Class:", "Clase:"),
@@ -347,6 +349,143 @@ CATALOG = {
     "%d itens": ("%d items", "%d objetos"),
     "Spotlight do mapa (multiplica tudo)": ("Map spotlight (multiplies everything)",
                                             "Spotlight del mapa (multiplica todo)"),
+    "Monster Spotlight (lista do evento ou mapa marcado)": ("Monster Spotlight (event list or marked map)",
+                                                            "Monster Spotlight (lista del evento o mapa marcado)"),
+    "%s (lista do evento)": ("%s (event list)", "%s (lista del evento)"),
+    "Lendo as gravações que já estavam na pasta (só desta vez): %d de %d. Pode continuar jogando; o relatório se completa sozinho.": ("Reading the recordings that were already in the folder (just this once): %d of %d. You can keep playing; the report fills in by itself.",
+        "Leyendo las grabaciones que ya estaban en la carpeta (solo esta vez): %d de %d. Puedes seguir jugando; el informe se completa solo."),
+    "Inclui as %d gravações que já estavam na pasta, lidas uma vez em %s.": ("Includes the %d recordings that were already in the folder, read once on %s.",
+        "Incluye las %d grabaciones que ya estaban en la carpeta, leídas una vez el %s."),
+    "Dados (o mesmo conteúdo acima, para a ferramenta de quem desenvolve)": ("Data (the same content as above, for the developer's tool)",
+        "Datos (el mismo contenido de arriba, para la herramienta de quien desarrolla)"),
+    "Uma linha por registro. As marcas (id, pc, cid) são sorteadas neste PC: só servem para não contar duas vezes o que vier repetido em relatórios seguidos e não revelam nomes de arquivo nem de personagem.": ("One line per record. The marks (id, pc, cid) are drawn at random on this PC: they only keep what comes repeated in later reports from being counted twice and reveal no file or character names.",
+        "Una línea por registro. Las marcas (id, pc, cid) se sortean en este PC: solo sirven para no contar dos veces lo que venga repetido en informes seguidos y no revelan nombres de archivo ni de personaje."),
+    "Calibrar: grave de novo": ("Calibrate: record again",
+        "Calibrar: graba de nuevo"),
+    "Gravações de %s a %s. Cada linha: os bônus de drop ativos no abate, os abates e quantos de cada item caíram (por abate).": ("Recordings from %s to %s. Each line: the drop bonuses active at the kill, the kills and how many of each item dropped (per kill).",
+        "Grabaciones del %s al %s. Cada línea: los bonos de drop activos en la muerte, las muertes y cuántos de cada objeto cayeron (por muerte)."),
+    "Calibrar este mapa": ("Calibrate this map",
+        "Calibrar este mapa"),
+    "pare e grave de novo (até 1 min)": ("stop and record again (within 1 min)",
+        "detén y graba de nuevo (en 1 min)"),
+    "Relatório de aprendizado…": ("Learning report…",
+        "Informe de aprendizaje…"),
+    "Relatório de aprendizado": ("Learning report",
+        "Informe de aprendizaje"),
+    "⟳ %s ainda não tem medida de XP exata. Para a previsão valer neste mapa: pare a gravação no jogo e comece outra em até 1 minuto (as duas seguidas dão a XP exata).": ("⟳ %s has no exact XP measurement yet. For the forecast to hold on this map: stop the recording in the game and start another within 1 minute (the two in a row give the exact XP).",
+        "⟳ %s todavía no tiene medida de XP exacta. Para que la previsión valga en este mapa: detén la grabación en el juego y comienza otra en menos de 1 minuto (las dos seguidas dan la XP exacta)."),
+    "o que o programa aprendeu sobre XP e drops; você lê e manda se quiser": ("what the program learned about XP and drops; you read it and send it if you want",
+        "lo que el programa aprendió sobre XP y drops; lo lees y lo envías si quieres"),
+    "lista × %s, deste mapa medido por outros personagens (%d medidas)": ("list × %s, from this map measured by other characters (%d measurements)",
+        "lista × %s, de este mapa medido por otros personajes (%d medidas)"),
+    "lista × %s (este mapa medido por outros personagens: %d medidas)": ("list × %s (this map measured by other characters: %d measurements)",
+        "lista × %s (este mapa medido por otros personajes: %d medidas)"),
+    "O que o Replay Master aprendeu sobre XP e drops nas suas gravações. Nada é enviado: se quiser ajudar a melhorar o programa, copie ou salve e mande para quem desenvolve (ou para quem você quiser). Não há nada pessoal no texto.": ("What Replay Master learned about XP and drops from your recordings. Nothing is sent: if you want to help improve the program, copy or save it and send it to the developer (or to anyone you like). There is nothing personal in the text.",
+        "Lo que Replay Master aprendió sobre XP y drops en tus grabaciones. No se envía nada: si quieres ayudar a mejorar el programa, copia o guarda y envíalo a quien lo desarrolla (o a quien quieras). No hay nada personal en el texto."),
+    "Salvar relatório": ("Save report",
+        "Guardar informe"),
+    "Texto": ("Text",
+        "Texto"),
+    "Salvo.": ("Saved.",
+        "Guardado."),
+    "Salvar como…": ("Save as…",
+        "Guardar como…"),
+    "Copiar tudo": ("Copy all",
+        "Copiar todo"),
+    "evento do servidor": ("server event",
+        "evento del servidor"),
+    "Cetro": ("Scepter",
+        "Cetro"),
+    "manual": ("manual",
+        "manual"),
+    "itens": ("items",
+        "objetos"),
+    "nenhum bônus de drop visível": ("no visible drop bonus",
+        "ningún bono de drop visible"),
+    "%d%% do trecho": ("%d%% of the stretch",
+        "%d%% del tramo"),
+    "Replay Master %s · relatório de aprendizado": ("Replay Master %s · learning report",
+        "Replay Master %s · informe de aprendizaje"),
+    "Gerado em %s. O programa não enviou nada: este texto só sai do seu PC se você mandar.": ("Generated on %s. The program sent nothing: this text only leaves your PC if you send it.",
+        "Generado el %s. El programa no envió nada: este texto solo sale de tu PC si lo envías."),
+    "Sem nada pessoal: sem nomes de personagem, conta, grupo ou guilda e sem nomes de arquivo. Os personagens aparecem como A, B, C.": ("Nothing personal: no character, account, party or guild names and no file names. Characters appear as A, B, C.",
+        "Nada personal: sin nombres de personaje, cuenta, grupo o gremio y sin nombres de archivo. Los personajes aparecen como A, B, C."),
+    "Personagens": ("Characters",
+        "Personajes"),
+    "níveis %d a %d": ("levels %d to %d",
+        "niveles %d a %d"),
+    "XP por mapa (XP real ÷ XP estimada pela lista de bônus)": ("XP per map (real XP ÷ XP estimated by the bonus list)",
+        "XP por mapa (XP real ÷ XP estimada por la lista de bonos)"),
+    "%s · %s · %d medidas, %s min · ×%s (de ×%s a ×%s) · personagens %s · monstros: %s": ("%s · %s · %d measurements, %s min · ×%s (from ×%s to ×%s) · characters %s · monsters: %s",
+        "%s · %s · %d medidas, %s min · ×%s (de ×%s a ×%s) · personajes %s · monstruos: %s"),
+    "%s: ×%s → ×%s (o mapa mudou: evento começou ou acabou?)": ("%s: ×%s → ×%s (the map changed: event started or ended?)",
+        "%s: ×%s → ×%s (el mapa cambió: ¿empezó o terminó un evento?)"),
+    "evento do servidor: +%d%% → +%d%% (deduzido pela XP exata)": ("server event: +%d%% → +%d%% (deduced from exact XP)",
+        "evento del servidor: +%d%% → +%d%% (deducido por la XP exacta)"),
+    "Mudanças detectadas": ("Detected changes",
+        "Cambios detectados"),
+    "Medidas de XP exata (uma por linha)": ("Exact XP measurements (one per line)",
+        "Medidas de XP exacta (una por línea)"),
+    "data · mapa · minutos · abates (divididos) · real÷estimado · personagem e nível · mortes · missões · bônus · monstros": ("date · map · minutes · kills (shared) · real÷estimated · character and level · deaths · quests · bonuses · monsters",
+        "fecha · mapa · minutos · muertes (compartidas) · real÷estimado · personaje y nivel · muertes del personaje · misiones · bonos · monstruos"),
+    "%d sem seguro": ("%d without insurance",
+        "%d sin seguro"),
+    "%d com seguro": ("%d with insurance",
+        "%d con seguro"),
+    "sem mortes": ("no deaths",
+        "sin muertes"),
+    "missões %s": ("quests %s",
+        "misiones %s"),
+    "sem missões": ("no quests",
+        "sin misiones"),
+    "Monstros que o programa ainda não conhece a XP": ("Monsters whose XP the program does not know yet",
+        "Monstruos cuya XP el programa aún no conoce"),
+    "%s (%s) · mapas %s · %d abates em %d gravações · visto por último em %s": ("%s (%s) · maps %s · %d kills in %d recordings · last seen on %s",
+        "%s (%s) · mapas %s · %d muertes en %d grabaciones · visto por última vez el %s"),
+    "Recompensas de missão medidas (sem bônus)": ("Measured quest rewards (without bonuses)",
+        "Recompensas de misión medidas (sin bonos)"),
+    "missão %s (%s)": ("quest %s (%s)", "misión %s (%s)"),
+    "na entrega": ("at the turn-in", "en la entrega"),
+    "nível %s": ("level %s", "nivel %s"),
+    "o programa já esperava %s": ("the program already expected %s", "el programa ya esperaba %s"),
+    "entregue junto com %s: o total dividido entre elas": ("turned in together with %s: the total split among them",
+        "entregada junto con %s: el total dividido entre ellas"),
+    "XP de nível diferente da tabela do programa": ("Level XP different from the program's table",
+        "XP de nivel distinta de la tabla del programa"),
+    "%s nível %s: o jogo mandou %s, a tabela do programa diz %s": ("%s level %s: the game sent %s, the program's table says %s",
+        "%s nivel %s: el juego envió %s, la tabla del programa dice %s"),
+    "Drops (monstros que você matou dando a maior parte do dano)": ("Drops (monsters you killed doing most of the damage)",
+        "Drops (monstruos que mataste haciendo la mayor parte del daño)"),
+    "Gravações de %s a %s. Só abates isolados (nenhum outro monstro morreu até 0,35 s antes ou depois), para saber de quem caiu cada item. Cada linha: os bônus de drop ativos no abate, os abates e quantos de cada item caíram (por abate).": ("Recordings from %s to %s. Only isolated kills (no other monster died within 0.35 s before or after), so we know who dropped each item. Each line: the drop bonuses active at the kill, the kills and how many of each item dropped (per kill).",
+        "Grabaciones del %s al %s. Solo muertes aisladas (ningún otro monstruo murió hasta 0,35 s antes o después), para saber de quién cayó cada objeto. Cada línea: los bonos de drop activos en la muerte, las muertes y cuántos de cada objeto cayeron (por muerte)."),
+    "abates": ("kills",
+        "muertes"),
+    "nada caiu": ("nothing dropped",
+        "no cayó nada"),
+    "Ainda não há nada aprendido: grave o farm (com uma subida de nível ou duas gravações seguidas) e volte aqui.": ("Nothing learned yet: record your farming (with a level-up or two recordings in a row) and come back here.",
+        "Todavía no hay nada aprendido: graba el farmeo (con una subida de nivel o dos grabaciones seguidas) y vuelve aquí."),
+    "Para ajudar a melhorar o Replay Master: copie este texto e mande para quem desenvolve o programa (ou para quem você quiser).": ("To help improve Replay Master: copy this text and send it to the developer (or to anyone you like).",
+        "Para ayudar a mejorar Replay Master: copia este texto y envíalo a quien desarrolla el programa (o a quien quieras)."),
+    "lista × %s, de %d medidas neste mapa": ("list × %s, from %d measurements on this map",
+                                             "lista × %s, de %d medidas en este mapa"),
+    "lista × %s, de %d medidas de outros mapas": ("list × %s, from %d measurements on other maps",
+                                                  "lista × %s, de %d medidas de otros mapas"),
+    "lista × %s (%d medidas neste mapa)": ("list × %s (%d measurements on this map)",
+                                           "lista × %s (%d medidas en este mapa)"),
+    "lista × %s (%d medidas de outros mapas; este mapa ainda sem medida)": (
+        "list × %s (%d measurements on other maps; none on this map yet)",
+        "lista × %s (%d medidas de otros mapas; este mapa aún sin medida)"),
+    "Cada mapa aprende sozinho quanto rende, com a XP exata; marcar aqui fixa um percentual.": (
+        "Each map learns by itself how much it pays, from the exact XP; marking it here sets a fixed percentage.",
+        "Cada mapa aprende solo cuánto rinde, con la XP exacta; marcarlo aquí fija un porcentaje."),
+    "Monster Spotlight até %s: os %d monstros da lista do evento já contam sozinhos.": (
+        "Monster Spotlight until %s: the %d monsters on the event list already count by themselves.",
+        "Monster Spotlight hasta %s: los %d monstruos de la lista del evento ya cuentan solos."),
+    "morte sem seguro −%s": ("death without insurance −%s", "muerte sin seguro −%s"),
+    "%d mortes sem seguro −%s": ("%d deaths without insurance −%s", "%d muertes sin seguro −%s"),
+    "O mapa marcado vale só para os monstros fora da lista.": (
+        "A marked map only counts for monsters that are not on the list.",
+        "El mapa marcado solo vale para los monstruos fuera de la lista."),
     "Mapas ▾": ("Maps ▾", "Mapas ▾"),
     "%s: +%g%% em %s da gravação": ("%s: +%g%% for %s of the recording", "%s: +%g%% en %s de la grabación"),
     "%s não está marcado como spotlight (botão Mapas)": ("%s is not marked as spotlight (Maps button)",
@@ -1046,6 +1185,15 @@ CATALOG = {
     "Golpes fortes (≥ 0,5% do HP)": ("Strong hits (≥ 0.5% of HP)", "Golpes fuertes (≥ 0,5% del HP)"),
     "Usos da %s": ("%s uses", "Usos de %s"),
     "usou %s": ("used %s", "usó %s"),
+    "dobrou %s de %s: %s (a Lex rendeu %s)": ("doubled %s from %s: %s (the Lex added %s)",
+                                             "duplicó %s de %s: %s (la Lex aportó %s)"),
+    "%s no chefe (sem o uso à vista)": ("%s on the boss (cast not seen)", "%s en el jefe (sin el uso a la vista)"),
+    "não dobrou nada: outra Lex foi posta antes do próximo golpe": (
+        "doubled nothing: another Lex was cast before the next hit",
+        "no duplicó nada: otra Lex fue puesta antes del siguiente golpe"),
+    "gasta sem golpe à vista (fora da tela)": ("used up with no hit in view (off screen)",
+                                               "gastada sin golpe a la vista (fuera de la pantalla)"),
+    "não foi gasta": ("never used up", "no fue gastada"),
     "Dor Máxima devolveu %s": ("Dor Máxima returned %s", "Dor Máxima devolvió %s"),
     "%d jogadores atingidos, maior: %s": ("%d players hit, biggest: %s", "%d jugadores alcanzados, mayor: %s"),
     "%s começou": ("%s started", "%s empezó"),
@@ -1186,6 +1334,10 @@ CATALOG = {
     "golpe forte": ("strong hit", "golpe fuerte"),
     # dano por fase
     "Dano por fase": ("Damage per phase", "Daño por fase"),
+    "Dano por fase — %s": ("Damage per phase — %s", "Daño por fase — %s"),
+    "nenhuma luta contra chefe no recorte": ("no boss fight in the range", "ninguna pelea contra jefe en el recorte"),
+    "clique em outra luta na lista acima para ver a dela": ("click another fight in the list above to see its own",
+                                                            "haz clic en otra pelea de la lista de arriba para ver la suya"),
     "%s: %s em %s (%s/s), %d jogador(es)": ("%s: %s in %s (%s/s), %d player(s)", "%s: %s en %s (%s/s), %d jugador(es)"),
     "% da luta": ("% of fight", "% de la pelea"),
     "Por fase (lutas contra chefe no recorte)": ("Per phase (boss fights in the selection)",
@@ -1317,6 +1469,7 @@ CATALOG = {
     "Cabeça:": ("Head:", "Cabeza:"),
     "Parado": ("Standing", "Quieto"),
     "Andando": ("Walking", "Caminando"),
+    "Andando (rápido)": ("Walking (fast)", "Caminando (rápido)"),
     "Sentado": ("Sitting", "Sentado"),
     "Em guarda": ("Ready", "En guardia"),
     "Atacando": ("Attacking", "Atacando"),
@@ -1765,32 +1918,36 @@ CATALOG = {
     "com %d missão(ões)": ("with %d quest(s)", "con %d misión(es)"),
     "%d missão(ões) sem XP conhecida": ("%d quest(s) with unknown XP", "%d misión(es) sin XP conocida"),
     "recompensa %s, sem bônus": ("reward %s, no bonus", "recompensa %s, sin bonos"),
-    "recompensa %s +%d%% (manual e Kafra)": ("reward %s +%d%% (manual and Kafra)",
-                                             "recompensa %s +%d%% (manual y Kafra)"),
-    "entregue: a XP desta missão ainda não entra na estimativa": (
-        "turned in: this quest's XP isn't part of the estimate yet",
-        "entregada: la XP de esta misión aún no entra en la estimación"),
+    "recompensa %s × %s (manual, Kafra, Njord e Milagre)": (
+        "reward %s × %s (manual, Kafra, Njord and Miracle)",
+        "recompensa %s × %s (manual, Kafra, Njord y Milagro)"),
+    "recompensa desconhecida: aprendida quando ela fechar um nível": (
+        "unknown reward: learned when it completes a level",
+        "recompensa desconocida: se aprende cuando complete un nivel"),
     "fora da conta": ("not counted", "fuera de la cuenta"),
     "Missões entregues": ("Quests turned in", "Misiones entregadas"),
     "XP fora da conta: estimativa abaixo do real": ("XP not counted: the estimate is below the real one",
                                                     "XP fuera de la cuenta: la estimación queda por debajo"),
     "pode ser menos: missões fora da conta": ("may be less: quests are not counted",
                                               "puede ser menos: las misiones no cuentan"),
-    "pode ser menos: a XP das missões entregues não entra na conta": (
-        "may be less: the XP of the quests turned in is not counted",
-        "puede ser menos: la XP de las misiones entregadas no entra en la cuenta"),
+    "pode ser menos: falta a XP de %d missão(ões) entregue(s)": (
+        "may be less: the XP of %d quest(s) turned in is missing",
+        "puede ser menos: falta la XP de %d misión(es) entregada(s)"),
     "agora (sem as missões)": ("now (without the quests)", "ahora (sin las misiones)"),
     "%s agora (sem a XP das missões)": ("%s now (without the quest XP)", "%s ahora (sin la XP de las misiones)"),
     "sem a XP de %d missão(ões)": ("without the XP of %d quest(s)", "sin la XP de %d misión(es)"),
-    "O replay mostra a entrega e o progresso das caças, mas não quanto cada missão rende. Por enquanto a XP das "
-    "missões fica fora da estimativa: depois de uma entrega, o nível mostrado fica abaixo do real até a próxima "
-    "subida de nível ou a próxima gravação.": (
-        "The replay shows the turn-in and the hunt progress, but not how much each quest gives. For now quest XP "
-        "stays out of the estimate: after a turn-in, the level shown is below the real one until the next "
-        "level-up or the next recording.",
-        "El replay muestra la entrega y el progreso de las cazas, pero no cuánto rinde cada misión. Por ahora la "
-        "XP de las misiones queda fuera de la estimación: tras una entrega, el nivel mostrado queda por debajo "
-        "del real hasta la próxima subida de nivel o la próxima grabación."),
+    "O replay mostra a entrega e o progresso das caças, mas não quanto cada missão rende. A recompensa vem do que "
+    "o programa aprendeu quando uma missão fechou um nível, ou de uma tabela (o próprio jogo e o rAthena), e entra "
+    "no nível atual e no tempo até o próximo, com o bônus de missão (manual, Kafra, Njord e Milagre). Missão de "
+    "recompensa desconhecida fica fora da conta até ser aprendida.": (
+        "The replay shows the turn-in and the hunt progress, but not how much each quest gives. The reward comes "
+        "from what the program learned when a quest completed a level, or from a table (the game itself and "
+        "rAthena), and it counts toward the current level and the time to the next one, with the quest bonus "
+        "(manual, Kafra, Njord and Miracle). A quest with an unknown reward stays out until it is learned.",
+        "El replay muestra la entrega y el progreso de las cazas, pero no cuánto rinde cada misión. La recompensa "
+        "viene de lo que el programa aprendió cuando una misión completó un nivel, o de una tabla (el propio juego "
+        "y rAthena), y entra en el nivel actual y en el tiempo hasta el próximo, con el bono de misión (manual, "
+        "Kafra, Njord y Milagro). Una misión de recompensa desconocida queda fuera hasta ser aprendida."),
     # 1.5.0: copiar imagem
     "Copiar imagem": ("Copy image", "Copiar imagen"),
     "Imagem copiada!": ("Image copied!", "¡Imagen copiada!"),
@@ -2758,4 +2915,39 @@ CATALOG.update({
     "Debuff no chefe": (
         "Debuff on the boss",
         "Debuff en el jefe"),
+})
+
+# Linha do tempo: cor pela força do golpe na lista; golpes acima de 5% e Lex que dobrou golpe forte na curva de HP
+CATALOG.update({
+    "%s do HP": ("%s of HP", "%s del HP"),
+    "Força do golpe (% do HP do chefe):": ("Hit strength (% of the boss's HP):", "Fuerza del golpe (% del HP del jefe):"),
+    "Golpes acima de %s do HP": ("Hits above %s of HP", "Golpes de más de %s del HP"),
+    "%s que dobrou golpe forte": ("%s that doubled a strong hit", "%s que duplicó un golpe fuerte"),
+})
+
+# Dedo Duro: buff da classe de rajada (dura bem menos que a recarga, ex.: Despertar do Balaio de Gato)
+CATALOG.update({
+    "de rajada: dura %s e tem recarga de %d s, não fica ativo o tempo todo": (
+        "burst buff: lasts %s with a %d s cooldown, it can't stay up all the time",
+        "de ráfaga: dura %s y tiene %d s de recarga, no queda activo todo el tiempo"),
+})
+
+# Animista: crédito dos buffs que ele dá (estimativa da calculadora) e o alerta da Bênção da Natureza
+CATALOG.update({
+    "≈ +0,6% no dano (ATQ e ATQM +10%; estimativa da calculadora com uma build de Mestre Celestial)": (
+        "≈ +0.6% damage (ATK and MATK +10%; calculator estimate with a Mestre Celestial build)",
+        "≈ +0,6% de daño (ATQ y ATQM +10%; estimación de la calculadora con una build de Mestre Celestial)"),
+    "≈ +4,6% no dano (ATQ e ATQM +100; estimativa da calculadora com uma build de Mestre Celestial)": (
+        "≈ +4.6% damage (ATK and MATK +100; calculator estimate with a Mestre Celestial build)",
+        "≈ +4,6% de daño (ATQ y ATQM +100; estimación de la calculadora con una build de Mestre Celestial)"),
+    "≈ +15% no dano no nível 5 (P.ATQ e S.ATQM +10 por nível; estimativa da calculadora com uma build de Mestre "
+    "Celestial)": (
+        "≈ +15% damage at level 5 (P.ATK and S.MATK +10 per level; calculator estimate with a Mestre Celestial "
+        "build)",
+        "≈ +15% de daño en el nivel 5 (P.ATQ y S.ATQM +10 por nivel; estimación de la calculadora con una build "
+        "de Mestre Celestial)"),
+    "%s não foi usada": ("%s was not used", "%s no se usó"),
+    "não usou %s em nenhum momento da luta (P.ATQ e S.ATQM +50 por 10 s num aliado do grupo)": (
+        "never used %s during the fight (P.ATK and S.MATK +50 for 10 s on a party member)",
+        "no usó %s en ningún momento de la pelea (P.ATQ y S.ATQM +50 por 10 s en un aliado del grupo)"),
 })

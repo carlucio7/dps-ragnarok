@@ -320,7 +320,7 @@ class CardsTab:
         ent = tk.Entry(bar, textvariable=self.query, width=26, font=win.f["text"], bg=c["btn"], fg=c["fg"],
                        insertbackground=c["fg"], relief="flat")
         ent.pack(side="left", padx=6, ipady=3)
-        self.query.trace_add("write", lambda *_a: self.fill_results())
+        win.trace(self.query, lambda *_a: self.fill_results())
         self.group = tk.StringVar(win.top, _(ALL))
         gb = ttk.Combobox(bar, textvariable=self.group, values=[_(ALL)] + [_(g) for g in cards.GROUPS], width=24,
                           state="readonly", style="An.TCombobox", font=win.f["text"])

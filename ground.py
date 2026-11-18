@@ -19,6 +19,7 @@ TEX = "data\\texture\\"
 PLACES = [("Prontera", "prontera", (156, 190)), ("Campo de Prontera", "prt_fild08", (170, 362)),
           ("Payon", "payon", (173, 100)), ("Morroc", "morocc", (160, 100)), ("Geffen", "geffen", (120, 68)),
           ("Lutie", "xmas", (148, 128)), ("Comodo", "comodo", (190, 150)), ("Alberta", "alberta", (116, 62))]
+PREFIXES = tuple("data\\%s.gnd" % m for _n, m, _c in PLACES) + (TEX,)    # o que o chão lê do data.grf
 
 
 def parse(data):
@@ -35,21 +36,22 @@ def parse(data):
     p += 16 + nlight * (lw * lh * 4)
     ntiles = struct.unpack_from("<i", data, p)[0]
     p += 4
-    tiles = []
-    for i in range(ntiles):
-        u = struct.unpack_from("<4f", data, p)
-        v = struct.unpack_from("<4f", data, p + 16)
-        tiles.append((u, v, struct.unpack_from("<h", data, p + 32)[0]))
-        p += 40
-    top = [struct.unpack_from("<i", data, p + i * 28 + 16)[0] for i in range(w * h)]
+    # superfície: u×4, v×4, textura, (mapa de luz e cor, que aqui não servem); quadrado: alturas×4, superfície de
+    # cima, (frente, lado). Lidos em bloco (iter_unpack): um unpack por campo levava ~0,1 s num mapa como Prontera.
+    if ntiles < 0 or w < 0 or h < 0 or len(data) < p + ntiles * 40 + w * h * 28:
+        raise ValueError(".gnd cortado")
+    tiles = [(t[:4], t[4:8], t[8]) for t in struct.iter_unpack("<8fh6x", data[p:p + ntiles * 40])]
+    p += ntiles * 40
+    top = [t[0] for t in struct.iter_unpack("<16xi8x", data[p:p + w * h * 28])]
     return dict(w=w, h=h, textures=textures, tiles=tiles, top=top)
 
 
 class Ground:
     """Lê os terrenos do jogo e desenha um pedaço em volta de uma célula."""
 
-    def __init__(self, grf_path):
-        self.grf = sprites.Grf(grf_path, prefixes=tuple("data\\%s.gnd" % m for _n, m, _c in PLACES) + (TEX,))
+    def __init__(self, grf_path, grf=None):
+        # `grf`: um índice já aberto que cubra estas pastas (a aba Visuais divide um com os efeitos e os ícones)
+        self.grf = grf if grf is not None and grf.covers(PREFIXES) else sprites.Grf(grf_path, prefixes=PREFIXES)
         self.maps = {}                # mapa -> o .gnd lido (None se não deu)
         self.textures = {}            # (mapa, textura) -> (w, h, bytes BGRA) ou None
 

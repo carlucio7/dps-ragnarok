@@ -19,6 +19,7 @@ from fmt import dec, dur, full, num
 from i18n import _
 
 BOSS_ROWS = 12                # lutas contra chefe mostradas (as de mais dano)
+PHASES = 4                    # colunas de fase no dano por fase (dano, parte e DPS de cada)
 
 
 class SummaryTab:
@@ -56,8 +57,22 @@ class SummaryTab:
             ("name", _("Chefe"), 200, "w", "text"), ("when", _("Quando"), 70, "e", "dur"),
             ("end_txt", _("Resultado"), 150, "w", "text"), ("total", _("Dano do grupo"), 125, "e", "big"),
             ("mine", _("Seu dano"), 120, "e", "big"), ("share", _("Sua parte"), 80, "e", "pct"),
-            ("my_dps", _("Seu DPS"), 110, "e", "big"), ("deaths", _("Mortes do grupo"), 110, "e", "int")], height=4)
+            ("my_dps", _("Seu DPS"), 110, "e", "big"), ("deaths", _("Mortes do grupo"), 110, "e", "int")], height=4,
+            on_select=self.boss_picked)
         self.t_boss.pack(fill="x", padx=6)
+        # o dano de cada jogador em cada fase da luta escolhida na lista de chefes (de início, a de mais dano)
+        self.phase_lbl = win.section(tab, _("Dano por fase"))
+        self.phase_sum = win.label(tab, "", "small", "muted", "panel", anchor="w", justify="left")
+        self.phase_sum.pack(fill="x", padx=10, pady=(0, 4))
+        cols = [("name", _("Jogador"), 150, "w", "text"), ("job", _("Classe"), 120, "w", "text")]
+        for i in range(PHASES):
+            cols += [("d%d" % i, _("Fase %d") % (i + 1), 110, "e", "big"), ("s%d" % i, "%", 60, "e", "pct"),
+                     ("r%d" % i, "DPS", 90, "e", "big")]
+        cols += [("total", _("Total"), 120, "e", "big"), ("share", _("% da luta"), 80, "e", "pct")]
+        self.t_phase = Table(tab, win, cols, height=5, swatch=True)
+        self.t_phase.pack(fill="x", padx=6)
+        self.phase_key = None         # luta escolhida na lista de chefes (None: a de mais dano)
+        self.phase_cache = (None, None)
         both = tk.Frame(tab, bg=c["panel"])
         both.pack(fill="both", expand=True, padx=4, pady=(4, 8))
         for col in range(3):
@@ -80,6 +95,7 @@ class SummaryTab:
                              height=8)
         self.t_items.pack(fill="both", expand=True, padx=6)
         ui_parts.follow_wrap(tab, self.sub, 24, 200)
+        ui_parts.follow_wrap(tab, self.phase_sum, 24, 200)
         self.cache = (None, None)
         self.sum_cache = (None, None, None, None)
         self.fight_cache = (None, [], 0, None)
@@ -121,6 +137,51 @@ class SummaryTab:
                              dead=f["ttk"] is not None))
         self.fight_cache = (sig, top, count, rows)
         return rows
+
+    def boss_picked(self, row):
+        """Clique numa luta da lista de chefes: o dano por fase passa a ser o dela."""
+        if row is not None and row["key"] != self.phase_key:
+            self.phase_key = row["key"]
+            c = self.win.combat()
+            if c is not None:
+                self.fill_phases(c, self.fight_cache[3] or [])
+
+    def fill_phases(self, c, rows):
+        """O dano de cada jogador por fase na luta escolhida (como a sub-aba "Dano por fase" da Linha do tempo)."""
+        keys = [r["key"] for r in rows]
+        key = self.phase_key if self.phase_key in keys else (max(rows, key=lambda r: r["total"])["key"] if rows
+                                                             else None)
+        data = None
+        if key is not None:
+            rng = self.win.rng
+            sig = (id(c), c.version, rng, key, an.hp_choice(c, key), meter.HIDE_NAMES)
+            if self.phase_cache[0] != sig:
+                try:
+                    self.phase_cache = (sig, dd.phase_damage(dd.Ctx(c, key, rng)))
+                except (IndexError, KeyError, ValueError):     # luta sem golpe no recorte
+                    self.phase_cache = (sig, None)
+            data = self.phase_cache[1]
+        if not data:
+            self.phase_lbl.configure(text=_("Dano por fase"))
+            self.phase_sum.configure(text=_("nenhuma luta contra chefe no recorte"))
+            self.t_phase.set_rows([], lambda r: 0)
+            return
+        phases, prow = data
+        name = next((r["name"] for r in rows if r["key"] == key), "")
+        self.phase_lbl.configure(text=_("Dano por fase — %s") % name)
+        bits = [_("%s: %s em %s (%s/s), %d jogador(es)") % (p["name"], full(p["total"]), dur(p["ms"]), num(p["dps"]),
+                                                          p["players"]) for p in phases]
+        if len(rows) > 1:
+            bits.append(_("clique em outra luta na lista acima para ver a dela"))
+        self.phase_sum.configure(text="   ·   ".join(bits))
+        shown = ["name", "job"] + [k % p["i"] for p in phases for k in ("d%d", "s%d", "r%d")] + ["total", "share"]
+        if len(phases) <= 1:
+            shown = [k for k in shown if not k.startswith(("s", "r")) or k == "share"]
+        self.t_phase.show(shown, {"d%d" % p["i"]: p["name"] for p in phases})
+        self.t_phase.set_rows(prow, lambda r: r["key"], lambda r: ["me"] if r["me"] else [],
+                              lambda r: self.win.color_of(r["aid"]))
+        if self.t_boss.selected() is None or self.t_boss.selected()["key"] != key:
+            self.t_boss.select(key)              # a luta do dano por fase fica marcada na lista
 
     def refresh(self, c):
         win = self.win
@@ -222,6 +283,7 @@ class SummaryTab:
         rows = self.boss_rows(c, rng, fights)
         self.boss_lbl.configure(text=_("Chefes do recorte") if rows else _("Chefes do recorte: nenhuma luta contra chefe"))
         self.t_boss.set_rows(rows, lambda r: r["key"], lambda r: ["good"] if r["dead"] else ["mid"])
+        self.fill_phases(c, rows)
         self.t_tophits.set_rows(top_hits, lambda r: "%d|%d" % (r["t"], r["dmg"]))
         self.t_taken.set_rows(taken_rows, lambda r: "%s|%s" % (r["source"], r["name"]))
         self.t_items.set_rows(used, lambda r: r["item"])

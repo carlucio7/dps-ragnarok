@@ -25,8 +25,12 @@ ORIGIN = (320.0, 240.0)       # o centro do efeito no arquivo (tela de 640 x 480
 ABOVE_FEET = 110.0            # altura do centro do efeito sobre os pés com hatEffectPos 0
 POS_PX = 9.6                  # pixels por unidade de hatEffectPos (negativo = para baixo)
 SQUASH = 0.76                 # achatamento vertical de tudo no efeito
-STEP = 4                      # um quadro desenhado a cada 4 do arquivo (60 por segundo -> 15)
-MAX_FRAMES = 60               # animação mais longa que isso pula mais quadros
+STEP = 2                      # um quadro desenhado a cada 2 do arquivo (60 por segundo -> 30)
+MAX_FRAMES = 60               # animação mais longa que isso pula mais quadros (o mesmo teto de antes: memória igual)
+# cada quadro guarda só o pedaço desenhado (o quadrado inteiro do efeito é quase todo transparente): bem menos para
+# ler a cada desenho da prévia, o que paga os 30 quadros por segundo (antes 15) dos efeitos curtos; os longos
+# continuam com 60 quadros no máximo
+EMPTY = None
 MAX_HALF = 260                # metade do lado da área desenhada, no máximo (pixels do jogo)
 NORMAL_DST = 6                # D3DBLEND_INVSRCALPHA: mistura comum; o resto é tratado como luz somada
 # Efeitos que o jogo liga por número (não estão na tabela de chapéus) mas cujo arquivo .str vem no data.grf:
@@ -44,7 +48,9 @@ SPR = "data\\sprite\\이팩트\\"
 # ms por quadro; atrás do personagem). Espaço Digital (a pedra e o "[Visual] Holograma Futurista"): no GIF do
 # jogo são os 14 quadros do sprite a ~120 ms cada, com o personagem na frente.
 SPRITES = {"digital_space": ("digital_space\\digital_space", 120.0, True)}
-KEEP = 8                      # efeitos prontos guardados ao mesmo tempo (os mais antigos saem)
+PREFIXES = (HAT, EFF) + tuple(SPR + f for f, _ms, _b in SPRITES.values())    # o que os efeitos leem do data.grf
+KEEP = 6                      # efeitos prontos guardados ao mesmo tempo (os mais antigos saem); com os 30 quadros
+                              # por segundo cada um guarda ~20% a mais, e 6 deixam a memória como era com 8
 DARK = 10                     # brilho até aqui conta como preto (transparente) nas texturas de luz
 _DIV = None
 
@@ -89,13 +95,38 @@ def tga_bgra(data):
 
 
 def bmp_bgra(data):
-    """(w, h, bytes BGRA) de um .bmp de 8 ou 24 bits; o magenta do jogo vira transparente."""
-    w, h, px = sprites.bmp_rgba(data)
-    buf = bytearray(w * h * 4)
-    buf[2::4] = bytes(p[0] for p in px)
-    buf[1::4] = bytes(p[1] for p in px)
-    buf[0::4] = bytes(p[2] for p in px)
-    buf[3::4] = bytes(p[3] for p in px)
+    """(w, h, bytes BGRA de cima para baixo) de um .bmp de 8 ou 24 bits; o magenta do jogo vira transparente.
+    O mesmo que sprites.bmp_rgba, mas em operações de bytes (tabelas da paleta, fatias, uma conta de bits para o
+    magenta): pixel a pixel uma textura do chão de 256 x 256 levava ~0,16 s."""
+    off = struct.unpack_from("<I", data, 10)[0]
+    w, h, _planes, bpp = struct.unpack_from("<iiHH", data, 18)
+    if bpp not in (8, 24) or w <= 0 or h == 0:
+        raise ValueError("bmp de %d bits" % bpp)
+    flip, h = h > 0, abs(h)
+    stride, used = ((w * bpp + 31) // 32) * 4, w * bpp // 8
+    rows = [data[off + y * stride:off + y * stride + used] for y in (range(h - 1, -1, -1) if flip else range(h))]
+    pix = b"".join(rows)
+    if len(pix) != used * h:
+        raise ValueError("bmp cortado")
+    n = w * h
+    buf = bytearray(n * 4)
+    if bpp == 8:
+        ncol = struct.unpack_from("<I", data, 46)[0] or 256
+        pal = data[54:54 + 4 * min(ncol, 256)].ljust(1024, b"\0")
+        b, g, r = pal[0::4], pal[1::4], pal[2::4]
+        alpha = bytes(0 if (r[i] > 240 and g[i] < 16 and b[i] > 240) else 255 for i in range(256))
+        buf[0::4], buf[1::4], buf[2::4], buf[3::4] = (pix.translate(b), pix.translate(g), pix.translate(r),
+                                                      pix.translate(alpha))
+    else:
+        b, g, r = pix[0::3], pix[1::3], pix[2::3]
+        buf[0::4], buf[1::4], buf[2::4] = b, g, r
+        # magenta (vermelho e azul acima de 240, verde abaixo de 16): 1 em cada canal que passa, E dos três de uma
+        # vez como números inteiros grandes, e o resultado vira a transparência
+        big = bytes(1 if v > 240 else 0 for v in range(256))
+        small = bytes(1 if v < 16 else 0 for v in range(256))
+        hit = (int.from_bytes(r.translate(big), "big") & int.from_bytes(g.translate(small), "big")
+               & int.from_bytes(b.translate(big), "big"))
+        buf[3::4] = hit.to_bytes(n, "big").translate(bytes([255, 0]) + bytes(254))
     return w, h, bytes(buf)
 
 
@@ -209,11 +240,38 @@ def state(layer, frame):
                 tex=_tex(ani, ntex))
 
 
+def _cropped(size, ops):
+    """Um quadro do efeito desenhado só no retângulo que as texturas cobrem (dentro do quadrado `size`):
+    (PNG em base64, x, y do canto no quadrado), ou None se o GDI+ falhar. Os mesmos pixels do quadrado inteiro."""
+    global EMPTY
+    box = None
+    for im, a11, a12, a21, a22, tx, ty, _smooth in ops:
+        hw, hh = im.w / 2.0, im.h / 2.0
+        xs = [u * a11 + v * a21 + tx for u in (-hw, hw) for v in (-hh, hh)]
+        ys = [u * a12 + v * a22 + ty for u in (-hw, hw) for v in (-hh, hh)]
+        r = (min(xs), min(ys), max(xs), max(ys))
+        box = r if box is None else (min(box[0], r[0]), min(box[1], r[1]), max(box[2], r[2]), max(box[3], r[3]))
+    if box is not None:
+        x0, y0 = max(0, int(math.floor(box[0])) - 1), max(0, int(math.floor(box[1])) - 1)
+        x1, y1 = min(size, int(math.ceil(box[2])) + 1), min(size, int(math.ceil(box[3])) + 1)
+        if x1 > x0 and y1 > y0:
+            out = gdip.render(x1 - x0, y1 - y0, [(im, a11, a12, a21, a22, tx - x0, ty - y0, sm)
+                                                 for im, a11, a12, a21, a22, tx, ty, sm in ops])
+            if out is None:
+                return None
+            return (base64.b64encode(sprites.png_rgba(x1 - x0, y1 - y0, gdip.swap_rb(out))).decode("ascii"),
+                    x0, y0)
+    if EMPTY is None:                              # quadro sem nada: um pixel transparente
+        EMPTY = base64.b64encode(sprites.png_rgba(1, 1, bytes(4))).decode("ascii")
+    return (EMPTY, 0, 0)
+
+
 class HatEffects:
     """A tabela de efeitos de chapéu do jogo e os efeitos já abertos."""
 
-    def __init__(self, grf_path):
-        self.grf = sprites.Grf(grf_path, prefixes=(HAT, EFF) + tuple(SPR + f for f, _ms, _b in SPRITES.values()))
+    def __init__(self, grf_path, grf=None):
+        # `grf`: um índice já aberto que cubra estas pastas (a aba Visuais divide um com o chão e os ícones)
+        self.grf = grf if grf is not None and grf.covers(PREFIXES) else sprites.Grf(grf_path, prefixes=PREFIXES)
         self.table = {}               # nome (sem "HAT_EF_", minúsculas) -> dict(file, pos, posx, behind)
         try:
             raw = lub.run(self.grf.read(HAT + "hateffectinfo.lub") or b"", "cp949").get("hatEffectTable") or {}
@@ -293,7 +351,7 @@ class HatEffects:
         if made is None:
             return None
         w, h, frames, ox, oy = made
-        return dict(frames=[base64.b64encode(sprites.png_rgba(w, h, gdip.swap_rb(f))).decode("ascii")
+        return dict(frames=[(base64.b64encode(sprites.png_rgba(w, h, gdip.swap_rb(f))).decode("ascii"), 0, 0)
                             for f in frames],
                     w=w, h=h, cx=ox, cy=oy, ms=entry["ms"], behind=entry["behind"], name=entry["name"])
 
@@ -365,10 +423,9 @@ class HatEffects:
                                 m11 * ca - m12 * sa, SQUASH * (m11 * sa + m12 * ca),
                                 m21 * ca - m22 * sa, SQUASH * (m21 * sa + m22 * ca),
                                 cx * ca - cy * sa + ox, SQUASH * (cx * sa + cy * ca) + oy, True))
-                out = gdip.render(size, size, ops) if ops else bytes(size * size * 4)
-                if out is None:
+                frames.append(_cropped(size, ops))
+                if frames[-1] is None:
                     return None
-                frames.append(base64.b64encode(sprites.png_rgba(size, size, gdip.swap_rb(out))).decode("ascii"))
         finally:
             for im in images.values():
                 im.close()

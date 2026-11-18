@@ -9,6 +9,7 @@ foco do jogo: as teclas continuam indo para o Ragnarok. Passe o mouse sobre um
 botão para ver o que ele faz no rodapé; o botão direito abre todas as opções.
 """
 
+import collections
 import ctypes
 import faulthandler
 import json
@@ -28,6 +29,7 @@ import cards
 import clientdata
 import itemkind
 import itemping
+import learnfolder
 import sprites
 import meter
 import quests
@@ -46,6 +48,8 @@ WS_EX_NOACTIVATE = 0x08000000
 CONFIG_PATH = os.environ.get("RODPS_CONFIG") or os.path.join(
     os.environ.get("APPDATA") or os.path.expanduser("~"), "RODpsMeter", "config.json")
 RES_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+# o registro de aprendizado (xp_learn) mora num arquivo próprio: passa de 1 MB, e a configuração é gravada a toda hora
+LEARN_PATH = os.path.join(os.path.dirname(CONFIG_PATH), "aprendizado.json")
 
 # Medidas de base (escala 100%, 96 dpi)
 BASE_W = 300            # largura padrão (o usuário pode mudar arrastando o canto)
@@ -347,8 +351,23 @@ def round_rect_pts(x1, y1, x2, y2, r):
             x1, y2, x1, y2 - r, x1, y2 - r, x1, y1 + r, x1, y1 + r, x1, y1]
 
 
+def load_learn(saved=None):
+    """O registro de aprendizado, do arquivo dele. Sem o arquivo, vale o que estiver dentro da configuração antiga
+    (as versões de teste guardavam lá; a configuração só recarrega as chaves de DEFAULTS e perdia o registro)."""
+    try:
+        with open(LEARN_PATH, encoding="utf-8") as f:
+            lrn = json.load(f)
+        if isinstance(lrn, dict):
+            return lrn
+    except (OSError, ValueError):
+        pass
+    old = saved.get("xp_learn") if isinstance(saved, dict) else None
+    return old if isinstance(old, dict) else {}
+
+
 def load_config():
     cfg = dict(DEFAULTS)
+    saved = None
     try:
         with open(CONFIG_PATH, encoding="utf-8") as f:
             saved = json.load(f)
@@ -373,6 +392,7 @@ def load_config():
         cfg["targets"] = "all"
     if not cfg["gap_s"]:
         cfg["gap_s"] = 15
+    cfg["xp_learn"] = load_learn(saved)
     return cfg
 
 
@@ -408,12 +428,56 @@ def dwm_set(hwnd, attr, value):
         return False
 
 
+# ---------------------------------------------------------------- Tk só na thread principal
+
+_TK_MAIN = threading.main_thread()
+_TK_LATER = collections.deque()          # (finalizador original, objeto) que chegaram por outra thread
+
+
+def _tk_deferred(orig):
+    def __del__(self):
+        if threading.current_thread() is _TK_MAIN:
+            orig(self)
+        else:
+            _TK_LATER.append((orig, self))   # o objeto fica vivo até a thread principal rodar o finalizador
+    __del__.on_main = True
+    return __del__
+
+
+def tk_finalize_on_main(root, every_ms=1000):
+    """O coletor de lixo do Python solta uma análise fechada (variáveis, imagens e fontes do Tk) na thread que estiver
+    rodando na hora, às vezes uma de segundo plano. Fora da thread principal o Tk não pode ser chamado: a thread fica
+    esperando a principal (que pode estar esperando por ela: travaria), ou o finalizador falha e a imagem fica para
+    sempre na memória do Tk. Os finalizadores chamados fora da principal ficam para ela, que os roda a cada segundo."""
+    for cls in (tk.Variable, tk.Image, tkfont.Font):
+        if not getattr(cls.__del__, "on_main", False):
+            cls.__del__ = _tk_deferred(cls.__del__)
+
+    def drain():
+        while _TK_LATER:
+            orig, obj = _TK_LATER.popleft()
+            try:
+                orig(obj)
+            except Exception:  # noqa: BLE001 - o Tk já fechou ou o nome já não existe: nada a soltar
+                pass
+            obj = None
+        try:
+            root.after(every_ms, drain)
+        except tk.TclError:
+            pass
+    drain()
+
+
 # ---------------------------------------------------------------- app
 
 class DpsApp:
     def __init__(self, root, open_path=None):
         self.root = root
+        tk_finalize_on_main(root)
         self.cfg = load_config()
+        # o que já está no arquivo do registro (sem o arquivo, a 1ª gravação da configuração cria)
+        self.learn_rev = self.cfg["xp_learn"].get("rev") if os.path.exists(LEARN_PATH) else None
+        self.learn_check_at = 0.0
         self.watcher = meter.Watcher(self.cfg["folder"], self.gap_ms(), self.cfg["targets"])
         # nomes do jogo no idioma escolhido (da instalação; com o cache leva ~0,1 s, na 1ª vez alguns segundos)
         clientdata.NAMES.load()
@@ -503,6 +567,9 @@ class DpsApp:
         self.draw()
         root.after(10, self.setup_native)
         root.after(50, self.tick)
+        if learnfolder.enabled():
+            # uma vez só: as gravações que já estavam na pasta, num processo à parte (os replays costumam ser apagados)
+            root.after(learnfolder.DELAY_MS, self.learn_folder_start)
 
     # ------------------------------------------------------------ base
 
@@ -622,8 +689,16 @@ class DpsApp:
             os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
             tmp = CONFIG_PATH + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self.cfg, f, ensure_ascii=False, indent=2)
+                json.dump({k: v for k, v in self.cfg.items() if k != "xp_learn"}, f, ensure_ascii=False, indent=2)
             os.replace(tmp, CONFIG_PATH)
+            # o registro de aprendizado só quando mudou (xp.touch_learn)
+            lrn = self.cfg.get("xp_learn")
+            if isinstance(lrn, dict) and lrn and lrn.get("rev") != getattr(self, "learn_rev", None):
+                tmp = LEARN_PATH + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(lrn, f, ensure_ascii=False, separators=(",", ":"))
+                os.replace(tmp, LEARN_PATH)
+                self.learn_rev = lrn.get("rev")
         except OSError:
             pass
 
@@ -715,6 +790,10 @@ class DpsApp:
         if self.xp_again is not None and now >= self.xp_again[1]:
             prev, self.xp_again = self.xp_again[0], None
             self.xp_calibrate(prev)
+        if now >= self.learn_check_at:
+            # a leitura das gravações que já estavam na pasta terminou? (um arquivo: olhar custa quase nada)
+            self.learn_check_at = now + 10.0
+            self.learn_folder_take()
         if f is not None and f.ready:
             f.combat.finished = not self.watcher.recording(now)
             self.check_alerts(f, now)
@@ -751,17 +830,66 @@ class DpsApp:
             except Exception:  # noqa: BLE001
                 self.log_error(*sys.exc_info())
 
+    def open_report(self):
+        """O relatório do que o programa aprendeu (XP e drops): o jogador lê, copia ou salva e manda se quiser."""
+        import ui_report
+        t = self.t
+        ui_report.open_report(self.root, self.cfg, dict(panel=t["bg"], tile=t["track"], fg=t["fg"], muted=t["muted"]),
+                              self.fonts["small"], self.learn_folder_status)
+
+    def learn_folder_start(self):
+        """Uma vez só: lê num processo à parte as gravações que já estavam na pasta (learnfolder). Se uma leitura
+        anterior terminou com o programa fechado, só junta o resultado."""
+        try:
+            cfg_dir = os.path.dirname(CONFIG_PATH)
+            if self.learn_folder_take():
+                return
+            lrn = xp._learn(self.cfg)
+            if not self.watcher.folders or not learnfolder.should_start(lrn, cfg_dir):
+                return
+            lrn["folder_tries"] = int(lrn.get("folder_tries") or 0) + 1
+            xp.touch_learn(lrn)
+            self.save()                              # a pasta da configuração existe antes do processo escrever nela
+            learnfolder.start(cfg_dir, self.watcher.folders)
+        except Exception:  # noqa: BLE001 - é um extra: não pode atrapalhar o widget
+            self.log_error(*sys.exc_info())
+
+    def learn_folder_take(self):
+        """Junta o que a leitura da pasta aprendeu, quando ela termina (o relatório aberto se refaz). True se juntou."""
+        try:
+            if not learnfolder.take(self.cfg, os.path.dirname(CONFIG_PATH)):
+                return False
+            self.save()
+            import ui_report
+            ui_report.refresh()
+            return True
+        except Exception:  # noqa: BLE001
+            self.log_error(*sys.exc_info())
+            return False
+
+    def learn_folder_status(self):
+        """Linha da janela do relatório enquanto a pasta está sendo lida ("" fora disso)."""
+        p = learnfolder.progress(os.path.dirname(CONFIG_PATH))
+        if p is None:
+            return ""
+        return _("Lendo as gravações que já estavam na pasta (só desta vez): %d de %d. Pode continuar jogando; o "
+                 "relatório se completa sozinho.") % p
+
     def xp_calibrate(self, c):
         """Fator de XP do personagem: XP exata até a próxima gravação ÷ XP estimada dos abates desta. No modo
         automático a mesma medida confere o evento do servidor e aprende a XP das missões."""
         try:
-            before = json.dumps([self.cfg.get(k) for k in ("xp_bonuses", "xp_quests", "xp_manual_last")], sort_keys=True)
+            def sig():
+                # o registro de aprendizado (drops, monstros sem XP) muda até em gravação sem XP exata
+                return json.dumps([self.cfg.get(k) for k in ("xp_bonuses", "xp_quests", "xp_manual_last")]
+                                  + [(self.cfg.get("xp_learn") or {}).get("rev")], sort_keys=True)
+            before = sig()
             server = xp.settings(self.cfg)["server"]
             done = xp.calibrate(c, self.cfg, meter.xp_after)
             now = xp.settings(self.cfg)["server"]
             if (server["on"], server["pct"]) != (now["on"], now["pct"]):
                 self.xp_server_found(now["pct"] if now["on"] else 0)
-            after = json.dumps([self.cfg.get(k) for k in ("xp_bonuses", "xp_quests", "xp_manual_last")], sort_keys=True)
+            after = sig()
             if done or before != after:
                 self.save()
                 self.dirty = True
@@ -2121,6 +2249,11 @@ class DpsApp:
         how = {"medido": _("×%s medido"), "fixo": _("×%s fixo"), "auto": _("×%s aproximado")}.get(
             kind, _("×%s pela lista")) % dec("%.2f" % est["factor"])
         rows = []
+        if xp.calibration_hint(cb, self.cfg):
+            # mapa sem medida: duas gravações seguidas dão a XP exata (a linha só aparece na aba XP; não é fixável)
+            # texto curto e sem coluna da direita: um texto largo ali empurra as colunas de todas as linhas
+            rows.append(dict(label=_("Calibrar: grave de novo"), value="⟳", right="", frac=0.0, me=False,
+                             color="#f59e0b"))
         # porcentagem do nível primeiro, número absoluto depois (quando o jogo mandou quanto falta para o nível)
         pct = est["pct"] is not None
         rows.append(dict(label=_("XP estimada") if rng is None else _("XP nesta luta"),
@@ -2139,6 +2272,9 @@ class DpsApp:
                 right = (_("faltam %s") % num(left)) if left else ""
                 if missing and eta:
                     right = _("pode ser menos: missões fora da conta")
+                dn = xp.death_note(cb, self.cfg)            # morte sem seguro: a previsão já desconta os 5%
+                if dn:
+                    right = (right + " · " if right else "") + xp.death_text(*dn)
                 rows.append(dict(label=_("Até o próximo nível"), value=xp.span_text(eta) if eta else _("já subiu"),
                                  right=right, frac=1.0, me=True, pin="xp_eta"))
             elif xp.no_known_xp(cb):
@@ -3045,6 +3181,7 @@ class DpsApp:
         m.add_command(label=_("Análise completa…"), command=self.open_analysis)
         m.add_command(label=_("Cartões e efeitos acompanhados…"), command=lambda: self.open_analysis("cartoes"))
         m.add_command(label=_("Avisos de item…"), command=self.open_pings)
+        m.add_command(label=_("Relatório de aprendizado…"), command=self.open_report)
         m.add_command(label=_("Copiar a imagem do widget"), command=self.copy_image)
         hide = self.keep(tk.BooleanVar(self.root, cfg["copy_hide_names"]))
         m.add_checkbutton(label=_("Copiar imagem sem os nomes dos jogadores"), variable=hide,
@@ -3313,6 +3450,9 @@ def selftest(app, report):
 
 
 def main():
+    if learnfolder.ARG in sys.argv:              # o processo que lê as gravações da pasta: sem janela, e acaba sozinho
+        learnfolder.child(sys.argv)
+        return
     if IS_WIN:
         try:
             ctypes.windll.shcore.SetProcessDpiAwareness(1)

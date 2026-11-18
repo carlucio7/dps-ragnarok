@@ -3,8 +3,10 @@
 
 Em cima, as curvas (DPS do grupo e de cada jogador, HP estimado do chefe, dano recebido); embaixo, uma faixa
 por marcação (Garra Sombria, Pólen, Avanço Sísmico e Dor Máxima no chefe, mortes, skills do chefe, dano
-refletido...). Arrastar no gráfico ou girar a roda do mouse aproxima; duplo clique volta para a luta toda.
-A lista embaixo mostra cada evento com décimo de segundo; clicar num evento marca o instante no gráfico.
+refletido...). Em cima da curva de HP, os eventos-chave: golpes acima de 5% do HP e as Lex Aeterna que dobraram um
+golpe forte. Arrastar no gráfico ou girar a roda do mouse aproxima; duplo clique volta para a luta toda.
+A lista embaixo mostra cada evento com décimo de segundo (os golpes no chefe com a cor da força); clicar num evento
+marca o instante no gráfico.
 """
 
 import bisect
@@ -26,11 +28,44 @@ SMOOTH = [(0, _("sem média")), (1000, _("média de 1 s")), (3000, _("média de 
 TIME_STEPS = (100, 200, 500, 1000, 2000, 5000, 10000, 15000, 30000, 60000, 120000, 300000)
 CURVES = [("group", _("DPS do grupo")), ("hp", _("HP do chefe (estimado)")), ("taken", _("Dano recebido pelo grupo"))]
 MIN_VIEW_MS = 1000
+# ordem na lista de eventos do mesmo instante (a mesma de quando os golpes vinham junto com o resto)
+ROW_ORDER = {"hit": 1, "mobhit": 1, "pskill": 2, "mobskill": 2, "status": 3, "area": 3}
+# lista de eventos: cada golpe no chefe com a cor da força (% do HP que ele tirou) no fundo da linha ("row") ou na
+# cor do texto ("text"; "off" tira a cor)
+STRENGTH_STYLE = "row"
+# em cima da curva de HP do chefe vão só os eventos-chave, para as bolinhas não tomarem o gráfico: os golpes acima de
+# 5% do HP (faixa de força 3) e as Lex Aeterna que dobraram um golpe forte, de 0,5% do HP ou mais (anel em volta do
+# golpe dobrado, que leva a cor da força dele). As faixas desses dois saem do gráfico (voltam com a curva de HP
+# desligada); a lista continua com tudo
+CURVE_BAND = 3
+CURVE_LEX_BAND = 1
+DOT_LANES = ("strong", "lex")
+DOT_R = (2.6, 2.6, 3.3, 4.2)                # raio da bolinha na curva por força
+# fundo da linha por força: (cor misturada ao fundo do painel, quanto dela); o texto continua na cor de sempre
+ROW_TINT = {"dark": (("#94a3b8", 0.20), ("#fde047", 0.24), ("#fb923c", 0.30), ("#f43f5e", 0.38)),
+            "light": (("#64748b", 0.28), ("#ef4444", 0.22), ("#ef4444", 0.40), ("#ef4444", 0.60))}
 
 
 def ink(win, color):
     """Cor para texto: no tema claro, as cores vivas (verde, amarelo, ciano) escurecem para dar para ler."""
     return color if _lum(win.c["bg"]) < 0.5 else _mix(color, win.c["fg"], 0.45)
+
+
+def strength_colors(win):
+    """Cores das 4 faixas de força (do golpe mais fraco ao mais forte) no tema da janela: pontos no gráfico e
+    texto da lista."""
+    return tl.STRENGTH_COLORS["dark" if _lum(win.c["bg"]) < 0.5 else "light"]
+
+
+def strength_tints(win):
+    """Fundo das linhas da lista por força, no tema da janela (o texto continua legível)."""
+    return [_mix(win.c["panel"], col, k) for col, k in ROW_TINT["dark" if _lum(win.c["bg"]) < 0.5 else "light"]]
+
+
+def strength_labels():
+    """["< 0,5%", "0,5–1%", "1–5%", "> 5%"], dos limites das faixas."""
+    lo, mid, hi = ("%g" % (v * 100) for v in tl.STRENGTH_LIMITS)
+    return [dec("< %s%%" % lo), dec("%s–%s%%" % (lo, mid)), dec("%s–%s%%" % (mid, hi)), dec("> %s%%" % hi)]
 
 
 def when(t, tenths=True):
@@ -74,6 +109,7 @@ class TimelineChart(tk.Canvas):
         self.starts = []              # (t, "Fase N" ou None): começo de cada fase, para "x s depois do começo"
         self.smooth = 3000
         self.focus = None             # instante destacado (evento clicado na lista)
+        self.dots = []                # faixas (golpes fortes, Lex) com os eventos-chave da curva de HP (CURVE_BAND)
         self.hover = None
         self.drag = None
         self.layout = None
@@ -88,13 +124,35 @@ class TimelineChart(tk.Canvas):
 
     # ------------------------------------------------------------ dados
 
-    def set(self, full, curves, lanes, marks, smooth, keep_view=False, starts=()):
+    def set(self, full, curves, lanes, marks, smooth, keep_view=False, starts=(), dots=()):
         if not keep_view or self.full != full or self.view is None:
             self.view = full
         self.full = full
         self.curves, self.lanes, self.marks, self.smooth = curves, lanes, marks, smooth
         self.starts = list(starts)
+        self.dots = list(dots)
         self.redraw()
+
+    def curve_marks(self, a, b):
+        """Os eventos-chave em cima da curva de HP entre a e b: [(evento, instante na curva)]. O golpe acima de 5% do
+        HP fica no instante dele; a Lex Aeterna que dobrou um golpe forte (0,5% do HP ou mais), no instante do golpe
+        dobrado. Os golpes menores e as Lex que não dobraram nada ou dobraram golpe fraco ficam só na lista (na luta
+        toda, dezenas deles viravam um borrão em cima da curva; num Betelgeuse, 21 das 28 Lex que dobraram foram em
+        golpe fraco)."""
+        out = []
+        for lane in self.dots:
+            for e in lane["items"]:
+                if e["kind"] == "lex":
+                    if e.get("hit_pct") is None or tl.strength(e["hit_pct"]) < CURVE_LEX_BAND:
+                        continue
+                    t = e["hit_t"]
+                elif e.get("pct") is not None and tl.strength(e["pct"]) >= CURVE_BAND:
+                    t = e["t"]
+                else:
+                    continue
+                if a <= t <= b:
+                    out.append((e, t))
+        return out
 
     def reset_view(self):
         if self.full:
@@ -244,13 +302,18 @@ class TimelineChart(tk.Canvas):
                 self.create_text(x + 4 * d, y0 + 2 * d + row * 14 * d, text=label, anchor="nw", fill=c["fg"],
                                  font=f["small"])
         # curvas
+        hp_line = None
         for cv, vals in series:
             pts = []
             for t, v in zip(ts, vals):
                 pts += [self.x_of(t + bucket / 2), yv(v, cv["axis"])]
             if len(pts) >= 4:
                 self.create_line(*pts, fill=cv["color"], width=max(1, cv.get("width", 2) * d))
-        # legenda das curvas
+                if cv["axis"] == "pct":
+                    hp_line = (pts[0::2], pts[1::2])
+        if self.dots and hp_line is not None:
+            self._hp_dots(hp_line, a, b)
+        # legenda das curvas (e das bolinhas na curva de HP)
         lx = x0
         for cv in self.curves:
             w = f["small"].measure(cv["name"]) + 30 * d
@@ -259,6 +322,8 @@ class TimelineChart(tk.Canvas):
             self.create_rectangle(lx, 6 * d, lx + 10 * d, 16 * d, fill=cv["color"], outline="")
             self.create_text(lx + 15 * d, 11 * d, text=cv["name"], anchor="w", fill=c["fg"], font=f["small"])
             lx += w
+        if self.dots and hp_line is not None:
+            self._dots_legend(lx, x1)
         if self.focus is not None and a <= self.focus <= b:
             x = self.x_of(self.focus)
             self.create_line(x, y0, x, bottom, fill=c["accent"], width=max(1, 2 * d))
@@ -268,11 +333,72 @@ class TimelineChart(tk.Canvas):
         self.hover = None
         self._ts, self._series, self._bucket_ms = ts, series, bucket
 
+    def _hp_dots(self, line, a, b):
+        """Os eventos-chave (curve_marks) em cima da curva de HP do chefe, no ponto da linha desenhada no instante do
+        golpe: bolinha na cor da força do golpe (maior quanto mais forte) e, na Lex, um anel em volta do golpe dobrado
+        (um Firmamento dobrado: anel com a bolinha vermelha dentro)."""
+        c, d = self.win.c, self._z()
+        xs, ys = line
+
+        def y_at(x):                                # altura da linha desenhada em x (entre dois pontos dela)
+            i = bisect.bisect_left(xs, x)
+            if i <= 0:
+                return ys[0]
+            if i >= len(xs):
+                return ys[-1]
+            span = xs[i] - xs[i - 1]
+            return ys[i - 1] + (ys[i] - ys[i - 1]) * ((x - xs[i - 1]) / span if span else 0.0)
+        bands = strength_colors(self.win)
+        dots, rings = [], []
+        for e, t in self.curve_marks(a, b):
+            x = self.x_of(t)
+            y = y_at(x)
+            lex = e["kind"] == "lex"
+            pct = e.get("hit_pct") if lex else e["pct"]
+            band = tl.strength(pct) if pct is not None else 0
+            col = bands[band] if pct is not None else self.win.color_of(e.get("target"))
+            dots.append((band, x, y, col, DOT_R[band] * d))
+            if lex:
+                rings.append((x, y))
+        for _b, x, y, col, r in sorted(dots, key=lambda p: p[0]):     # os mais fortes por cima
+            self.create_oval(x - r, y - r, x + r, y + r, fill=col, outline=c["panel"], width=max(1, d))
+        lex, r = ink(self.win, tl.EVENT_COLORS["lex"]), 4.8 * d
+        for x, y in rings:                          # por cima de tudo: o anel fica em volta do golpe dobrado
+            self.create_oval(x - r, y - r, x + r, y + r, outline=lex, width=max(1, 1.6 * d))
+
+    def _dots_legend(self, lx, x1):
+        """Legenda dos eventos-chave da curva de HP, depois da das curvas: golpe acima de 5% (bolinha) e Lex Aeterna
+        que dobrou golpe forte (anel), só os que a luta tem."""
+        c, f, d = self.win.c, self.win.f, self._z()
+        names = {l["key"]: l["name"] for l in self.dots}
+        kinds = {e["kind"] for e, _t in self.curve_marks(*self.full)}
+        items = []
+        if "strong" in kinds:
+            items.append(("strong", _("Golpes acima de %s do HP") % dec("%g%%" % (tl.STRENGTH_LIMITS[2] * 100))))
+        if "lex" in kinds:
+            items.append(("lex", _("%s que dobrou golpe forte") % names["lex"]))
+        for key, text in items:
+            w = f["small"].measure(text) + 30 * d
+            if lx + w > x1:
+                break
+            cx, cy = lx + 5 * d, 11 * d
+            if key == "lex":
+                r = 4.5 * d
+                self.create_oval(cx - r, cy - r, cx + r, cy + r, outline=ink(self.win, tl.EVENT_COLORS["lex"]),
+                                 width=max(1, 1.6 * d))
+            else:
+                r = DOT_R[3] * d
+                self.create_oval(cx - r, cy - r, cx + r, cy + r, fill=strength_colors(self.win)[3], outline=c["panel"],
+                                 width=max(1, d))
+            self.create_text(lx + 15 * d, 11 * d, text=text, anchor="w", fill=c["fg"], font=f["small"])
+            lx += w
+
     def _points(self, lane, ly, lh, a, b):
         c, f, d = self.win.c, self.win.f, self._z()
         mid = ly + lh / 2
         r = min(3.5 * d, lh / 3.5)
         color = lane["color"] or c["fg"]
+        bands = strength_colors(self.win)
         items = [e for e in lane["items"] if a <= e["t"] <= b]
         biggest = max([e["value"] or 0 for e in items] + [1])
         xs = [self.x_of(e["t"]) for e in items]
@@ -290,7 +416,17 @@ class TimelineChart(tk.Canvas):
                 self.create_rectangle(x - 2 * d, mid - h, x + 2 * d, mid + h, fill=color, outline="")
             elif e["kind"] in ("strong", "claw", "elo"):
                 col = self.win.color_of(e["aid"]) if e["aid"] is not None else color
+                if e.get("pct") is not None:                    # golpe forte: na cor da força dele
+                    col = bands[tl.strength(e["pct"])]
                 self.create_oval(x - r, mid - r, x + r, mid + r, fill=col, outline=color, width=max(1, d))
+            elif e["kind"] == "lex":
+                # Lex que dobrou um golpe: cheia, na cor de quem lançou; a que não dobrou nada: só o contorno
+                col = self.win.color_of(e["aid"]) if e["aid"] is not None else color
+                if e.get("used"):
+                    self.create_oval(x - r, mid - r, x + r, mid + r, fill=col, outline=color, width=max(1, d))
+                else:
+                    self.create_oval(x - r * 0.8, mid - r * 0.8, x + r * 0.8, mid + r * 0.8, outline=col,
+                                     width=max(1, 1.5 * d))
             else:
                 self.create_line(x, ly + 3.5 * d, x, ly + lh - 3.5 * d, fill=color, width=max(1, 2 * d))
                 # o nome da skill do chefe, só quando cabe antes da próxima
@@ -330,6 +466,9 @@ class TimelineChart(tk.Canvas):
                     text = "● " + lane["name"] + ((" " + hit[2]) if len(hit) > 2 else "")
                     lines.append((text, ink(self.win, lane["color"] or c["fg"])))
         near = [e for lane in self.lanes if lane["kind"] == "point" for e in lane["items"] if abs(e["t"] - t) <= tol]
+        if self.dots:                               # os eventos-chave da curva de HP também aparecem aqui
+            seen = {id(e) for e in near}
+            near += [e for e, _t in self.curve_marks(t - tol, t + tol) if id(e) not in seen]
         for e in sorted(near, key=lambda e: e["t"])[:10]:
             col = ink(self.win, self.win.color_of(e["aid"])) if e["aid"] is not None else c["fg"]
             who = (e["who"] + " ") if e["who"] else ""
@@ -455,6 +594,8 @@ class TimelineTab:
         self.visible_var = tk.BooleanVar(win.top, True)
         ttk.Checkbutton(ebar, text=_("Só o trecho visível do gráfico"), variable=self.visible_var,
                         style="An.TCheckbutton", command=self.fill_events).pack(side="left", padx=(16, 0))
+        self.legend = tk.Frame(ebar, bg=c["panel"])  # cor pela força do golpe: o que cada cor quer dizer
+        self.legend_sig = None
         self.table = Table(ev_tab, win, [
             ("time", _("Tempo"), 70, "e", "text"), ("since", _("Desde o começo"), 110, "w", "text"),
             ("what", _("O quê"), 230, "w", "text"),
@@ -613,12 +754,19 @@ class TimelineTab:
             level = " · ".join(filter(None, (d["hp_label"], num(d["hp_max"]))))      # "Nível 1 · 800M"
             curves.append(dict(name=_("HP do chefe (%s)") % level, color=c["accent"], points=d["hp"], axis="pct",
                                kind="step", width=1.8))
-        lanes = [l for l in d["lanes"] if self.lane_on(l)]
+        lanes = [l for l in d["lanes"] if self.lane_on(l) and l["kind"] != "list"]
+        # golpes fortes e Lex Aeterna: só os eventos-chave, em cima da curva de HP (CURVE_BAND); sem a curva, nas faixas
+        dots = []
+        if curves and curves[-1]["axis"] == "pct":
+            dots = [l for l in lanes if l["key"] in DOT_LANES]
+            lanes = [l for l in lanes if l["key"] not in DOT_LANES]
         marks = d["marks"] if self.on.get("marks", True) else []
         smooth = next((ms for ms, lb in SMOOTH if lb == self.smooth_var.get()), 3000)
-        self.chart.set((d["t0"], d["t1"]), curves, [l for l in lanes if l["kind"] != "list"], marks, smooth,
-                       keep_view=keep_view, starts=d["starts"])
-        self.fill_events()
+        self._filled = False
+        self.chart.set((d["t0"], d["t1"]), curves, lanes, marks, smooth, keep_view=keep_view, starts=d["starts"],
+                       dots=dots)
+        if not self._filled:                      # o gráfico já encheu a lista ao avisar o trecho visível: uma vez basta
+            self.fill_events()
         self.fill_phases()
 
     def fill_phases(self):
@@ -657,6 +805,7 @@ class TimelineTab:
 
     def fill_events(self):
         """Eventos das marcações ligadas, de quem foi escolhido e (se marcado) só do trecho visível do gráfico."""
+        self._filled = True
         d = self.data
         if d is None:
             self.table.set_rows([], lambda r: 0)
@@ -667,9 +816,14 @@ class TimelineTab:
         marked = self.players_on or set()
         view = self.chart.view if self.visible_var.get() else None
         rows = []
-        for e in d["events"] + d["lane_events"]:
+        events = d["events"]
+        if "hits" in on or "mobhits" in on:       # os golpe a golpe só são montados quando alguém liga a faixa
+            events = events + d["hit_events"]()
+        for e in events + d["lane_events"]:
             if e["lane"] not in on or (e["lane"] == "strong" and "hits" in on):
                 continue                          # com todos os golpes ligados, o forte já vem marcado neles
+            if e.get("lex") and "lex" in on:
+                continue                          # a Lex no chefe já está na faixa dela, com o golpe que dobrou
             if view is not None and not view[0] <= e["t"] <= view[1]:
                 continue
             if who == "mob" and not (e.get("mob") or e["kind"] == "status"):
@@ -679,16 +833,52 @@ class TimelineTab:
             if who not in (None, "mob", "marked") and e["aid"] != who and e.get("target") != who:
                 continue
             rows.append(e)
-        rows.sort(key=lambda e: e["t"])
+        # no mesmo instante, a ordem de sempre: marcações, golpes, outras skills e por fim o começo e fim dos status
+        rows.sort(key=lambda e: (e["t"], ROW_ORDER.get(e["kind"], 0)))
         colors = {l["key"]: l["color"] or c["fg"] for l in d["lanes"]}
+        mode = STRENGTH_STYLE
+        self.style_strength(mode)
         for i, e in enumerate(rows):
             e["time"] = when(e["t"])
             e["since"] = since(d["starts"], e["t"], short=True)
             e["row"] = "%d|%s|%s" % (e["t"], e["lane"], i)
+            e["zebra"] = i % 2
+        tags = None
+        if mode == "text":
+            tags = lambda e: ["str%d" % tl.strength(e["pct"])] if "pct" in e else []      # noqa: E731
+        elif mode == "row":
+            tags = lambda e: (["str%d" % tl.strength(e["pct"])] if "pct" in e      # noqa: E731
+                              else ["zebra"] if e["zebra"] else [])
         zoomed = view is not None and self.chart.full is not None and tuple(view) != tuple(self.chart.full)
         self.ev_title.configure(text=(_("Eventos — %d no trecho visível") if zoomed else _("Eventos — %d")) % len(rows))
-        self.table.set_rows(rows, lambda e: e["row"], None,
+        self.table.set_rows(rows, lambda e: e["row"], tags,
                             lambda e: self.win.color_of(e["aid"]) if e["aid"] is not None else colors.get(e["lane"], c["fg"]))
+
+    def style_strength(self, mode):
+        """Cor pela força do golpe: as marcas das linhas da lista (cor do texto ou do fundo) e a legenda
+        acima dela. No fundo, a listra das linhas ímpares sai: no Tk vale a marca criada antes, e a listra ("odd")
+        cobriria a cor da força; a listra volta nas linhas sem força pela marca "zebra" (criada depois das da força)."""
+        if mode == self.legend_sig:
+            return
+        self.legend_sig = mode
+        win, c, tree = self.win, self.win.c, self.table.tree
+        texts = strength_colors(win)
+        tints = strength_tints(win)
+        for i in range(4):
+            tree.tag_configure("str%d" % i, foreground=texts[i] if mode == "text" else "",
+                               background=tints[i] if mode == "row" else "")
+        tree.tag_configure("zebra", background=c["row_alt"])
+        tree.tag_configure("odd", background="" if mode == "row" else c["row_alt"])
+        for w in self.legend.winfo_children():
+            w.destroy()
+        if mode == "off":
+            self.legend.pack_forget()
+            return
+        win.label(self.legend, _("Força do golpe (% do HP do chefe):"), "small", "muted", "panel").pack(side="left")
+        for i, text in enumerate(strength_labels()):
+            tk.Label(self.legend, text=text, font=win.f["small"], fg=texts[i] if mode == "text" else c["fg"],
+                     bg=tints[i] if mode == "row" else c["panel"], padx=5).pack(side="left", padx=(4, 0))
+        self.legend.pack(side="right", padx=(10, 4))
 
     def event_picked(self, row):
         if row is not None:
