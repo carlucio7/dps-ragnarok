@@ -2,6 +2,27 @@
 
 Português · [English](#english) · [Español](#español)
 
+## 1.11.0
+
+Resumo da sessão com destaques animados, prévia ao vivo dos cartões e sons seus.
+
+- Resumo da sessão: assim que a gravação para, um cartão com o que você escolher (tempo, XP, abates, dano, chefes, mortes, favoritos...) e o destaque da sessão no título: Chefe derrotado, ONE SHOT, Subiu de nível, Recorde pessoal, Maior DPS do grupo, Escravo do Milagre, Bolsa cheia, Intocável e outros.
+- Os destaques são animados, e os de luta mostram o monstro de verdade (nas classes de punho, com o seu personagem). Menu do widget › "Resumo da última sessão" mostra de novo.
+- Cartões: prévia ao vivo no tamanho do seu widget. Os botões Contador, Faixa fixa e Cartão mostram a diferença antes de você escolher.
+- Sons seus: arquivos .wav ou .mp3 de uma pasta que você escolhe, nos efeitos acompanhados e nos itens marcados.
+- Cada item marcado pode ter o próprio som, no clique direito do drop.
+- "Segundos antes": digite qualquer valor de 1 a 600 s.
+- Simulador de XP: "E se fosse em outro mapa?", com os mapas do próprio jogo e os de nível mais perto do seu no topo. Na Biosfera, que no LATAM é de outra versão, ele explica a diferença.
+- XP: o programa aprende as missões a cada subida de nível, e o tempo até o próximo nível conta só o tempo caçando.
+- XP: "a qualquer momento" no lugar de "já subiu".
+- XP: o Zerar não atrapalha mais a medida da XP, e o Lanche do Diabo entra na previsão.
+- Amdarais: a vida certa em cada dificuldade.
+- Monstros comuns com muita vida não contam mais como MVP.
+- Chefe morto com um golpe: a análise mostra a vida dele, e não o tamanho do golpe.
+- Edda do Biolaboratório e Torneio de Magia: monstros, vida e barreira lidos certo.
+- A análise cabe em janelas menores, sem maximizar.
+- No nível máximo da classe, o nível aparece como "nível máximo".
+
 ## 1.10.0
 
 Previsão de nível com as missões, a força de cada golpe na Linha do tempo e a análise mais rápida.
@@ -249,6 +270,27 @@ Primeira versão pública.
 
 ## English
 
+### 1.11.0
+
+Session summary with animated highlights, live card preview and your own sounds.
+
+- Session summary: as soon as the recording stops, a card with what you choose (time, XP, kills, damage, bosses, deaths, favorites...) and the session's highlight in the title: Boss down, ONE SHOT, Level up, Personal best, Top DPS in the party, Slave to the Miracle, Full bag, Untouchable and more.
+- Highlights are animated, and the fight ones show the real monster (with your own character on fist classes). Widget menu › "Last session summary" shows it again.
+- Cards: live preview at your widget's size. The Counter, Pinned bar and Card buttons show the difference before you pick.
+- Your own sounds: .wav or .mp3 files from a folder you choose, for tracked effects and marked items.
+- Each marked item can have its own sound, from the drop's right-click.
+- "Seconds before": type any value from 1 to 600 s.
+- XP simulator: "What if it were on another map?", with the game's own maps and the ones closest to your level on top. On the Biosphere, a different version in LATAM, it explains the difference.
+- XP: the program learns quests at each level-up, and the time to the next level counts only hunting time.
+- XP: "any moment now" instead of "already up".
+- XP: Reset no longer spoils the XP measurement.
+- Amdarais: the right HP at each difficulty.
+- Common monsters with a lot of HP no longer count as MVPs.
+- Boss killed in one hit: the analysis shows its HP, not the size of the hit.
+- Edda Biolab and the Magic Tournament: monsters, HP and barrier read correctly.
+- The analysis fits smaller windows, without maximizing.
+- At the class's max level, the level shows as "max level".
+
 ### 1.10.0
 
 Level forecast with quests, the strength of each hit on the Timeline and a faster analysis.
@@ -495,6 +537,27 @@ First public version.
 ---
 
 ## Español
+
+### 1.11.0
+
+Resumen de la sesión con destaques animados, vista previa en vivo de las tarjetas y tus propios sonidos.
+
+- Resumen de la sesión: apenas se detiene la grabación, una tarjeta con lo que elijas (tiempo, XP, monstruos derrotados, daño, jefes, muertes, favoritos...) y el destaque de la sesión en el título: Jefe derrotado, ONE SHOT, Subiste de nivel, Récord personal, Mayor DPS del grupo, Esclavo del Milagro, Bolsa llena, Intocable y otros.
+- Los destaques son animados, y los de pelea muestran el monstruo de verdad (con tu propio personaje en las clases de puño). Menú del widget › "Resumen de la última sesión" lo muestra de nuevo.
+- Tarjetas: vista previa en vivo del tamaño de tu widget. Los botones Contador, Barra fija y Tarjeta muestran la diferencia antes de elegir.
+- Tus propios sonidos: archivos .wav o .mp3 de una carpeta que eliges, en los efectos seguidos y en los ítems marcados.
+- Cada ítem marcado puede tener su propio sonido, con el clic derecho en el drop.
+- "Segundos antes": escribe cualquier valor de 1 a 600 s.
+- Simulador de XP: "¿Y si fuera en otro mapa?", con los mapas del propio juego y los de nivel más cercano al tuyo arriba. En la Biosfera, que en LATAM es de otra versión, explica la diferencia.
+- XP: el programa aprende las misiones en cada subida de nivel, y el tiempo hasta el próximo nivel cuenta solo el tiempo cazando.
+- XP: "en cualquier momento" en lugar de "ya subió".
+- XP: Reiniciar ya no estropea la medida de la XP.
+- Amdarais: la vida correcta en cada dificultad.
+- Los monstruos comunes con mucha vida ya no cuentan como MVP.
+- Jefe muerto de un golpe: el análisis muestra su vida, no el tamaño del golpe.
+- Edda del Biolaboratorio y Torneo de Magia: monstruos, vida y barrera leídos correctamente.
+- El análisis cabe en ventanas más pequeñas, sin maximizar.
+- En el nivel máximo de la clase, el nivel aparece como "nivel máximo".
 
 ### 1.10.0
 

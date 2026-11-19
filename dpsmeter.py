@@ -13,6 +13,7 @@ import collections
 import ctypes
 import faulthandler
 import json
+import math
 import os
 import random
 import subprocess
@@ -33,6 +34,7 @@ import learnfolder
 import sprites
 import meter
 import quests
+import session
 import sounds
 import testes
 import xp
@@ -86,6 +88,35 @@ BOSS_MERGE_MS = 2000  # mudanças do mesmo chefe quase juntas viram um cartão s
 SUMMARY_CARD_S = 14.0     # o resumo do fim da luta (conclusões do Dedo Duro) fica esse tempo
 SUMMARY_WAIT_MS = 2500    # depois da morte do chefe, espera os últimos pacotes da luta
 SUMMARY_PHASE_MS = 14000  # chefe em fases que morreu antes da 3ª: espera para ver se vem outra fase
+SESSION_CARD_S = 600.0    # o resumo da sessão fica até ser fechado, começar outra luta ou passar este tempo
+SESSION_FX_S = 6.0        # a animação do destaque no começo do resumo da sessão
+HOLD_QUIET_S = 1.0        # parado há isso, o widget pergunta se o jogo ainda está com o arquivo da gravação aberto
+HOLD_CHECK_S = 1.0        # ...no máximo uma vez a cada tanto (a pergunta leva uns 10 ms)
+HOLD_SEEN_MIN = 2         # vezes que o jogo precisa ter sido visto com o arquivo parado aberto (ele segura o arquivo)
+SESSION_FX_MS = 50        # um quadro a cada tanto enquanto ela roda (o laço normal, de 150 ms, picota o confete)
+CONFETTI = ("#fbbf24", "#4ade80", "#60a5fa", "#f472b6", "#c084fc", "#f87171")
+# "Máquina de abates": Poring, Drops, Poporing e Marin fugindo (do data.grf; sem o jogo, desenhados nestas cores)
+CHASE_MOBS = (1002, 1113, 1031, 1242)
+CHASE_RIDER = {"job": 13, "sex": 1, "hair": 2, "hair_color": 0, "weapon": 5}   # Cavaleiro no Peco Peco, lança
+LANCE_POSE = 4            # a pose "em guarda" do .act de jogador: a arma aparece (andando, o jogo não desenha a arma)
+# as cenas de luta dos cartões de dano: o Mestre (Champion) com soqueira quando quem grava não é de uma classe de punho
+FIGHTER = {"job": 4016, "sex": 1, "hair": 6, "hair_color": 0, "weapon": 12}
+CAST, ATK1, ATK2, ATK3 = 12, 5, 10, 11      # ações do .act de jogador: conjurando e os três ataques
+FIGHT_ACTS = {"combo": (ATK2, ATK3), "heavy": (CAST, ATK1), "asura": (CAST, ATK1), "boss_down": (ATK2, ATK3, ATK1)}
+BOSS_FALL_S = 3.4         # "Chefe derrotado": o golpe final, o chefe cai e vem o confete
+FIGHT_DUMMY = 1002        # o alvo quando o monstro da sessão não tem desenho: um Poring
+# o palco: nas cenas com personagens o texto sobe e eles ficam numa faixa no pé do cartão (não passam por cima das
+# linhas); acabada a animação, ela recolhe em STAGE_FOLD_S e as linhas voltam
+SCENE_FX = ("combo", "heavy", "asura", "boss_down", "chase", "jabs", "one_punch")
+STAGE_H = 50              # altura do palco (pixels, no zoom 1)
+STAGE_FOLD_S = 0.5
+CRIT_TINT, SHOT_TINT = (255, 228, 60), (255, 160, 48)   # números amarelos (crítico) e laranja (one shot)
+STAR_JOBS = {4047, 4048, 4239, 4241, 4243, 4244, 4302, 4316}   # a linha estelar: estrelinhas no lugar das esferas
+BIG_PART = (1.6, 2.5)     # peça maior que isto (altura, largura) vezes o corpo fica fora da cena (chapéu-aura etc.)
+CHASE_COLORS = {1002: "#f9a8d4", 1113: "#fdba74", 1031: "#86efac", 1242: "#a5b4fc"}
+# o punho de monge: pele, sombra da pele, contorno, faixa, sombra da faixa, contorno da faixa, conta do rosário
+FIST = ("#f6d3b3", "#dfa983", "#6b4226", "#f6f0e4", "#d8cfbf", "#8a7f6e", "#9a3412")
+GLASS_BG = "#1b2433"      # o fundo do cartão translúcido do "Intocável"
 REC_OFF_S = 45.0          # jogo aberto e nada gravando há esse tempo: lembrete de gravação desligada
 GAME_CHECK_S = 5.0        # de quanto em quanto tempo olha se o jogo está aberto
 SIZE_NAMES = {"S": "pequeno", "M": "médio", "L": "grande"}
@@ -135,6 +166,7 @@ HINTS = {
     "pin": _("Fixar sempre por cima das outras janelas"), "chart": _("Análise completa (abre outra janela)"),
     "shot": _("Copiar a imagem do widget (cole com Ctrl+V)"),
     "summary": _("Clique: abrir o Dedo Duro · botão direito: desligar o resumo da luta"),
+    "session": _("Clique: abrir a análise · botão direito: fechar, escolher o que mostrar ou desligar"),
     "more": _("Opções"), "min": _("Minimizar"), "close": _("Fechar o medidor"), "reset": _("Zerar: começa a contar de novo"),
     "view": _("Escolher o que mostrar: tudo ou uma luta"), "prev": _("Luta anterior"), "next": _("Próxima luta"),
     "group": _("Dano de cada jogador"), "skills": _("O seu dano por skill"), "targets": _("Em quem você bateu"),
@@ -197,6 +229,9 @@ DEFAULTS = {
     "death_card": True,     # quando você morre, o widget mostra por 10 s o que te matou
     "alert_boss": True,     # cartão de 5 s: o chefe trocou de propriedade/tamanho, ou mecânica (Dor Máxima, defesa)
     "fight_summary": True,  # no fim da luta contra chefe, as principais conclusões do Dedo Duro por alguns segundos
+    "session_card": True,   # quando a gravação para, o resumo da sessão com o que a pessoa escolheu (aba Cartões)
+    "session_fields": list(session.DEFAULT),  # o que o resumo da sessão mostra (session.FIELDS), na ordem do cartão
+    "session_anim": True,   # a animação do destaque do resumo da sessão (confete, moedinhas, as cenas de luta...)
     "alert_rec": True,      # lembrar quando o jogo está aberto e nenhum replay está sendo gravado
     "rec_sound": False,     # ...com um som curto (uma vez)
     "copy_hide_names": False,   # "copiar imagem" troca os nomes dos jogadores pela classe
@@ -204,6 +239,8 @@ DEFAULTS = {
     "ping_sound": True,     # ...com o som (sem item marcado, nada toca)
     "ping_volume": 40,
     "ping_tone": itemping.DEFAULT_TONE,   # tom do som: "grave", "medio", "agudo" ou "bem agudo"
+    "ping_snd": {},         # som de cada item marcado ({"4001": "sino" ou "file:moeda.wav"}); sem som = o padrão
+    "sound_folder": "",     # pasta com os sons da pessoa (.wav e .mp3) para os efeitos e os itens marcados
     "ping_keep": "all",     # itens marcados valem: "all" (todos os personagens), "char" (cada um a sua lista) ou
                             # "session" (só até fechar o programa)
     "ping_chars": {},       # {personagem: [itens]} quando cada personagem tem a sua lista
@@ -231,6 +268,33 @@ def _rgb(h):
 
 def _hex(rgb):
     return "#%02x%02x%02x" % tuple(max(0, min(255, int(round(v)))) for v in rgb)
+
+
+def merge_rgba(a, b, dx, dy):
+    """Junta a imagem b por cima da a (as duas como sprites.compose devolve: w, h, pixels, x e y da origem), com a
+    origem de b em (origem de a + dx, + dy)."""
+    w1, h1, p1, ox1, oy1 = a
+    w2, h2, p2, ox2, oy2 = b
+    x0, y0 = min(-ox1, -ox2 + dx), min(-oy1, -oy2 + dy)
+    x1, y1 = max(w1 - ox1, w2 - ox2 + dx), max(h1 - oy1, h2 - oy2 + dy)
+    W, H = x1 - x0, y1 - y0
+    px = [(0, 0, 0, 0)] * (W * H)
+    for wi, hi, pi, oxi, oyi, ddx, ddy in ((w1, h1, p1, ox1, oy1, 0, 0), (w2, h2, p2, ox2, oy2, dx, dy)):
+        left, top = -oxi + ddx - x0, -oyi + ddy - y0
+        for yy in range(hi):
+            row, src = (top + yy) * W + left, yy * wi
+            for xx in range(wi):
+                r, g, b_, al = pi[src + xx]
+                if al == 0:
+                    continue
+                if al == 255:
+                    px[row + xx] = (r, g, b_, 255)
+                else:
+                    br, bg_, bb, ba = px[row + xx]
+                    k = al / 255.0
+                    px[row + xx] = (int(r * k + br * (1 - k)), int(g * k + bg_ * (1 - k)), int(b_ * k + bb * (1 - k)),
+                                    max(al, ba))
+    return W, H, px, -x0, -y0
 
 
 def mix(a, b, t):
@@ -338,10 +402,48 @@ def play_ping(volume=40, tone=None):
     play_wav(lambda v: itemping.wav(v, tone), volume)
 
 
+SOUND_FOLDER = [""]           # a pasta de sons da pessoa (cfg "sound_folder"), para os sons tocados de qualquer lugar
+
+
+def sound_name(key):
+    """O nome de um som para a tela: os do programa traduzidos; os da pasta, o nome do arquivo."""
+    return _(sounds.NAMES[key]) if key in sounds.NAMES else sounds.label(key)
+
+
+def set_sound_folder(path):
+    SOUND_FOLDER[0] = path or ""
+
+
 def play_sound(voice, volume=40):
-    """Toca um dos sons dos efeitos acompanhados: voice = (som, tom)."""
+    """Toca um dos sons dos efeitos acompanhados e dos itens marcados: voice = (som, tom). Um som da pasta da
+    pessoa (WAV da memória, MP3 pelo Windows) que sumiu ou não abre toca o som padrão no lugar."""
     snd, tone = voice
+    if sounds.is_custom(snd):
+        path = sounds.custom_path(SOUND_FOLDER[0], snd)
+        if path and path.lower().endswith(".mp3"):
+            play_mp3(path, volume, tone)
+            return
+        if path:
+            play_wav(lambda v: sounds.custom_wav(path, v) or sounds.wav(sounds.DEFAULT, tone, v), volume)
+            return
+        snd = sounds.DEFAULT
     play_wav(lambda v: sounds.wav(snd, tone, v), volume)
+
+
+def play_mp3(path, volume=40, tone=None):
+    """Toca um MP3 da pasta da pessoa sem travar o widget; se o Windows não abrir, toca o som padrão."""
+    if not IS_WIN or volume <= 0:
+        return
+
+    def run():
+        try:
+            if not sounds.play_mp3(path, volume):
+                import winsound
+                winsound.PlaySound(sounds.wav(sounds.DEFAULT, tone or "medio", volume),
+                                   winsound.SND_MEMORY | winsound.SND_NODEFAULT)
+        except (ImportError, RuntimeError, OSError):
+            pass
+    threading.Thread(target=run, daemon=True).start()
 
 
 def round_rect_pts(x1, y1, x2, y2, r):
@@ -475,6 +577,7 @@ class DpsApp:
         self.root = root
         tk_finalize_on_main(root)
         self.cfg = load_config()
+        set_sound_folder(self.cfg.get("sound_folder"))
         # o que já está no arquivo do registro (sem o arquivo, a 1ª gravação da configuração cria)
         self.learn_rev = self.cfg["xp_learn"].get("rev") if os.path.exists(LEARN_PATH) else None
         self.learn_check_at = 0.0
@@ -509,6 +612,16 @@ class DpsApp:
         self.death_card = None        # (resumo da morte, quando apareceu)
         self.boss_card = None         # (o que mudou no chefe, quando apareceu)
         self.summary_card = None      # (resumo do fim da luta, quando apareceu)
+        self.session_card = None      # (resumo da sessão que acabou, quando apareceu)
+        self.session_waiting = False  # o resumo da sessão está atrás de outro cartão (session_wait)
+        self.session_anim = None      # o after() dos quadros extras da animação do resumo da sessão
+        self.last_session = None      # o último resumo da sessão (o menu do widget mostra de novo)
+        self.live_combat = None       # a gravação que estava sendo escrita (quando ela para, vem o resumo da sessão)
+        self.live_done = None         # (gravação, last_change) da que já acabou: só volta a valer se crescer de novo
+        self.hold_seen = 0            # vezes que o jogo estava com o arquivo da gravação aberto com ele parado
+        self.hold_now = None          # na última pergunta: alguém com o arquivo aberto (None: não deu para saber)
+        self.hold_check_at = 0.0      # a última pergunta ao Windows sobre quem está com o arquivo
+        self.hold_every = HOLD_CHECK_S
         self.summary_due = None       # (gravação, nº do aviso da morte do chefe) esperando os últimos pacotes
         self.game_on = False          # o jogo está aberto? (olhado a cada 5 s, para o lembrete de gravação)
         self.game_check_at = 0.0
@@ -782,6 +895,8 @@ class DpsApp:
         cur = f.combat if f is not None and f.ready else None
         if cur is not self.xp_seen:
             prev, self.xp_seen = self.xp_seen, cur
+            if prev is not None and prev is self.live_combat:
+                self.end_live(prev, now)          # começou outra gravação: a que estava sendo escrita acabou
             if prev is not None:
                 self.xp_calibrate(prev)
                 # a gravação nova acabou de começar e o começo dela (com a XP) ainda não dá para ler: mede de novo
@@ -796,9 +911,12 @@ class DpsApp:
             self.learn_folder_take()
         if f is not None and f.ready:
             f.combat.finished = not self.watcher.recording(now)
+            self.check_session(f, now)
             self.check_alerts(f, now)
             self.check_pings(f.combat, now)
             self.check_trackers(f.combat, now)
+        self.session_wait(now)
+        if f is not None and f.ready:
             if now - self.xp_auto_at >= 3.0:
                 self.xp_auto_at = now
                 self.xp_auto(f.combat)
@@ -816,7 +934,7 @@ class DpsApp:
         self.phase = (self.phase + 1) % 8
         self.check_recording(now)
         if (now - self.miracle_at < MIRACLE_FLASH_S + 0.3 or self.death_card or self.boss_card
-                or self.summary_card or self.ping_card):
+                or self.summary_card or self.ping_card):     # o resumo da sessão fica no redesenho de 1 s
             self.dirty = True
         if self.dirty or now - self.last_draw >= 1.0:
             try:
@@ -898,7 +1016,7 @@ class DpsApp:
 
     def xp_auto(self, c):
         """Automático da XP durante a gravação: guarda o % do manual que o jogo mandou e, a cada subida de nível
-        (XP exata), confere o evento do servidor."""
+        (XP exata), confere o evento do servidor e aprende a recompensa das missões do nível que fechou."""
         try:
             changed = xp.remember_manual(c, self.cfg)
             sig = (id(c), len(c.level_ups))
@@ -906,6 +1024,7 @@ class DpsApp:
                 self.xp_lvl_seen = sig
                 if c.level_ups:
                     changed = self.xp_server_found(xp.detect_server(c, self.cfg)) or changed
+                    changed = xp.learn_levels(c, self.cfg) or changed
             if changed:
                 self.save()
                 self.dirty = True
@@ -1183,16 +1302,15 @@ class DpsApp:
         sm.add_separator()
         bm = self.new_menu(sm)
         bvar = self.keep(tk.IntVar(self.root, t["before"]))
-        for s in cards.BEFORE_CHOICES:
+        for s in sorted(set(cards.BEFORE_CHOICES) | {t["before"]}):
             bm.add_radiobutton(label="%d s" % s, variable=bvar, value=s,
                                command=lambda s=s: self.set_fx_option(kind, ident, sound="before", before=s))
+        bm.add_command(label=_("Outro…"), command=lambda: self.ask_fx_before(kind, ident))
         sm.add_cascade(label=_("Quantos segundos antes"), menu=bm)
         km = self.new_menu(sm)
         kvar = self.keep(tk.StringVar(self.root, t["snd"]))
-        for key in sounds.KEYS:
-            km.add_radiobutton(label=_(sounds.NAMES[key]), variable=kvar, value=key,
-                               command=lambda key=key: self.set_fx_option(kind, ident, snd=key, play=True))
-        sm.add_cascade(label=_("Qual som: %s") % _(sounds.NAMES[t["snd"]]), menu=km)
+        self.add_sound_choices(km, kvar, lambda key: self.set_fx_option(kind, ident, snd=key, play=True))
+        sm.add_cascade(label=_("Qual som: %s") % sound_name(t["snd"]), menu=km)
         tm = self.new_menu(sm)
         tvar = self.keep(tk.StringVar(self.root, t["tone"]))
         for tone, hz in itemping.TONES:
@@ -1214,6 +1332,95 @@ class DpsApp:
                                command=lambda s=s: self.set_fx_option(kind, ident, secs=s))
         tm.add_command(label=_("Outro…"), command=lambda: self.ask_fx_timer(kind, ident))
         return tm
+
+    def ask_fx_before(self, kind, ident):
+        """"Quantos segundos antes" com um número digitado (de 1 s a 10 min)."""
+        from tkinter import simpledialog
+        t = self.fx_tracker(kind, ident)
+        secs = simpledialog.askinteger(_("Segundos antes"), _("Quantos segundos antes de %s acabar o som toca?")
+                                       % cards.short_name(cards.name_of(t)) if t else "",
+                                       parent=self.root, minvalue=1, maxvalue=cards.MAX_BEFORE_S,
+                                       initialvalue=(t or {}).get("before") or cards.DEFAULT_BEFORE)
+        if secs:
+            self.set_fx_option(kind, ident, sound="before", before=secs)
+
+    def add_sound_choices(self, menu, var, command):
+        """Os sons do programa e os da pasta da pessoa num menu de escolha (radiobuttons em `var`), e no fim o item
+        para escolher a pasta."""
+        for key in sounds.KEYS:
+            menu.add_radiobutton(label=_(sounds.NAMES[key]), variable=var, value=key,
+                                 command=lambda key=key: command(key))
+        mine = sounds.custom_sounds(self.cfg.get("sound_folder"))
+        if mine:
+            menu.add_separator()
+            for key, name in mine:
+                menu.add_radiobutton(label=name, variable=var, value=key, command=lambda key=key: command(key))
+        menu.add_separator()
+        menu.add_command(label=_("Pasta com os seus sons…"), command=self.pick_sound_folder)
+
+    def pick_sound_folder(self):
+        """Escolhe a pasta dos sons da pessoa (.wav e .mp3, até 10 MB cada; toca no máximo 10 s)."""
+        from tkinter import filedialog
+        path = filedialog.askdirectory(parent=self.root, title=_("Pasta com os seus sons (.wav ou .mp3)"),
+                                       initialdir=self.cfg.get("sound_folder") or None, mustexist=True)
+        if not path:
+            return
+        self.cfg["sound_folder"] = os.path.normpath(path)
+        set_sound_folder(self.cfg["sound_folder"])
+        self.save()
+        n = len(sounds.custom_sounds(self.cfg["sound_folder"]))
+        self.alert = ((_("Pasta de sons: %d som(ns) .wav ou .mp3") % n) if n else
+                      _("Pasta de sons: nenhum .wav ou .mp3 de até 10 MB nela"), "info", time.time())
+        self.dirty = True
+        if self.analysis is not None:
+            self.analysis.refresh(force=True)
+
+    @staticmethod
+    def sound_name(key):
+        return sound_name(key)
+
+    def ping_sound_of(self, item):
+        """O som escolhido para um item marcado, ou None (o som padrão do aviso de item)."""
+        snd = (self.cfg.get("ping_snd") or {}).get(str(item))
+        return snd if sounds.valid(snd) else None
+
+    def set_ping_sound(self, item, snd):
+        """Aviso de um item pelo botão direito: snd None = não avisar; "" = avisar com o som padrão do aviso de item;
+        senão avisar com esse som (toca uma vez para ouvir)."""
+        items = self.ping_list()
+        old = self.cfg.get("ping_snd")
+        chosen = self.cfg["ping_snd"] = dict(old) if isinstance(old, dict) else {}     # cópia: nunca o do padrão
+        vol, tone = self.cfg.get("ping_volume", 40), self.cfg.get("ping_tone") or itemping.DEFAULT_TONE
+        if snd is None:
+            if item in items:
+                items.remove(item)
+            chosen.pop(str(item), None)
+            if self.ping_card and self.ping_card[0]["item"] == item:
+                self.ping_card = None
+        else:
+            if item not in items:
+                items.append(item)
+            if snd:
+                chosen[str(item)] = snd
+                play_sound((snd, tone), vol)
+            else:
+                chosen.pop(str(item), None)
+                play_ping(vol, tone)
+        self.save()
+        self.drops_changed()
+
+    def ping_sound_menu(self, parent, item):
+        """Submenu do botão direito num item: não avisar, o som padrão do aviso ou qualquer outro som."""
+        m = self.new_menu(parent)
+        on = item in self.ping_items()
+        cur = self.ping_sound_of(item)
+        var = self.keep(tk.StringVar(self.root, (cur or "") if on else "-"))
+        m.add_radiobutton(label=_("Não avisar"), variable=var, value="-", command=lambda: self.set_ping_sound(item, None))
+        m.add_radiobutton(label=_("Avisar com o som padrão do aviso de item"), variable=var, value="",
+                          command=lambda: self.set_ping_sound(item, ""))
+        m.add_separator()
+        self.add_sound_choices(m, var, lambda key: self.set_ping_sound(item, key))
+        return m
 
     def ask_fx_timer(self, kind, ident):
         from tkinter import simpledialog
@@ -1354,7 +1561,11 @@ class DpsApp:
         self.alert = (text, "info", now)
         if self.cfg.get("ping_sound", True) and now - self.ping_played >= PING_SOUND_GAP_S:
             self.ping_played = now
-            play_ping(self.cfg.get("ping_volume", 40), self.cfg.get("ping_tone"))
+            snd = self.ping_sound_of(item)            # o som escolhido para o item (botão direito nele) ou o padrão
+            if snd:
+                play_sound((snd, self.cfg.get("ping_tone") or itemping.DEFAULT_TONE), self.cfg.get("ping_volume", 40))
+            else:
+                play_ping(self.cfg.get("ping_volume", 40), self.cfg.get("ping_tone"))
         self.dirty = True
 
     def copy_ping(self):
@@ -1450,6 +1661,1182 @@ class DpsApp:
         except Exception:  # noqa: BLE001 - o resumo é um extra
             self.log_error(*sys.exc_info())
         self.dirty = True
+
+    def check_session(self, f, now):
+        """Resumo da sessão: a gravação que estava sendo escrita parou. Na hora quando o jogo solta o arquivo ou é
+        fechado (session_ended); quando começa outra gravação, o step mostra na hora. O jogo segura o arquivo enquanto
+        grava e solta quando a gravação para (visto ao vivo em 2026-11-19): com o jogo segurando, o arquivo parado
+        (personagem parado, jogo travado) não é fim. Só quando não dá para saber quem está com o arquivo vale a espera
+        de SESSION_END_S parado. Se a gravação voltar a crescer, o resumo sai (não tinha acabado); ele também sai
+        quando a luta recomeça numa gravação nova ou depois de SESSION_CARD_S."""
+        c, w = f.combat, self.watcher
+        if w.pinned:
+            return
+        quiet = now - w.last_change
+        card = self.session_card
+        if card and card[0]["c"] is c and w.last_change > card[0].get("made", card[1]):
+            self.session_card = None              # voltou a crescer depois do resumo: não tinha acabado
+            self.dirty = True
+        done = self.live_done
+        if done and done[0] is c and w.last_change <= done[1]:
+            pass                                  # já acabou e não cresceu desde então
+        elif quiet <= session.SESSION_END_S:
+            if self.live_combat is not c:
+                self.live_combat, self.hold_seen, self.hold_now = c, 0, None
+                if clientdata.NAMES.grf:            # os desenhos do resumo (os Porings e o cavaleiro da "Máquina
+                    sprites.MONSTERS.start(clientdata.NAMES.grf)      # de abates")
+                    sprites.LOADER.start(clientdata.NAMES.grf)
+            if self.session_ended(f, now, quiet):
+                self.end_live(c, now)
+        elif self.live_combat is c:
+            if self.hold_seen >= HOLD_SEEN_MIN and self.hold_now:
+                if self.session_ended(f, now, quiet):  # o jogo ainda grava (parado ou travado): acaba quando soltar
+                    self.end_live(c, now)
+            else:
+                self.end_live(c, now)
+        if self.session_card:
+            d, shown = self.session_card
+            new = False
+            if d["c"] is not c:                   # outra gravação: o resumo sai quando você volta a lutar nela
+                n0 = d["n0"] if d["cur"] is c else 0
+                if len(c.hits) < n0:
+                    n0 = d["n0"] = 0              # Zerar na gravação nova
+                new = any(h.out and h.src == c.me for h in c.hits[n0:])
+            if now - shown > SESSION_CARD_S or new:
+                self.session_card = None
+                self.dirty = True
+
+    def end_live(self, c, now):
+        self.live_combat = None
+        self.live_done = (c, self.watcher.last_change)
+        self.show_session(c, now)
+
+    def session_ended(self, f, now, quiet):
+        """A gravação acabou antes dos SESSION_END_S parada? Sim se o jogo foi fechado, ou se o jogo soltou o arquivo
+        dela: o Windows diz quem está com o arquivo aberto (meter.file_holders, sem abrir o arquivo). Isso só vale
+        depois de ver, nesta gravação, o jogo com o arquivo aberto mesmo com ele parado (então o jogo segura o arquivo
+        enquanto grava, e soltar quer dizer parar); sem isso, fica a espera de SESSION_END_S."""
+        if quiet < HOLD_QUIET_S or now - self.hold_check_at < self.hold_every:
+            return False
+        self.hold_check_at = now
+        t0 = time.perf_counter()
+        holders = meter.file_holders(f.path)
+        took = time.perf_counter() - t0
+        self.hold_every = HOLD_CHECK_S if took < 0.1 else 5.0     # num computador em que a pergunta é lenta, menos
+        self.hold_now = None if holders is None else bool(holders)
+        if holders is None:
+            return False
+        if holders:
+            self.hold_seen += 1
+            return False
+        if self.hold_seen >= HOLD_SEEN_MIN:
+            return True
+        return not meter.game_running()          # ninguém com o arquivo e o jogo fechado: acabou
+
+    def show_session(self, c, now):
+        """Monta o resumo da gravação que acabou: o que a pessoa escolheu na aba Cartões e os destaques dela. Gravação
+        de menos de 1 min (session.MIN_MS) só ganha o resumo se teve um acontecimento (session.SHORT_OK: um chefe, uma
+        carta, uma subida de nível, um one shot; o Bafomé de 58 s do usuário não tinha resumo), e não mexe nos
+        recordes."""
+        if not cards.enabled(self.cfg, "session"):
+            return
+        short = c.now < session.MIN_MS
+        records = None
+        if not short:
+            try:
+                before = json.dumps(self.cfg.get("session_records"), sort_keys=True)
+                records = session.update_records(c, self.cfg)
+                if json.dumps(self.cfg.get("session_records"), sort_keys=True) != before:
+                    self.save()
+            except Exception:  # noqa: BLE001 - os recordes são um extra
+                self.log_error(*sys.exc_info())
+                records = None
+        try:
+            d = session.card(c, self.cfg, favs=self.cfg.get("drop_favs") or [], marked=self.ping_items(),
+                             records=records)
+        except Exception:  # noqa: BLE001 - o resumo é um extra
+            self.log_error(*sys.exc_info())
+            return
+        if not (d["lines"] or d["hl"] or d["sub"]):
+            return
+        if short and not any(h["key"] in session.SHORT_OK for h in d["hl"]):
+            return
+        cur = self.combat()
+        d.update(c=c, cur=cur, n0=len(cur.hits) if cur is not None else 0, made=now)
+        if d["hl"] and d["hl"][0].get("fx") == "chase":
+            d["chase"] = {}                       # os desenhos do jogo entram quando ficarem prontos (draw_chase)
+            if clientdata.NAMES.grf:
+                sprites.MONSTERS.start(clientdata.NAMES.grf)
+                sprites.LOADER.start(clientdata.NAMES.grf)
+        if not self.session_covered():
+            self.prepare_session_fx(d)
+        self.session_card = (d, time.time())      # depois de montar a cena: a animação começa do começo
+        self.session_waiting = False
+        self.last_session = d
+        self.dirty = True
+        self.start_session_anim()
+
+    def reopen_session(self):
+        """O menu do widget: mostra de novo o último resumo da sessão (com a animação)."""
+        d = self.last_session
+        if not d:
+            return
+        cur = self.combat()
+        d.update(cur=cur, n0=len(cur.hits) if cur is not None else 0)
+        self.session_card = (d, time.time())
+        self.dirty = True
+        self.start_session_anim()
+
+    def session_covered(self):
+        """Algum cartão que passa na frente do resumo da sessão está na tela (a morte, o item marcado, o aviso de chefe,
+        o resumo da luta: a ordem do draw)?"""
+        return bool(self.death_card or self.ping_card or self.boss_card or self.summary_card)
+
+    def session_wait(self, now):
+        """O resumo da sessão atrás de outro cartão fica parado: o relógio dele (a animação e os SESSION_CARD_S) só
+        anda quando ele aparece, e aí a animação começa do zero. Antes, quem parava a gravação logo depois de matar o
+        chefe via o resumo da sessão só depois dos 14 s do resumo da luta, já sem a animação (o Osíris do usuário)."""
+        card = self.session_card
+        if not card:
+            self.session_waiting = False
+            return
+        if self.session_covered():
+            self.session_card = (card[0], now)
+            self.session_waiting = True
+        elif self.session_waiting:
+            self.session_waiting = False
+            self.prepare_session_fx(card[0])
+            self.session_card = (card[0], time.time())
+            self.dirty = True
+            self.start_session_anim()
+
+    def prepare_session_fx(self, d):
+        """Monta antes os desenhos da cena do destaque do resumo `d` (o lutador, o monstro e os números da luta; os
+        bichinhos e o cavaleiro da "Máquina de abates"), que levam uns 0,5 s: montados no primeiro quadro, a animação
+        começava sem o primeiro meio segundo. Só se a animação está ligada e os desenhos do jogo já estão prontos."""
+        hl = (d.get("hl") or [None])[0]
+        if not hl or hl.get("fx") not in SCENE_FX or not self.cfg.get("session_anim", True):
+            return
+        try:
+            if hl["fx"] in FIGHT_ACTS:
+                self.fight_assets(hl.get("fight") or {}, hl["fx"])
+            elif hl["fx"] == "chase":
+                frames = d.setdefault("chase", {})
+                if "mobs" not in frames and sprites.MONSTERS.book is not None:
+                    frames["mobs"] = self.chase_frames()
+                if "rider" not in frames and sprites.LOADER.wardrobe is not None:
+                    frames["rider"] = self.rider_frames()
+        except Exception:  # noqa: BLE001 - a cena é um extra: sem ela, os desenhos de reserva
+            self.log_error(*sys.exc_info())
+
+    def start_session_anim(self):
+        """Quadros extras (a cada SESSION_FX_MS) enquanto a animação do destaque do resumo da sessão roda. Com outro
+        cartão na frente ela não roda (session_wait começa quando o resumo aparece)."""
+        if (self.session_anim is not None or not self.session_card or not self.cfg.get("session_anim", True)
+                or self.session_covered()):
+            return
+        hls = self.session_card[0].get("hl") or []
+        if not (hls and hls[0].get("fx")):
+            return
+
+        def frame():
+            self.session_anim = None
+            card = self.session_card
+            if not card or time.time() - card[1] > SESSION_FX_S + 0.2 or self.session_covered():
+                self.dirty = True                 # o quadro sem a animação vem no laço normal
+                return
+            try:
+                self.draw()
+            except Exception:  # noqa: BLE001 - a animação é um extra
+                self.log_error(*sys.exc_info())
+                return
+            self.session_anim = self.root.after(SESSION_FX_MS, frame)
+        self.session_anim = self.root.after(SESSION_FX_MS, frame)
+
+    def open_session(self):
+        """Clique no resumo da sessão: abre a análise no Resumo."""
+        self.session_card = None
+        self.dirty = True
+        self.open_analysis()
+        if self.analysis is not None:
+            try:
+                self.analysis.select_tab("resumo")
+            except Exception:  # noqa: BLE001
+                self.log_error(*sys.exc_info())
+
+    def session_menu(self):
+        m = self.new_menu()
+        m.add_command(label=_("Abrir a análise"), command=self.open_session)
+        m.add_command(label=_("Fechar este resumo"), command=lambda: (setattr(self, "session_card", None),
+                                                                     setattr(self, "dirty", True)))
+        m.add_command(label=_("Escolher o que o resumo mostra…"), command=self.open_session_options)
+        m.add_command(label=_("Não mostrar mais o resumo da sessão"), command=lambda: self.toggle_cfg("session_card"))
+        return m
+
+    def open_session_options(self):
+        """A aba Cartões da análise, na parte do resumo da sessão."""
+        self.open_analysis()
+        if self.analysis is not None:
+            try:
+                self.analysis.select_tab("cartoes")
+                self.analysis.cards_tab.show_page("session")
+            except Exception:  # noqa: BLE001
+                self.log_error(*sys.exc_info())
+
+    def session_fit(self, d=None):
+        """Quantas linhas das informações cabem no cartão, depois do título e do que os destaques de `d` (o cartão)
+        pedem: a mesma conta do draw_session_card."""
+        return self.session_layout(d or {})[1]
+
+    def session_layout(self, d, stage=0.0):
+        """(partes que cabem, quantas linhas cabem). O título sempre; depois até 2 linhas das informações, o
+        subtítulo, a frase e a barra do destaque principal e os selos dos outros, nessa ordem, enquanto couberem; o
+        resto do espaço vai para as linhas. `stage`: a altura do palco aberto no pé do cartão (fica fora da conta)."""
+        s = self.s
+        room = ((self.rows_y0() + self.cfg["rows"] * ROW_H - 3) - (TABS_Y0 - 2)) * s - 18 * s - 22 * s - stage
+        hls = d.get("hl") or []
+        main = hls[0] if hls else None
+        want = []
+        if d.get("sub") or main:
+            want.append(("sub", 13 * s))
+        if main and main.get("sub"):
+            want.append(("phrase", 14 * s))
+        if main and main.get("bar") is not None:
+            want.append(("bar", 14 * s))
+        if len(hls) > 1:
+            want.append(("chips", 21 * s))
+        n = len(d.get("lines") or ()) if d else 99
+        used = min(n, 2) * 14 * s
+        parts = set()
+        for name, h in want:
+            if used + h <= room:
+                parts.add(name)
+                used += h
+        free = room - (used - min(n, 2) * 14 * s)
+        return parts, max(0, int(free // (14 * s)))
+
+    def draw_session_card(self):
+        """Resumo da sessão que acabou: o destaque principal no título, numa faixa da cor dele e com a animação dele no
+        começo (confete, moedinhas, estrelas, brilho); embaixo, a duração e o mapa, a frase e a barra do destaque, os
+        outros destaques em selos e uma linha por informação escolhida (o que não cabe vira "mais N")."""
+        if not self.session_card:
+            return
+        d, shown = self.session_card
+        k = time.time() - shown
+        if not 0 <= k < SESSION_CARD_S:
+            return
+        c, s, W = self.canvas, self.s, self.W
+        hls = d.get("hl") or []
+        main = hls[0] if hls else None
+        col = main["color"] if main else SEV_COLORS["info"]
+        x0, x1 = 8 * s, W - 8 * s
+        y0 = (TABS_Y0 - 2) * s
+        y1 = (self.rows_y0() + self.cfg["rows"] * ROW_H - 3) * s
+        pad = 9 * s
+        cx = (x0 + x1) / 2
+        glass = bool(main and main.get("glass"))
+        c.create_polygon(round_rect_pts(x0, y0, x1, y1, 10 * s), smooth=True, fill=GLASS_BG if glass else CARD_BG,
+                         outline=col, width=max(1, int(2 * s)))
+        if glass:                                 # vidro: duas faixas de brilho na diagonal e diamantes parados
+            for off, wd in ((0.18, 0.10), (0.34, 0.04)):
+                xa = x0 + (x1 - x0) * off
+                c.create_polygon(xa, y0 + 2 * s, xa + (x1 - x0) * wd, y0 + 2 * s,
+                                 xa + (x1 - x0) * wd - (y1 - y0) * 0.6, y1 - 2 * s, xa - (y1 - y0) * 0.6, y1 - 2 * s,
+                                 fill=mix(GLASS_BG, "#ffffff", 0.07), outline="")
+            if k >= SESSION_FX_S or not self.cfg.get("session_anim", True):
+                self.draw_diamonds(2.0, (x0, y0, x1, y1), 0.45, GLASS_BG)
+        self.hits.append((("session", None), (x0, y0, x1, y1)))
+        # o palco das cenas com personagens: aberto durante a animação, depois recolhe
+        stage = 0.0
+        if main and main.get("fx") in SCENE_FX and self.cfg.get("session_anim", True) and k < SESSION_FX_S + STAGE_FOLD_S:
+            stage = STAGE_H * s * (1.0 if k < SESSION_FX_S else max(0.0, 1.0 - (k - SESSION_FX_S) / STAGE_FOLD_S))
+        if stage > 1:
+            c.create_rectangle(x0 + 3 * s, y1 - stage, x1 - 3 * s, y1 - 5 * s, fill=mix(CARD_BG, col, 0.06), outline="")
+            c.create_line(x0 + 10 * s, y1 - stage, x1 - 10 * s, y1 - stage, fill=mix(CARD_BG, col, 0.3))
+        parts, fit = self.session_layout(d, stage)
+        lines = list(d.get("lines") or [])
+        if len(lines) > fit:
+            lines = (lines[:fit - 1] + [(_("mais %d na análise (clique)") % (len(lines) - fit + 1), CARD_DIM)]
+                     if fit >= 1 else [])
+        heights = dict(sub=13 * s, phrase=14 * s, bar=14 * s, chips=21 * s)
+        total = 22 * s + sum(h for p, h in heights.items() if p in parts) + 14 * s * len(lines)
+        y = y0 + max(pad, ((y1 - stage - y0) - total) / 2)
+        anim = bool(main and main.get("fx") and self.cfg.get("session_anim", True) and k < SESSION_FX_S)
+        # a faixa do título na cor do destaque, com a metade de cima mais clara (brilho) e um fio embaixo
+        bx0, bx1 = x0 + 4 * s, x1 - 4 * s
+        c.create_polygon(round_rect_pts(bx0, y - 3 * s, bx1, y + 19 * s, 7 * s), smooth=True,
+                         fill=mix(CARD_BG, col, 0.13), outline="")
+        c.create_polygon(round_rect_pts(bx0 + 2 * s, y - 2 * s, bx1 - 2 * s, y + 7 * s, 5 * s), smooth=True,
+                         fill=mix(CARD_BG, col, 0.21), outline="")
+        c.create_line(bx0 + 10 * s, y + 19 * s, bx1 - 10 * s, y + 19 * s, fill=mix(CARD_BG, col, 0.5))
+        if anim:
+            self.draw_session_fx(main["fx"], k, (x0, y0, x1, y1), col, y + 8 * s, (bx0 + 13 * s, y + 8 * s),
+                                 main.get("tag"), d.setdefault("chase", {}), GLASS_BG if glass else CARD_BG,
+                                 main.get("fight"))
+        cid = c.create_text(x1 - pad, y0 + pad + 4 * s, anchor="e", text="✕", font=self.fonts["small"],
+                            fill=CARD_DIM)
+        count_w = c.bbox(cid)[2] - c.bbox(cid)[0]
+        xr = x1 - pad - (count_w + 6 * s if y < y0 + pad + 14 * s else 0)
+        xl = x0 + pad
+        if main and main.get("emblem"):           # o emblema: um círculo na cor do destaque com o símbolo dele
+            ex, ey, er = bx0 + 13 * s, y + 8 * s, 9 * s
+            if anim:                              # entra crescendo e dá um pulinho
+                er *= min(1.0, 0.4 + k / 0.25) * (1.0 + 0.12 * math.sin(min(k, 1.2) * 10) * max(0.0, 1.2 - k))
+            c.create_oval(ex - er, ey - er, ex + er, ey + er, fill=col, outline=mix(col, "#ffffff", 0.45),
+                          width=max(1, int(s)))
+            c.create_text(ex, ey, text=main["emblem"], fill=CARD_BG,
+                          font=("Segoe UI Symbol", -max(6, int(er * 1.15)), "bold"))
+            xl = ex + 9 * s + 6 * s
+        title = main["title"].upper() if main else _("Resumo da sessão").upper()
+        self.center_text(max(cx, (xl + xr) / 2) if main else cx, y + 8 * s, title, self.fonts["title"],
+                         mix(col, "#ffffff", 0.15), xl, xr)
+        y += 22 * s
+        if "sub" in parts:
+            sub = d.get("sub") or ""
+            text = (_("Resumo da sessão") + (" · " + sub if sub else "")) if main else sub
+            self.center_text(cx, y + 4 * s, text, self.fonts["small"], CARD_DIM, x0 + pad, x1 - pad)
+            y += 13 * s
+        if "phrase" in parts:
+            self.center_text(cx, y + 5 * s, main["sub"], self.fonts["small"], mix(col, "#ffffff", 0.45), x0 + pad,
+                             x1 - pad)
+            y += 14 * s
+        if "bar" in parts:
+            self.draw_session_bar(main["bar"], cx, y + 6 * s, x0 + pad, x1 - pad, col, k if anim else None)
+            y += 14 * s
+        if "chips" in parts:
+            self.draw_session_chips(hls[1:], y + 9 * s, x0 + pad, x1 - pad)
+            y += 21 * s
+        for text, fill in lines:
+            self.center_text(cx, y + 5 * s, text, self.fonts["small"], fill or CARD_DIM, x0 + pad, x1 - pad)
+            y += 14 * s
+        left = 1.0 - k / SESSION_CARD_S
+        if left > 0.005:
+            c.create_line(x0 + 10 * s, y1 - 3 * s, x0 + 10 * s + (x1 - x0 - 20 * s) * left, y1 - 3 * s, fill=col,
+                          width=max(2, int(2 * s)))
+
+    def draw_fist(self, x, y, k, fade, bg, t=0.0):
+        """O punho de um monge socando para a direita, com a frente em (x, y); k = tamanho (s). O antebraço e a mão
+        enfaixados (as faixas cruzando os nós dos dedos e o pulso, as duas pontas soltas balançando para trás com o
+        tempo `t`), o rosário no pulso, o polegar dobrado por cima dos dedos, deitado no eixo do soco, e os dedos
+        fechados na frente."""
+        c = self.canvas
+        skin, shade, line, cloth, cloth_sh, cloth_ln, bead = (mix(bg, col, fade) for col in FIST)
+        w = max(1, int(k))
+
+        def pts(points):
+            return [v for px, py in points for v in (x + px * k, y + py * k)]
+        for j, (lift, ln) in enumerate(((-3, 18), (3, 14))):   # as pontas soltas das faixas, balançando
+            wave = [(-24 - d, lift + 3 * math.sin(t * 9 + d * 0.35 + j)) for d in range(0, ln + 1, 3)]
+            c.create_line(*pts(wave), smooth=True, fill=cloth_ln, width=max(2, int(4.2 * k)), capstyle="round")
+            c.create_line(*pts(wave), smooth=True, fill=cloth, width=max(1, int(2.6 * k)), capstyle="round")
+        c.create_polygon(pts([(-36, -6), (-17, -8), (-17, 8), (-36, 6)]), fill=skin, outline=line, width=w)
+        for xs in (-33, -27, -21):                  # as faixas em volta do antebraço, na diagonal
+            c.create_polygon(pts([(xs, -7), (xs + 4, -7), (xs + 2, 7), (xs - 2, 7)]), fill=cloth, outline=cloth_ln,
+                             width=w)
+        for j in range(5):                          # o rosário no pulso
+            by = -7.5 + j * 3.75
+            c.create_oval(*pts([(-19.5, by - 1.8), (-15.5, by + 1.8)]), fill=bead, outline=line, width=w)
+            c.create_oval(*pts([(-18.6, by - 1.1), (-17.4, by - 0.1)]), fill=mix(bg, "#fed7aa", fade), outline="")
+        c.create_polygon(pts([(-16, -10), (-6, -12), (8, -11), (13, -8), (15, -2), (14, 6), (9, 10), (-4, 11),
+                              (-14, 9), (-17, 3), (-17, -4)]), smooth=True, fill=skin, outline=line, width=w)
+        c.create_polygon(pts([(-14, 4), (-4, 7), (9, 7), (12, 9), (-4, 11), (-14, 9)]), smooth=True, fill=shade,
+                         outline="")
+        c.create_polygon(pts([(-12, -11), (-6, -12), (-9, 10), (-15, 9)]), fill=cloth, outline=cloth_ln, width=w)
+        c.create_polygon(pts([(1, -11.5), (9, -11), (11, -9), (11, 9), (3, 9.5), (2, -2)]), smooth=True, fill=cloth,
+                         outline=cloth_ln, width=w)
+        for fy in (-6, -1.5, 3):                    # os dedos fechados, um em cima do outro, na frente
+            c.create_line(*pts([(11, fy), (14.5, fy + 0.6)]), fill=line, width=w)
+        c.create_line(*pts([(4, -10), (7, 8)]), fill=cloth_sh, width=w)
+        c.create_polygon(pts([(-10, -2), (-3, -4.5), (6, -4), (9, -1.5), (6, 1.5), (-3, 2), (-10, 1)]), smooth=True,
+                         fill=skin, outline=line, width=w)   # o polegar dobrado, deitado no eixo do soco
+        c.create_oval(*pts([(-6, -10), (2, -7.5)]), fill=mix(bg, "#fff7ed", 0.8 * fade), outline="")
+
+    def draw_cracks(self, x, y, grow, box, fade, bg):
+        """A tela rachando a partir de (x, y): rachaduras em zigue-zague para todo lado, dois anéis de trincas em
+        volta e cacos perto do centro. grow: 0 a 1 (o tamanho delas). Sempre o mesmo desenho (semente fixa)."""
+        c, s = self.canvas, self.s
+        x0, y0, x1, y1 = box
+        rnd = random.Random(23)
+        light, shadow = mix(bg, "#f1f5f9", 0.85 * fade), mix(bg, "#000000", 0.6 * fade)
+        width = max(1, int(1.4 * s))
+
+        def inside(px, py):
+            return x0 + 4 * s < px < x1 - 4 * s and y0 + 4 * s < py < y1 - 4 * s
+        for i in range(9):
+            ang = (i / 9.0) * 2 * math.pi + rnd.uniform(-0.25, 0.25)
+            length = rnd.uniform(55, 120) * s * grow
+            px, py, done = x, y, 0.0
+            while done < length:
+                seg = rnd.uniform(7, 14) * s
+                ang += rnd.uniform(-0.45, 0.45)
+                nx, ny = px + math.cos(ang) * seg, py + math.sin(ang) * seg * 0.75
+                if not inside(nx, ny):
+                    break
+                c.create_line(px + s, py + s, nx + s, ny + s, fill=shadow, width=width)
+                c.create_line(px, py, nx, ny, fill=light, width=width)
+                if rnd.random() < 0.3:              # um galho saindo da rachadura
+                    ba = ang + rnd.choice((-1, 1)) * rnd.uniform(0.6, 1.1)
+                    bx, by = nx + math.cos(ba) * seg * 0.7, ny + math.sin(ba) * seg * 0.5
+                    if inside(bx, by):
+                        c.create_line(nx, ny, bx, by, fill=light, width=max(1, int(s)))
+                px, py, done = nx, ny, done + seg
+        for ring in (16, 32):                       # os anéis de trincas em volta do impacto
+            r = ring * s * grow
+            prev = None
+            for j in range(13):
+                a = j / 12.0 * 2 * math.pi
+                rr = r * rnd.uniform(0.8, 1.2)
+                p = (x + math.cos(a) * rr, y + math.sin(a) * rr * 0.7)
+                if prev is not None and inside(*p) and inside(*prev) and rnd.random() < 0.75:
+                    c.create_line(prev[0], prev[1], p[0], p[1], fill=light, width=max(1, int(s)))
+                prev = p
+        for _j in range(6):                         # cacos perto do centro
+            a, r = rnd.uniform(0, 2 * math.pi), rnd.uniform(4, 14) * s * grow
+            cx_, cy_ = x + math.cos(a) * r, y + math.sin(a) * r * 0.7
+            sz = rnd.uniform(2, 4) * s
+            c.create_polygon(cx_, cy_ - sz, cx_ + sz, cy_ + sz * 0.6, cx_ - sz * 0.8, cy_ + sz * 0.4,
+                             fill=mix(bg, "#cbd5e1", 0.5 * fade), outline=light)
+
+    def draw_burst(self, x, y, r, spikes, fill, edge):
+        """Uma estrela de impacto (as pontas alternam o raio todo e 45% dele)."""
+        pts = []
+        for i in range(spikes * 2):
+            a = math.pi * i / spikes
+            rr = r if i % 2 == 0 else r * 0.45
+            pts += [x + math.cos(a) * rr, y + math.sin(a) * rr * 0.8]
+        self.canvas.create_polygon(pts, fill=fill, outline=edge, width=max(1, int(self.s)))
+
+    def draw_diamonds(self, k, box, fade, bg):
+        """Diamantes no cartão do "Intocável": a coroa clara, o pavilhão azulado, o brilho piscando."""
+        c, s = self.canvas, self.s
+        x0, y0, x1, y1 = box
+        rnd = random.Random(11)
+        for i in range(9):
+            x, y = rnd.uniform(x0 + 16 * s, x1 - 16 * s), rnd.uniform(y0 + 12 * s, y1 - 12 * s)
+            w = rnd.uniform(4.0, 7.5) * s
+            y += math.sin(k * 2.0 + i) * 2 * s
+            tw = 0.55 + 0.45 * math.sin(k * 3.1 + i * 1.7)
+            a = fade * (0.35 + 0.65 * tw)
+            c.create_polygon(x - w, y - 0.25 * w, x - 0.55 * w, y - 0.8 * w, x + 0.55 * w, y - 0.8 * w, x + w,
+                             y - 0.25 * w, fill=mix(bg, "#e0f2fe", a), outline=mix(bg, "#7dd3fc", a))
+            c.create_polygon(x - w, y - 0.25 * w, x + w, y - 0.25 * w, x, y + 1.1 * w,
+                             fill=mix(bg, "#38bdf8", a), outline=mix(bg, "#7dd3fc", a))
+            c.create_line(x - 0.3 * w, y - 0.25 * w, x, y + 1.1 * w, fill=mix(bg, "#bae6fd", a))
+            if tw > 0.9:
+                c.create_text(x + 0.7 * w, y - 0.9 * w, text="✦", fill=mix(bg, "#ffffff", fade),
+                              font=("Segoe UI Symbol", -int(7 * s)))
+
+    def chase_frames(self):
+        """{monstro: ([quadros andando para a direita], ms por quadro)} dos bichinhos da "Máquina de abates", do
+        data.grf do jogo, guardados por zoom; {} sem o jogo (ou enquanto o bestiário carrega)."""
+        cache = getattr(self, "_chase", None)
+        key = round(self.s, 3)
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        book = sprites.MONSTERS.book
+        if book is None:
+            return {}
+        import ui_parts
+        out = {}
+        for mob in CHASE_MOBS:
+            try:
+                part = book.part(mob) if book.has(mob) else None
+                made = ui_parts.mob_frames(self.root, part, sprites.MOB_WALK, 6, int(34 * self.s), int(30 * self.s),
+                                           {}) if part is not None else None
+            except Exception:  # noqa: BLE001 - sem o desenho: o bichinho desenhado entra no lugar
+                made = None
+            if made and made[0]:
+                out[mob] = made
+        self._chase = (key, out)
+        return out
+
+    def rider_frames(self):
+        """O Cavaleiro no Peco Peco andando para a direita com a lança na mão, das peças do jogo (o guarda-roupa da
+        aba Visuais): o corpo e a cabeça andando (as pernas do Peco correndo) e a lança da pose em guarda (andando o
+        jogo não desenha a arma), presa pela âncora da cabeça de cada passo para subir e descer junto. Reduzido para o
+        cartão: ([(foto, x da origem, y da origem)], ms por quadro), guardado por zoom; None sem o guarda-roupa."""
+        cache = getattr(self, "_rider", None)
+        key = round(self.s, 3)
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        w = sprites.LOADER.wardrobe
+        if w is None:
+            return None
+        got = None
+        try:
+            order, body, _missing = w.parts(CHASE_RIDER, 6)
+            weapon = next((p for p in order if p.name == "weapon"), None)
+            rest = [p for p in order if p is not weapon]
+            walk = body.act.frames(sprites.WALK * 8 + 6)
+            ready = body.act.frames(LANCE_POSE * 8 + 6)
+            lance = sprites.compose([weapon], body, LANCE_POSE, 6, 0) if weapon is not None and ready else None
+            first = sprites.compose(rest, body, sprites.WALK, 6, 0) if walk else None
+            if first is not None:
+                f = 42 * self.s / float(first[1])
+                frames = []
+                for i in range(len(walk)):
+                    img = first if i == 0 else sprites.compose(rest, body, sprites.WALK, 6, i)
+                    if img is None:
+                        continue
+                    if lance is not None and walk[i][1] and ready[0][1]:
+                        aw, ar = walk[i][1][0], ready[0][1][0]
+                        img = merge_rgba(img, lance, aw[0] - ar[0], aw[1] - ar[1])
+                    wd, ht, px, ox, oy = img
+                    tw, th = max(1, int(round(wd * f))), max(1, int(round(ht * f)))
+                    photo = tk.PhotoImage(master=self.root, data=sprites.png_b64(tw, th, sprites.resize(wd, ht, px, tw,
+                                                                                                    th)), format="png")
+                    frames.append((photo, ox * f, oy * f))
+                delay = body.act.delays[sprites.WALK * 8 + 6] if len(body.act.delays) > sprites.WALK * 8 + 6 else 100
+                got = (frames, delay or 100.0) if frames else None
+        except Exception:  # noqa: BLE001 - sem o desenho: o aventureiro desenhado entra no lugar
+            got = None
+        self._rider = (key, got)
+        return got
+
+    def fight_assets(self, fight, kind):
+        """Os desenhos da cena de luta de um cartão de dano, do jogo: o lutador (o visual de quem grava, se for de uma
+        classe de punho, ou o Mestre) nas ações da cena, virado para a direita; o monstro (o da sessão, ou um Poring)
+        parado, apanhando e caindo, virado para o lutador; e os números de dano. Guardados por (visual, monstro, cena,
+        zoom); None sem o guarda-roupa do jogo."""
+        look = fight.get("look") or FIGHTER
+        mob = fight.get("mob")
+        key = (repr(sorted(look.items())), mob, kind, round(self.s, 3))
+        cache = getattr(self, "_fight", None)
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        w, book = sprites.LOADER.wardrobe, sprites.MONSTERS.book
+        if w is None:
+            return None
+        out = dict(acts={}, mob={}, digits=None, photos={}, star=look.get("job") in STAR_JOBS)
+        try:
+            look, body_h = self.scene_look(w, look)
+            ref = w.render(look, sprites.IDLE, 6, 0)
+            f = 42 * self.s / float(body_h or ref[1]) if ref else None
+            for act in FIGHT_ACTS[kind]:
+                r0 = w.render(look, act, 6, 0) if f else None
+                if r0 is None:
+                    continue
+                frames = []
+                for i in range(r0[6]):
+                    r = r0 if i == 0 else w.render(look, act, 6, i)
+                    if r is None:
+                        continue
+                    wd, ht, px, ox, oy = r[:5]
+                    tw, th = max(1, int(round(wd * f))), max(1, int(round(ht * f)))
+                    photo = tk.PhotoImage(master=self.root, data=sprites.png_b64(tw, th, sprites.resize(wd, ht, px, tw,
+                                                                                                    th)), format="png")
+                    frames.append((photo, ox * f, oy * f))
+                if frames:
+                    out["acts"][act] = (frames, r0[5] or 100.0)
+        except Exception:  # noqa: BLE001 - sem o lutador: os socos desenhados entram no lugar
+            out["acts"] = {}
+        if not out["acts"]:
+            self._fight = (key, None)
+            return None
+        if book is not None:
+            import ui_parts
+            target = mob if mob and book.has(mob) else (FIGHT_DUMMY if book.has(FIGHT_DUMMY) else None)
+            part = book.part(target) if target else None
+            for action in (sprites.MOB_IDLE, sprites.MOB_HURT, sprites.MOB_DIE):
+                try:
+                    made = ui_parts.mob_frames(self.root, part, action, 2, int(42 * self.s), int(40 * self.s), {}) \
+                        if part is not None else None
+                except Exception:  # noqa: BLE001 - sem o desenho do monstro: o Poring desenhado
+                    made = None
+                if made and made[0]:
+                    out["mob"][action] = made
+            try:
+                out["digits"] = book.digits()
+            except Exception:  # noqa: BLE001 - sem os números do jogo: os escritos
+                out["digits"] = None
+        self._fight = (key, out)
+        return out
+
+    @staticmethod
+    def scene_look(w, look):
+        """O visual para a cena: sem as peças muito maiores que o corpo (o chapéu-aura de dragão, as capas gigantes),
+        que no palco pequeno engoliriam o personagem; e a altura do corpo com a cabeça, que dá a escala.
+        (visual, altura) — altura None se não der para medir."""
+        order, body, _missing = w.parts(look, 6)
+        if body is None:
+            return look, None
+        b = sprites.compose([body], body, sprites.IDLE, 6, 0)
+        if b is None:
+            return look, None
+        out = dict(look)
+        for p in order:
+            if p is not body and p.name in ("top", "mid", "low", "robe"):
+                r = sprites.compose([p], body, sprites.IDLE, 6, 0)
+                if r and (r[1] > BIG_PART[0] * b[1] or r[0] > BIG_PART[1] * b[0]):
+                    out[p.name] = 0
+        head = next((p for p in order if p.name == "cabeça"), None)
+        bh = sprites.compose([body, head] if head else [body], body, sprites.IDLE, 6, 0)
+        return out, (bh[1] if bh else b[1])
+
+    def digit_photos(self, assets, tint, zoom):
+        """Os dígitos 0 a 9 do jogo como imagens do Tk, na cor (`tint`, ou brancos) e no zoom pedidos, todos da mesma
+        altura (no arquivo o 0, o 1 e o 2 vêm um pouco menores)."""
+        key = (tint, zoom)
+        got = assets["photos"].get(key)
+        if got is None:
+            height = max(h for _w, h, _px in assets["digits"])
+            got = []
+            for w, h, px in assets["digits"]:
+                if h != height:
+                    nw = max(1, int(round(w * height / float(h))))
+                    px, w, h = sprites.resize(w, h, px, nw, height), nw, height
+                if tint:
+                    px = [(r * tint[0] // 255, g * tint[1] // 255, b * tint[2] // 255, a) for r, g, b, a in px]
+                photo = tk.PhotoImage(master=self.root, data=sprites.png_b64(w, h, px), format="png")
+                got.append(photo.zoom(zoom) if zoom > 1 else photo)
+            assets["photos"][key] = got
+        return got
+
+    def draw_number(self, x, y, value, assets, tint=None, zoom=1):
+        """Um número de dano centrado em x, com a base em y: os dígitos do jogo (sprite 숫자) encostados como no jogo;
+        sem eles, escrito em branco com contorno."""
+        text = "%d" % int(value)
+        c = self.canvas
+        if assets.get("digits"):
+            photos = self.digit_photos(assets, tint, zoom)
+            widths = [photos[int(ch)].width() for ch in text]
+            xx = x - (sum(widths) - (len(text) - 1) * zoom) / 2.0
+            for ch, wd in zip(text, widths):
+                c.create_image(xx, y, anchor="sw", image=photos[int(ch)])
+                xx += wd - zoom
+            return
+        font = ("Arial Black", -int(11 * self.s * zoom))
+        fill = "#%02x%02x%02x" % tint if tint else "#ffffff"
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            c.create_text(x + dx * self.s, y + dy * self.s, text=text, anchor="s", font=font, fill="#000000")
+        c.create_text(x, y, text=text, anchor="s", font=font, fill=fill)
+
+    def draw_fight(self, kind, k, box, fade, fight, bg, col):
+        """A cena de luta no pé do cartão. "combo" (Maior DPS): o lutador emenda os ataques e o monstro apanha sem
+        parar, com um monte de números (de vez em quando um crítico amarelo). "heavy" (Maior golpe): carrega com uma
+        aura dourada e dá um golpe só, com o número grande, um clarão e o monstro cambaleando. "asura" (one shot):
+        carrega com as esferas espirituais girando, avança, acerta com o número enorme, o monstro cai e a tela racha.
+        False se os desenhos do jogo não estiverem prontos (quem chamou desenha os socos de antes)."""
+        assets = self.fight_assets(fight, kind)
+        if assets is None:
+            return False
+        c, s = self.canvas, self.s
+        x0, y0, x1, y1 = box
+        base = y1 - 8 * s
+        tx = x0 + (x1 - x0) * 0.70
+        ax = tx - 50 * s
+        acts, mobs = assets["acts"], assets["mob"]
+        hit = float(fight.get("hit") or 0) or 99999
+        avg = float(fight.get("avg") or 0) or hit * 0.3
+        rnd = random.Random(31)
+
+        def frame_of(act, t, ms=None, loop=True):
+            frames, delay = acts[act]
+            i = int(t * 1000.0 / (ms or delay))
+            return frames[i % len(frames) if loop else min(i, len(frames) - 1)]
+
+        def mob_photo(action, t, loop=True):
+            photos, delay = mobs[action]
+            i = int(t * 1000.0 / max(40.0, delay))
+            return photos[i % len(photos) if loop else min(i, len(photos) - 1)]
+
+        def put(photo_ox_oy, x, y):
+            photo, ox, oy = photo_ox_oy
+            c.create_image(x - ox, y - oy, anchor="nw", image=photo)
+
+        mob_h = 34 * s
+        numbers = []                                # (quando, valor, cor, zoom, deslocamento)
+        mob_state, mob_t, shake, knock = sprites.MOB_IDLE, k, 0.0, 0.0
+        impact_x, impact_y = tx - 12 * s, base - 20 * s
+        if kind == "boss_down":                     # combo no chefe; no golpe final ele cai
+            final = BOSS_FALL_S
+            if k < final - 0.3:
+                seq = [a for a in (ATK2, ATK3) if a in acts] or list(acts)
+                lengths = [len(acts[a][0]) * 0.08 for a in seq]
+                t = (k % sum(lengths)) if k > 0 else 0.0
+                for a, ln in zip(seq, lengths):
+                    if t < ln or a == seq[-1]:
+                        put(frame_of(a, t, 80.0), ax, base)
+                        break
+                    t -= ln
+            elif ATK1 in acts:
+                put(frame_of(ATK1, k - (final - 0.3), loop=False), ax, base)
+            for i in range(9):                      # golpes até o final
+                ti = 0.4 + 0.33 * i
+                if ti > k or ti > final - 0.35:
+                    break
+                numbers.append((ti, avg * rnd.uniform(0.75, 1.25), None, 1, ((i % 3) - 1) * 12 * s))
+                if k - ti < 0.16:
+                    mob_state, mob_t = sprites.MOB_HURT, k - ti
+                    self.draw_burst(impact_x, impact_y, 6 * s, 8, mix(bg, "#ffffff", fade), mix(bg, "#f97316", fade))
+            if k >= final:
+                t = k - final
+                mob_state, mob_t = sprites.MOB_DIE, t
+                shake = math.sin(t * 70) * 3 * s * max(0.0, 1 - t / 0.4)
+                numbers.append((final, hit or avg * 3, CRIT_TINT, 2, 0.0))
+                if t < 0.5:
+                    u = t / 0.5
+                    self.draw_burst(impact_x, impact_y, (12 + 16 * u) * s, 12, mix(bg, "#fde047", fade * (1 - u)),
+                                    mix(bg, "#f97316", fade * (1 - u)))
+        elif kind == "combo":
+            seq = [a for a in (ATK2, ATK3) if a in acts] or list(acts)
+            ms = 70.0
+            lengths = [len(acts[a][0]) * ms / 1000.0 for a in seq]
+            cycle = sum(lengths)
+            t = (k - 0.15) % cycle if k > 0.15 else 0.0
+            for a, ln in zip(seq, lengths):
+                if t < ln or a == seq[-1]:
+                    put(frame_of(a, t, ms), ax, base)
+                    break
+                t -= ln
+            for i in range(18):                     # um golpe a cada 0,3 s; os números saem em três colunas
+                ti = 0.35 + 0.3 * i
+                if ti > k or ti > SESSION_FX_S - 0.8:
+                    break
+                crit = i % 4 == 3
+                value = avg * rnd.uniform(0.75, 1.25) * (1.4 if crit else 1.0)
+                numbers.append((ti, value, CRIT_TINT if crit else None, 1, ((i % 3) - 1) * 12 * s + rnd.uniform(-2, 2) * s))
+                if k - ti < 0.16:
+                    mob_state, mob_t = sprites.MOB_HURT, k - ti
+                    self.draw_burst(impact_x, impact_y + rnd.uniform(-6, 6) * s, (6 if not crit else 9) * s, 8,
+                                    mix(bg, "#fde047" if crit else "#ffffff", fade), mix(bg, "#f97316", fade))
+        else:
+            charge = 1.2 if kind == "heavy" else 1.1
+            strike = charge + (0.0 if kind == "heavy" else 0.18)
+            impact = charge + 0.3 if kind == "heavy" else strike
+            if k < charge:                          # carregando: a aura dourada (e as esferas no Asura)
+                g = min(1.0, k / charge)
+                cx_, cy_ = ax, base - 22 * s
+                for j in range(3):
+                    r = (14 + 6 * j + 2 * math.sin(k * 16 + j)) * s * (0.7 + 0.5 * g)
+                    c.create_oval(cx_ - r, cy_ - r * 1.25, cx_ + r, cy_ + r * 1.25,
+                                  outline=mix(bg, ("#fde68a", "#fbbf24", "#f59e0b")[j], fade * g * (0.85 - 0.2 * j)),
+                                  width=max(1, int(2 * s)))
+                if kind == "asura":                 # as esferas espirituais (ou estrelinhas, na linha estelar)
+                    for j in range(5):
+                        a = k * 5 + j * 2 * math.pi / 5
+                        ox_, oy_ = cx_ + math.cos(a) * 20 * s, cy_ + math.sin(a) * 9 * s - 6 * s
+                        if assets.get("star"):
+                            c.create_text(ox_, oy_, text="★", font=("Segoe UI Symbol", -int(9 * s)),
+                                          fill=mix(bg, ("#fde047", "#c084fc")[j % 2], fade))
+                        else:
+                            c.create_oval(ox_ - 3 * s, oy_ - 3 * s, ox_ + 3 * s, oy_ + 3 * s,
+                                          fill=mix(bg, "#fde047", fade), outline=mix(bg, "#f59e0b", fade))
+                if CAST in acts:
+                    put(frame_of(CAST, k), ax, base)
+                elif ATK1 in acts:
+                    put(frame_of(ATK1, 0.0), ax, base)
+            elif kind == "asura" and k < strike:    # o avanço
+                u = (k - charge) / (strike - charge)
+                x = ax + (tx - 24 * s - ax) * u
+                for j in (-14, -8, -2):
+                    c.create_line(x - 46 * s, base + j * s - 10 * s, x - 14 * s, base + j * s - 10 * s,
+                                  fill=mix(bg, "#fde68a", 0.7 * fade), width=max(1, int(1.5 * s)))
+                if ATK1 in acts:
+                    put(frame_of(ATK1, 0.3, loop=False), x, base)
+            else:                                   # o golpe e depois
+                x = tx - 24 * s if kind == "asura" else ax
+                if ATK1 in acts:
+                    put(frame_of(ATK1, k - strike, loop=False), x, base)
+            if k >= impact:
+                t = k - impact
+                shake = math.sin(t * 70) * 3 * s * max(0.0, 1 - t / 0.4)
+                if kind == "heavy":
+                    knock = 7 * s * math.exp(-t * 4) * min(1.0, t / 0.08)
+                    if t < 0.45:
+                        mob_state, mob_t = sprites.MOB_HURT, t
+                    numbers.append((impact, hit, CRIT_TINT, 2, 0.0))
+                    if t < 0.5:
+                        u = t / 0.5
+                        self.draw_burst(impact_x, impact_y, (12 + 18 * u) * s, 12, mix(bg, "#fde047", fade * (1 - u)),
+                                        mix(bg, "#f97316", fade * (1 - u)))
+                else:
+                    mob_state, mob_t = sprites.MOB_DIE, t
+                    numbers.append((impact, hit, SHOT_TINT, 2, 0.0))
+                    if t < 0.35:
+                        c.create_polygon(round_rect_pts(x0 + 3 * s, y0 + 3 * s, x1 - 3 * s, y1 - 3 * s, 8 * s),
+                                         smooth=True, fill=mix(bg, "#fff7ed", 0.6 * (1.0 - t / 0.35)), outline="")
+                    if t < 1.4:
+                        u = t / 1.4
+                        self.draw_burst(impact_x, impact_y, (30 - 12 * u) * s, 14, mix(bg, "#fde047", fade * (1 - u)),
+                                        mix(bg, "#f97316", fade * (1 - u)))
+                for j in range(3):                  # ondas de choque
+                    u = t - j * 0.12
+                    if 0 <= u < 0.8:
+                        r = (12 + (110 if kind == "asura" else 70) * u) * s
+                        c.create_oval(impact_x - r, impact_y - r * 0.6, impact_x + r, impact_y + r * 0.6,
+                                      outline=mix(bg, col, fade * (1.0 - u / 0.8)), width=max(1, int(3 * s * (1 - u))))
+                if kind == "asura" and t > 0.45:
+                    self.draw_cracks(impact_x, impact_y, min(1.0, (t - 0.45) / 0.25), box, fade, bg)
+        # o monstro (virado para o lutador): parado, apanhando ou caindo
+        got = mobs.get(mob_state) or mobs.get(sprites.MOB_IDLE)
+        if got:
+            photo = mob_photo(mob_state if mob_state in mobs else sprites.MOB_IDLE,
+                              mob_t, loop=mob_state == sprites.MOB_IDLE)
+            c.create_image(tx + knock + shake, base, anchor="s", image=photo)
+            mob_h = photo.height()
+        elif mob_state != sprites.MOB_DIE or mob_t < 0.3:
+            self.draw_poring(tx + knock + shake, base, CHASE_COLORS[FIGHT_DUMMY], 0.0, fade, bg)
+        for ti, value, tint, zoom, dx in numbers:   # os números sobem acima do monstro e somem
+            u = (k - ti) / (1.6 if zoom > 1 else 0.7)
+            if 0 <= u < 1:
+                self.draw_number(tx + dx, base - mob_h - 2 * s - (14 if zoom == 1 else 20) * s * u, value, assets, tint,
+                                 zoom)
+        return True
+
+    def draw_chase(self, k, box, fade, frames, bg):
+        """Os bichinhos atravessam o pé do cartão pulando, fugindo do Cavaleiro no Peco Peco com a lança (os desenhos
+        do jogo, que entram assim que ficam prontos; sem o jogo, desenhados aqui)."""
+        c, s = self.canvas, self.s
+        x0, y0, x1, y1 = box
+        if "mobs" not in frames and sprites.MONSTERS.book is not None:
+            frames["mobs"] = self.chase_frames()
+        if "rider" not in frames and sprites.LOADER.wardrobe is not None:
+            frames["rider"] = self.rider_frames()
+        mobs = frames.get("mobs") or {}
+        base = y1 - 9 * s
+        lead = x0 - 40 * s + ((x1 - x0) + 230 * s) * min(1.0, k / 5.4)
+        for i, mob in enumerate(CHASE_MOBS):
+            x = lead - (i * 27 + (i % 2) * 6) * s
+            hop = abs(math.sin(k * 7.5 + i * 1.3))
+            y = base - hop * 7 * s
+            if not x0 + 12 * s < x < x1 - 12 * s:
+                continue
+            got = mobs.get(mob)
+            if got:
+                photos, delay = got
+                c.create_image(x, y, anchor="s", image=photos[int(k * 1000 / max(40.0, delay)) % len(photos)])
+            else:
+                self.draw_poring(x, y, CHASE_COLORS[mob], hop, fade, bg)
+            if (k * 2 + i) % 1.0 < 0.5:             # gotinhas de suor voando para trás
+                u = (k * 2 + i) % 1.0 / 0.5
+                c.create_oval(x - 10 * s - 8 * s * u, y - 22 * s - 6 * s * u, x - 7 * s - 8 * s * u,
+                              y - 18 * s - 6 * s * u, fill=mix(bg, "#bae6fd", fade * (1 - u)), outline="")
+        hx = lead - (len(CHASE_MOBS) * 27 + 46) * s
+        rider = frames.get("rider")
+        if rider:
+            photos, delay = rider
+            photo, ox, oy = photos[int(k * 1000 / max(40.0, delay)) % len(photos)]
+            if x0 + 4 * s < hx - ox and hx - ox + photo.width() < x1 - 4 * s:
+                c.create_image(hx - ox, base + 2 * s - oy, anchor="nw", image=photo)
+        elif x0 + 14 * s < hx < x1 - 14 * s:
+            self.draw_hero(hx, base, k, fade, bg)
+
+    def draw_poring(self, x, y, color, hop, fade, bg):
+        """Um bichinho de geleia (o Poring e a família dele) de pé em (x, y): a gota, o brilho, olhos e a boquinha
+        aberta de susto. hop: 0 no chão (achatado) a 1 no alto."""
+        c, s = self.canvas, self.s
+        sq = 1.0 - hop
+        w, h = 10 * s * (1 + 0.15 * sq), 9 * s * (1 - 0.15 * sq)
+        edge = "#" + "".join("%02x" % int(int(color[i:i + 2], 16) * 0.65) for i in (1, 3, 5))
+        c.create_polygon(x, y - 2.3 * h, x + 0.55 * w, y - 1.75 * h, x + w, y - 0.9 * h, x + 0.85 * w, y,
+                         x - 0.85 * w, y, x - w, y - 0.9 * h, x - 0.55 * w, y - 1.75 * h, smooth=True,
+                         fill=mix(bg, color, fade), outline=mix(bg, edge, fade), width=max(1, int(s)))
+        c.create_oval(x - 0.62 * w, y - 1.65 * h, x - 0.2 * w, y - 1.25 * h, fill=mix(bg, "#ffffff", 0.85 * fade),
+                      outline="")
+        eye = mix(bg, "#1f2937", fade)
+        for ex in (x + 0.12 * w, x + 0.55 * w):
+            c.create_oval(ex - 1.3 * s, y - 1.25 * h, ex + 0.5 * s, y - 0.8 * h, fill=eye, outline="")
+        c.create_oval(x + 0.28 * w, y - 0.62 * h, x + 0.5 * w, y - 0.35 * h, fill=mix(bg, "#7f1d1d", fade), outline="")
+
+    def draw_hero(self, x, y, k, fade, bg):
+        """Um aventureiro correndo para a direita com a espada no alto (o "jogador" da Máquina de abates)."""
+        c, s = self.canvas, self.s
+        skin, hair = mix(bg, "#fcd9b6", fade), mix(bg, "#8b5a2b", fade)
+        tunic, dark, steel = mix(bg, "#3b82f6", fade), mix(bg, "#1e3a8a", fade), mix(bg, "#e5e7eb", fade)
+        run = math.sin(k * 15)
+        bob = abs(run) * 1.5 * s
+        y -= bob
+        for side in (1, -1):                        # pernas
+            a = 0.7 * run * side
+            c.create_line(x, y - 9 * s, x + math.sin(a) * 9 * s, y - (1 - math.cos(a)) * 3 * s + bob, fill=dark,
+                          width=max(2, int(2.6 * s)), capstyle="round")
+        c.create_polygon(round_rect_pts(x - 5 * s, y - 21 * s, x + 5 * s, y - 8 * s, 3 * s), smooth=True,
+                         fill=tunic, outline=dark)
+        c.create_line(x - 2 * s, y - 17 * s, x - 7 * s - run * 3 * s, y - 11 * s, fill=skin,
+                      width=max(2, int(2.2 * s)), capstyle="round")
+        sw = -1.1 + 0.55 * math.sin(k * 9)         # a espada balançando no alto
+        hx, hy = x + 3 * s, y - 18 * s
+        hand = (hx + math.cos(sw) * 7 * s, hy + math.sin(sw) * 7 * s)
+        c.create_line(hx, hy, hand[0], hand[1], fill=skin, width=max(2, int(2.2 * s)), capstyle="round")
+        tip = (hand[0] + math.cos(sw - 0.5) * 16 * s, hand[1] + math.sin(sw - 0.5) * 16 * s)
+        c.create_line(hand[0], hand[1], tip[0], tip[1], fill=steel, width=max(2, int(2.4 * s)))
+        gx, gy = math.cos(sw - 0.5 + math.pi / 2) * 3 * s, math.sin(sw - 0.5 + math.pi / 2) * 3 * s
+        c.create_line(hand[0] - gx, hand[1] - gy, hand[0] + gx, hand[1] + gy, fill=mix(bg, "#fbbf24", fade),
+                      width=max(2, int(2 * s)))
+        c.create_oval(x - 5.5 * s, y - 32 * s, x + 5.5 * s, y - 21 * s, fill=skin, outline=dark)
+        c.create_arc(x - 6 * s, y - 33 * s, x + 6 * s, y - 22 * s, start=15, extent=190, style="chord", fill=hair,
+                     outline="")
+        c.create_oval(x + 1.8 * s, y - 27.5 * s, x + 3.3 * s, y - 25.5 * s, fill=dark, outline="")
+
+    def draw_session_bar(self, pct, cx, cy, xl, xr, col, k):
+        """A barra do nível do "Quase lá", com o % ao lado; `k` (o tempo da animação): um brilho corre por ela."""
+        c, s = self.canvas, self.s
+        label = dec("%.1f%%" % pct)
+        lw = self.fonts["small"].measure(label) + 6 * s
+        bw = max(40 * s, min(220 * s, (xr - xl) - lw))
+        bx0 = cx - (bw + lw) / 2
+        bx1 = bx0 + bw
+        c.create_polygon(round_rect_pts(bx0, cy - 4 * s, bx1, cy + 4 * s, 4 * s), smooth=True,
+                         fill=mix(CARD_BG, col, 0.18), outline="")
+        fw = bw * max(0.0, min(100.0, pct)) / 100.0
+        if fw > 8 * s:
+            c.create_polygon(round_rect_pts(bx0, cy - 4 * s, bx0 + fw, cy + 4 * s, 4 * s), smooth=True, fill=col,
+                             outline="")
+            if k is not None:                       # o brilho corre da esquerda para a direita
+                sx = bx0 + ((k * 0.8) % 1.0) * fw
+                c.create_rectangle(sx, cy - 3 * s, min(sx + 12 * s, bx0 + fw - 2 * s), cy + 3 * s,
+                                   fill=mix(col, "#ffffff", 0.55), outline="")
+        c.create_text(bx1 + 6 * s, cy, anchor="w", text=label, font=self.fonts["small"], fill=col)
+
+    def draw_session_chips(self, hls, cy, xl, xr):
+        """Os selos dos destaques que não viraram título, centralizados; os que não cabem ficam de fora."""
+        c, s = self.canvas, self.s
+        font = self.fonts["small"]
+        gap = 5 * s
+        shown, total = [], 0.0
+        for h in hls:
+            w = font.measure(h["chip"]) + 14 * s
+            if total + w + (gap if shown else 0) > xr - xl:
+                break
+            total += w + (gap if shown else 0)
+            shown.append((h, w))
+        x = (xl + xr) / 2 - total / 2
+        for h, w in shown:
+            c.create_polygon(round_rect_pts(x, cy - 8 * s, x + w, cy + 8 * s, 8 * s), smooth=True,
+                             fill=mix(CARD_BG, h["color"], 0.2), outline=mix(CARD_BG, h["color"], 0.75))
+            c.create_text(x + w / 2, cy, text=h["chip"], font=font, fill=mix("#ffffff", h["color"], 0.35))
+            x += w + gap
+
+    def draw_session_fx(self, kind, k, box, col, title_y, origin, tag=None, chase=None, bg=CARD_BG, fight=None):
+        """A animação do destaque principal nos primeiros SESSION_FX_S do resumo (atrás do texto): confete (do alto e
+        dos cantos), moedinhas que se empilham (ganhou muito) ou que caem do emblema (gastou muito), estrelas piscando
+        (Milagre), brilhos em volta do título, ondas saindo do emblema, chuva ou a moldura pulsando. As peças saem
+        sempre da mesma semente: de um quadro para o outro só o tempo muda."""
+        c, s = self.canvas, self.s
+        x0, y0, x1, y1 = box
+        fade = 1.0 if k < SESSION_FX_S - 1.5 else max(0.0, (SESSION_FX_S - k) / 1.5)
+        rnd = random.Random(7)
+        if kind in ("lucky", "flash"):              # ondas que saem do emblema (o brilho de uma carta, um golpe)
+            ex, ey = origin
+            for j in range(3):
+                t = k - j * 0.3
+                if 0 <= t < 1.2:
+                    rx = 12 * s + (x1 - ex - 16 * s) * t / 1.2
+                    ry = min(ey - y0 - 4 * s, y1 - ey - 4 * s) * min(1.0, 0.25 + t)
+                    a = (1.0 - t / 1.2) * fade
+                    c.create_arc(ex - rx, ey - ry, ex + rx, ey + ry, start=-75, extent=150, style="arc",
+                                 outline=mix(CARD_BG, col, a), width=max(1, int(2 * s)))
+            if kind == "lucky":
+                kind = "sparkle"
+            else:
+                return
+        if kind == "confetti":                      # metade cai do alto, metade sai dos dois cantos de baixo
+            for i in range(48):
+                color = rnd.choice(CONFETTI)
+                w, h = rnd.uniform(2.0, 3.5) * s, rnd.uniform(4.5, 7.5) * s
+                spin, sway = rnd.uniform(3, 8), rnd.uniform(2.0, 4.0)
+                if i % 2:
+                    left = i % 4 == 1
+                    delay = rnd.uniform(0.0, 0.5)
+                    vx = rnd.uniform(50, 150) * s * (1 if left else -1)
+                    vy = -rnd.uniform(110, 190) * s
+                    t = k - delay
+                    if t < 0:
+                        continue
+                    x = (x0 + 10 * s if left else x1 - 10 * s) + vx * t
+                    y = y1 - 8 * s + vy * t + 0.5 * 170 * s * t * t
+                else:
+                    delay, vx = rnd.uniform(0.3, 2.0), rnd.uniform(-18, 18) * s
+                    vy, xs = rnd.uniform(30, 70) * s, rnd.uniform(x0 + 8 * s, x1 - 8 * s)
+                    t = k - delay
+                    if t < 0:
+                        continue
+                    x = xs + vx * t + math.sin(t * sway + i) * 6 * s
+                    y = y0 + 4 * s + vy * t + 26 * s * t * t
+                if not (y0 + 3 * s < y < y1 - 5 * s and x0 + 3 * s < x < x1 - 3 * s):
+                    continue
+                a = t * spin + i
+                ca, sa = math.cos(a), math.sin(a)
+                pts = []
+                for px, py in ((-w, -h), (w, -h), (w, h), (-w, h)):
+                    pts += [x + px * ca - py * sa, y + px * sa + py * ca]
+                c.create_polygon(pts, fill=mix(CARD_BG, color, fade), outline="")
+        elif kind == "rain":                        # a sessão difícil: chuvinha caindo de lado
+            for i in range(64):
+                xs, delay = rnd.uniform(x0, x1 + 40 * s), rnd.uniform(0.0, 1.2)
+                speed = rnd.uniform(150, 220) * s
+                t = (k - delay) % 1.3 if k >= delay else -1
+                if t < 0:
+                    continue
+                y = y0 + 6 * s + speed * t
+                x = xs - 0.35 * speed * t
+                if y > y1 - 8 * s or x < x0 + 6 * s or x > x1 - 4 * s:
+                    continue
+                c.create_line(x, y, x - 4 * s, y + 11 * s, fill=mix(CARD_BG, "#93c5fd", 0.8 * fade),
+                              width=max(1, int(1.4 * s)))
+        elif kind == "coins_stack":                 # ganhou: moedinhas caem e se empilham em montinhos no pé do cartão
+            floor, th, g = y1 - 10 * s, 3.0 * s, 520 * s
+            rx, ry = 7.5 * s, 2.6 * s
+            piles = 6
+            xs = [x0 + 20 * s + (x1 - x0 - 40 * s) * (j + 0.5) / piles for j in range(piles)]
+            height = [0] * piles
+            coins = []
+            for i in range(34):                     # a ordem de chegada: cada moeda pousa em cima da anterior
+                j = rnd.randrange(piles)
+                coins.append((0.15 + i * 0.085 + rnd.uniform(0.0, 0.06), j, height[j], rnd.uniform(5, 9)))
+                height[j] += 1
+            for delay, j, level, spin in coins:
+                t = k - delay
+                if t < 0:
+                    continue
+                x, top = xs[j], floor - level * th
+                fall = math.sqrt(2 * max(1.0, top - (y0 + 6 * s)) / g)
+                if t < fall:                        # caindo e girando
+                    y, r = y0 + 6 * s + 0.5 * g * t * t, 5.5 * s
+                    w = max(1.0 * s, r * abs(math.cos(t * spin)))
+                    c.create_oval(x - w, y - r, x + w, y + r, fill=mix(CARD_BG, "#fbbf24", fade),
+                                  outline=mix(CARD_BG, "#b45309", fade), width=max(1, int(s)))
+                    continue
+                # na pilha: a borda (mais escura) e a face de cima
+                c.create_oval(x - rx, top - ry + 1.6 * s, x + rx, top + ry + 1.6 * s,
+                              fill=mix(CARD_BG, "#b45309", fade), outline="")
+                c.create_oval(x - rx, top - ry, x + rx, top + ry, fill=mix(CARD_BG, "#fbbf24", fade),
+                              outline=mix(CARD_BG, "#d97706", fade), width=max(1, int(s)))
+                if t - fall < 0.25:                 # brilho de quando pousa
+                    c.create_line(x - rx * 0.5, top - ry * 0.2, x + rx * 0.2, top - ry * 0.2,
+                                  fill=mix(CARD_BG, "#fff7d6", fade), width=max(1, int(s)))
+        elif kind == "coins_down":                  # gastou: saem do emblema e caem pelo pé do cartão
+            ex, ey = origin
+            for i in range(22):
+                delay = rnd.uniform(0.0, 2.4)
+                spin, r = rnd.uniform(6, 11), rnd.uniform(4.5, 6.5) * s
+                vx, vy = rnd.uniform(10, 170) * s, -rnd.uniform(40, 110) * s
+                t = k - delay
+                if t < 0:
+                    continue
+                x = ex + vx * t
+                y = ey + vy * t + 0.5 * 320 * s * t * t
+                if y > y1 - 4 * s or not x0 + 4 * s < x < x1 - 4 * s:
+                    continue
+                a = fade * min(1.0, max(0.0, (y1 - 4 * s - y) / (18 * s)))
+                turn = abs(math.cos(t * spin + i))
+                rx = max(1.0 * s, r * turn)
+                c.create_oval(x - rx, y - r, x + rx, y + r, fill=mix(CARD_BG, "#fbbf24", a),
+                              outline=mix(CARD_BG, "#b45309", a), width=max(1, int(s)))
+                if turn > 0.45:
+                    c.create_line(x - rx * 0.35, y - r * 0.5, x - rx * 0.35, y + r * 0.25,
+                                  fill=mix(CARD_BG, "#fef3c7", a), width=max(1, int(s)))
+        elif kind == "jabs":                        # golpes e dano: a luva sai da esquerda, bate e volta, várias vezes
+            rows = (y1 - 34 * s, y1 - 20 * s)    # no palco, no pé do cartão
+            reach = x1 - x0 - 118 * s
+            for i in range(5):
+                t = k - (0.3 + i * 0.6)
+                if not 0 <= t < 0.6:
+                    continue
+                e = (t / 0.16) ** 0.7 if t < 0.16 else (1.0 if t < 0.26 else max(0.0, 1.0 - (t - 0.26) / 0.34))
+                gy = rows[i % 2]
+                gx = x0 + 38 * s + reach * e
+                if t < 0.17:                        # riscos de velocidade atrás da luva
+                    for j in (-6, 0, 6):
+                        c.create_line(gx - 44 * s, gy + j * s, gx - 30 * s, gy + j * s,
+                                      fill=mix(bg, "#ffffff", 0.45 * fade), width=max(1, int(s)))
+                if 0.14 < t < 0.36:                 # o impacto na frente da luva
+                    u = (t - 0.14) / 0.22
+                    self.draw_burst(gx + 15 * s, gy, (9 + 9 * u) * s, 10, mix(bg, "#fde047", fade * (1 - u)),
+                                    mix(bg, "#f97316", fade * (1 - u)))
+                self.draw_fist(gx, gy, 1.0 * s, fade, bg, k)
+        elif kind == "one_punch":                   # one shot: o punho toma impulso, atravessa o cartão e explode
+            gy = y1 - 26 * s                        # no palco, no pé do cartão
+            hit_x = x1 - 46 * s
+            if k < 0.9:                             # o impulso: recua, cresce, treme e junta a aura dourada
+                g = min(1.0, k / 0.9)
+                gx = x0 + 58 * s - 8 * s * g + math.sin(k * 70) * 1.6 * s * g     # o punho não passa da borda
+                for j in range(3):
+                    r = (16 + 7 * j + 3 * math.sin(k * 18 + j)) * s * (0.6 + 0.6 * g)
+                    c.create_oval(gx - 8 * s - r * 1.3, gy - r, gx - 8 * s + r * 1.3, gy + r,
+                                  outline=mix(bg, ("#fde68a", "#fbbf24", "#f59e0b")[j], fade * g * (0.9 - 0.25 * j)),
+                                  width=max(1, int(2 * s)))
+                for j in range(8):                  # faíscas subindo
+                    u = (k * 1.6 + j / 8.0) % 1.0
+                    c.create_text(gx - 30 * s + j * 6 * s, gy + 12 * s - u * 30 * s, text="✦",
+                                  font=("Segoe UI Symbol", -int(6 * s)), fill=mix(bg, "#fde68a", fade * g * (1 - u)))
+                self.draw_fist(gx, gy, (0.9 + 0.6 * g) * s, fade, bg, k)
+            elif k < 1.05:                          # o soco
+                u = (k - 0.9) / 0.15
+                gx = x0 + 50 * s + (hit_x - 18 * s - x0 - 50 * s) * u
+                for j in (-12, -5, 2, 9):
+                    c.create_line(x0 + 10 * s, gy + j * s, gx - 30 * s, gy + j * s,
+                                  fill=mix(bg, "#ffffff", 0.5 * fade), width=max(1, int(1.5 * s)))
+                self.draw_fist(gx, gy, 1.5 * s, fade, bg, k)
+            else:                                   # o impacto: clarão, onda de choque, estrelas e a luva vibrando
+                t = k - 1.05
+                if t < 0.35:
+                    c.create_polygon(round_rect_pts(x0 + 3 * s, y0 + 3 * s, x1 - 3 * s, y1 - 3 * s, 8 * s), smooth=True,
+                                     fill=mix(bg, "#fff7ed", 0.6 * (1.0 - t / 0.35)), outline="")
+                for j in range(3):
+                    u = t - j * 0.12
+                    if 0 <= u < 0.9:
+                        r = (14 + 120 * u) * s
+                        c.create_oval(hit_x - r, gy - r * 0.6, hit_x + r, gy + r * 0.6,
+                                      outline=mix(bg, col, fade * (1.0 - u / 0.9)), width=max(1, int(3 * s * (1 - u))))
+                if t < 1.6:
+                    u = t / 1.6
+                    self.draw_burst(hit_x + 6 * s, gy, (34 - 16 * u) * s, 14, mix(bg, "#fde047", fade * (1 - u)),
+                                    mix(bg, "#f97316", fade * (1 - u)))
+                for j in range(14):                 # estilhaços
+                    ang = rnd.uniform(-math.pi, math.pi)
+                    sp = rnd.uniform(60, 150) * s
+                    if t < 1.2:
+                        px = hit_x + math.cos(ang) * sp * t
+                        py = gy + math.sin(ang) * sp * t * 0.6 + 60 * s * t * t
+                        if x0 + 4 * s < px < x1 - 4 * s and y0 + 4 * s < py < y1 - 4 * s:
+                            c.create_text(px, py, text="✦", font=("Segoe UI Symbol", -int(8 * s)),
+                                          fill=mix(bg, rnd.choice(("#fde047", "#fb923c", "#ffffff")),
+                                                   fade * (1 - t / 1.2)))
+                if t > 0.45:                        # depois da onda de choque, a tela racha a partir do impacto
+                    self.draw_cracks(hit_x, gy, min(1.0, (t - 0.45) / 0.25), box, fade, bg)
+                wob = math.exp(-t * 5) * math.sin(t * 40) * 6 * s
+                self.draw_fist(hit_x - 26 * s + wob, gy, 1.5 * s, fade, bg, k)
+        elif kind in ("combo", "heavy", "asura", "boss_down"):  # a cena de luta com os desenhos do jogo
+            if not self.draw_fight(kind, k, box, fade, fight or {}, bg, col):
+                self.draw_session_fx({"asura": "one_punch", "boss_down": "confetti"}.get(kind, "jabs"), k, box, col,
+                                     title_y, origin, tag, chase, bg)
+            elif kind == "boss_down" and k > BOSS_FALL_S:       # o chefe caiu: confete
+                self.draw_session_fx("confetti", k - BOSS_FALL_S, box, col, title_y, origin, tag, chase, bg)
+        elif kind == "chase":                       # Porings, Drops, Poporings e Marins fugindo de um cavaleiro
+            self.draw_chase(k, box, fade, chase if chase is not None else {}, bg)
+        elif kind == "diamonds":                    # o "Intocável": diamantes brilhando no vidro
+            self.draw_diamonds(k, box, fade, bg)
+        elif kind == "stars":
+            twinkle = random.Random(int(k * 10))
+            for _i in range(24):
+                x, y = twinkle.uniform(x0 + 10 * s, x1 - 10 * s), twinkle.uniform(y0 + 8 * s, y1 - 8 * s)
+                size = twinkle.uniform(7, 14) * s
+                color = mix(CARD_BG, twinkle.choice(MIRACLE_COLORS), fade * twinkle.uniform(0.35, 0.9))
+                c.create_text(x, y, text=twinkle.choice("★✦✧⋆"), fill=color, font=("Segoe UI Symbol", -int(size)))
+        elif kind == "sparkle":
+            cx = (x0 + x1) / 2
+            for i in range(14):
+                ang, rx = rnd.uniform(0, 2 * math.pi), rnd.uniform(0.18, 0.48) * (x1 - x0)
+                ry, speed = rnd.uniform(6, 24) * s, rnd.uniform(3.0, 6.0)
+                pulse = 0.5 + 0.5 * math.sin(k * speed + i)
+                x, y = cx + math.cos(ang) * rx, title_y + math.sin(ang) * ry
+                c.create_text(x, y, text="✦", fill=mix(CARD_BG, col, fade * (0.25 + 0.75 * pulse)),
+                              font=("Segoe UI Symbol", -int((6 + 8 * pulse) * s)))
+        elif kind == "glow":
+            pulse = 0.5 + 0.5 * math.sin(k * 4.0)
+            c.create_polygon(round_rect_pts(x0 + 3 * s, y0 + 3 * s, x1 - 3 * s, y1 - 3 * s, 8 * s), smooth=True,
+                             fill="", outline=mix(CARD_BG, col, fade * (0.25 + 0.5 * pulse)),
+                             width=max(1, int((1 + 2 * pulse) * s)))
+        if tag and kind in ("coins_stack", "coins_down") and k < 3.0:
+            # o número flutua ao lado do emblema: subindo (ganhou) ou descendo (gastou)
+            ex, ey = origin
+            u = min(1.0, k / 3.0)
+            up = kind == "coins_stack"
+            ty = ey - 4 * s - 14 * s * u if up else ey + 6 * s + 14 * s * u
+            c.create_text(ex + 14 * s, ty, anchor="w", text=tag, font=self.fonts["small"],
+                          fill=mix(CARD_BG, "#fde68a" if up else "#fca5a5", fade * (1.0 - 0.7 * u)))
 
     def open_summary(self):
         """Clique no resumo: abre a análise no Dedo Duro, na luta do cartão."""
@@ -1632,8 +3019,8 @@ class DpsApp:
         self.W, self.H = W, H = self.size_px()
         self.hits = []
         # o cartão dos efeitos acompanhados só aparece quando nenhum outro cartão está na frente
-        self.fx_now = [] if (self.death_card or self.ping_card or self.boss_card or self.summary_card) \
-            else self.fx_card_rows()
+        self.fx_now = [] if (self.death_card or self.ping_card or self.boss_card or self.summary_card
+                             or self.session_card) else self.fx_card_rows()
         self.root.configure(bg=t["bg"])
         c.configure(bg=t["bg"])
 
@@ -1718,7 +3105,8 @@ class DpsApp:
         self.chip(("btn", "view"), max(x + 4 * s, W - 10 * s - mw), mode, False, outline=True)
 
         # faixa das informações fixadas (sempre visível, em qualquer aba; com um cartão aberto ela fica acima dele)
-        card_up = self.death_card or self.ping_card or self.boss_card or self.summary_card or self.fx_now
+        card_up = (self.death_card or self.ping_card or self.boss_card or self.summary_card or self.session_card
+                   or self.fx_now)
         if not card_up:
             self.draw_pins(cb)
 
@@ -1734,6 +3122,8 @@ class DpsApp:
                 self.draw_boss_card()
                 if not self.boss_card:
                     self.draw_summary_card()
+                if not self.boss_card and not self.summary_card:
+                    self.draw_session_card()
         self.draw_fx_card()
         self.draw_death()
         if self.death_card and self.cfg.get("pins"):
@@ -2232,7 +3622,7 @@ class DpsApp:
         cfg = self.cfg
         key = (id(cb), cfg["session"], self.enc_back, cfg.get("xp_mode"), cfg.get("xp_fixed"),
                repr(cfg.get("xp_bonuses")), repr(cfg.get("xp_event_off")), len(cb.level_ups), len(cb.quests_done),
-               cb.finished, xp.GEAR.table is None, i18n.LANG)
+               len(cb.quests_added), cb.finished, xp.GEAR.table is None, i18n.LANG)
         now = time.monotonic()
         hit = self._xp_rows
         if hit and hit[0] == key and now < hit[1]:
@@ -2275,7 +3665,10 @@ class DpsApp:
                 dn = xp.death_note(cb, self.cfg)            # morte sem seguro: a previsão já desconta os 5%
                 if dn:
                     right = (right + " · " if right else "") + xp.death_text(*dn)
-                rows.append(dict(label=_("Até o próximo nível"), value=xp.span_text(eta) if eta else _("já subiu"),
+                # estimativa passou do nível sem a subida chegar: quem grava ainda não subiu (o jogo manda a subida na
+                # hora), então "a qualquer momento", nunca "já subiu"
+                rows.append(dict(label=_("Até o próximo nível"),
+                                 value=xp.span_text(eta) if eta else _("a qualquer momento"),
                                  right=right, frac=1.0, me=True, pin="xp_eta"))
             elif xp.no_known_xp(cb):
                 rows.append(dict(label=_("Até o próximo nível"), value="—",
@@ -2309,9 +3702,14 @@ class DpsApp:
         pr = xp.progress(cb, self.cfg)
         prog = meter.level_progress(cb.session)
         if pr is not None and pr["pct"] is not None:   # onde está agora: o último ponto exato + a XP estimada
-            rows.append(dict(label=_("Nível %d") % pr["level"], value=dec("%.1f%%" % min(100.0, pr["pct"])),
+            # sem a subida de nível, quem grava ainda está no nível: nunca 100%
+            rows.append(dict(label=_("Nível %d") % pr["level"], value=dec("%.1f%%" % min(99.9, pr["pct"])),
                              right=_("agora (sem as missões)") if xp.quests_uncounted(cb, self.cfg)
                              else _("agora (estimado)"), frac=min(1.0, pr["pct"] / 100.0), me=False, pin="level"))
+        elif pr is not None and not pr["need"] and pr["level"] != cb.session.base_level:
+            # subiu até o nível máximo da classe: não há XP para o próximo (antes mostrava o nível do começo)
+            rows.append(dict(label=_("Nível %d") % pr["level"], value=_("máximo"), right="", frac=1.0, me=False,
+                             pin="level"))
         elif prog is not None:
             rows.append(dict(label=_("Nível %d") % cb.session.base_level, value=dec("%.1f%%" % (100 * prog)),
                              right=_("no início da gravação"), frac=prog, me=False, pin="level"))
@@ -2370,7 +3768,7 @@ class DpsApp:
         "agora / total / em combate": o cartão cobre a faixa fixa e fica com a área inteira.
         [(chave, rótulo, valor, cor)], ou [] quando não é o caso."""
         if self.death_card or not self.cfg.get("pins") or not (
-                self.ping_card or self.boss_card or self.summary_card or self.fx_now):
+                self.ping_card or self.boss_card or self.summary_card or self.session_card or self.fx_now):
             return []
         return [(key, label, value, color) for key, label, value, _right, color in self.pin_texts(cb)]
 
@@ -2576,6 +3974,11 @@ class DpsApp:
                                command=lambda tone=tone: self.set_ping_tone(tone))
         sm.add_cascade(label=_("Tom do aviso de item"), menu=tm)
         sm.add_separator()
+        folder = self.cfg.get("sound_folder")
+        sm.add_command(label=(_("Pasta com os seus sons: %s (%d)…") % (os.path.basename(folder) or folder,
+                                                                       len(sounds.custom_sounds(folder))))
+                       if folder else _("Pasta com os seus sons…"), command=self.pick_sound_folder)
+        sm.add_separator()
         sm.add_command(label=_("Os sons só tocam com o aviso do Milagre ou da União ligado."), state="disabled")
         return sm
 
@@ -2603,8 +4006,11 @@ class DpsApp:
                 fav = item in (self.cfg.get("drop_favs") or [])
                 m.add_command(label=_("Tirar dos favoritos") if fav else _("Favoritar (fica no topo)"),
                               command=lambda: self.toggle_fav(item))
-                m.add_command(label=_("Parar de avisar quando cair") if item in self.ping_items()
-                              else _("Avisar quando cair (som e lugar)"), command=lambda: self.toggle_ping(item))
+                # o aviso com o som escolhido ali mesmo: não avisar, o som padrão do aviso ou qualquer outro som
+                on = item in self.ping_items()
+                snd = self.ping_sound_of(item)
+                m.add_cascade(label=(_("Aviso quando cair: %s") % (sound_name(snd) if snd else _("som padrão"))) if on
+                              else _("Avisar quando cair (som e lugar)"), menu=self.ping_sound_menu(m, item))
                 m.add_separator()
                 m.add_command(label=_("Ocultar até fechar o programa"), command=lambda: self.hide_item(item, False))
                 m.add_command(label=_("Ocultar sempre"), command=lambda: self.hide_item(item, True))
@@ -2689,6 +4095,7 @@ class DpsApp:
     def reset(self):
         cb = self.combat()
         if cb is not None:
+            xp.keep_level(cb, self.cfg)          # a posição no nível não volta para trás com os abates apagados
             cb.reset()
         self.enc_back = 0
         self.dirty = True
@@ -3179,6 +4586,8 @@ class DpsApp:
         m.add_command(label=_("Zerar"), command=self.reset)
         m.add_separator()
         m.add_command(label=_("Análise completa…"), command=self.open_analysis)
+        if self.last_session:
+            m.add_command(label=_("Resumo da última sessão"), command=self.reopen_session)
         m.add_command(label=_("Cartões e efeitos acompanhados…"), command=lambda: self.open_analysis("cartoes"))
         m.add_command(label=_("Avisos de item…"), command=self.open_pings)
         m.add_command(label=_("Relatório de aprendizado…"), command=self.open_report)
@@ -3344,6 +4753,8 @@ class DpsApp:
                 self.dirty = True
             elif not moved and self.press_target and self.press_target[0] == "summary":
                 self.open_summary()
+            elif not moved and self.press_target and self.press_target[0] == "session":
+                self.open_session()
             elif not moved and self.press_target and self.press_target[0] == "fxcard":
                 self.close_fx_card()
             elif not moved and self.press_target and self.press_target[0] == "ping":
@@ -3366,6 +4777,8 @@ class DpsApp:
             self.popup(self.boss_menu, e.x_root, e.y_root)
         elif tgt and tgt[0] == "summary":
             self.popup(self.summary_menu, e.x_root, e.y_root)
+        elif tgt and tgt[0] == "session":
+            self.popup(self.session_menu, e.x_root, e.y_root)
         elif tgt and tgt[0] == "ping":
             self.popup(self.ping_menu, e.x_root, e.y_root)
         elif tgt and tgt[0] == "tracker":

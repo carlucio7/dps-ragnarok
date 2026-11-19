@@ -29,6 +29,7 @@ SYSTEM = [
     ("relief", "Aliviar muito alto (Betelgeuse)", "Almas ativas e a redução de dano do chefe", None),
     ("def_break", "A defesa caiu (Aquila)", "5 s de dano total", None),
     ("summary", "Resumo da luta contra chefe", "No fim da luta: tempo, sua parte do dano e o Dedo Duro", "fight_summary"),
+    ("session", "Resumo da sessão", "Quando a gravação para: as informações que você escolher", "session_card"),
     ("ping", "Item marcado caiu", "O cartão com o mapa e as coordenadas (o som é à parte)", None),
     ("miracle", "Milagre Solar, Lunar e Estelar", "A faixa dourada quando o Milagre ativa", "alert_miracle"),
     ("buff_end", "Buff importante acabou", "Aviso no rodapé, no meio da luta", "alert_buffs"),
@@ -54,7 +55,8 @@ MAX_TRACKED = 30
 # som de cada efeito acompanhado: quando toca. None = o padrão da aba ("Som quando acabar")
 SOUNDS = ("off", "start", "end", "before")
 SOUND_TEXT = {"off": "sem som", "start": "ao começar", "end": "ao acabar", "before": "antes de acabar"}
-BEFORE_CHOICES = (1, 2, 3, 5, 10, 15, 30)       # "antes de acabar": quantos segundos antes
+BEFORE_CHOICES = (1, 2, 3, 5, 10, 15, 30, 45, 60, 90, 120, 180, 300)   # "antes de acabar": quantos segundos antes
+MAX_BEFORE_S = 600            # dá para digitar qualquer número de segundos até isto
 DEFAULT_BEFORE = 3
 DEFAULT_TONE = "agudo"                          # os tons são os do aviso de item (itemping.TONES)
 # temporizador: a duração que a pessoa escolhe (s); 0 = a do jogo
@@ -215,8 +217,8 @@ def tracked(cfg):
         where = t.get("where") if t.get("where") in ("me", "target", "any") else default_where(kind, ident)
         out.append(dict(kind=kind, id=ident, where=where, show="card" if t.get("show") == "card" else "counter",
                         sound=t.get("sound") if t.get("sound") in SOUNDS else None,
-                        before=_int(t.get("before"), 1, 600, DEFAULT_BEFORE),
-                        snd=t.get("snd") if t.get("snd") in sndlib.KEYS else sndlib.DEFAULT,
+                        before=_int(t.get("before"), 1, MAX_BEFORE_S, DEFAULT_BEFORE),
+                        snd=t.get("snd") if sndlib.valid(t.get("snd")) else sndlib.DEFAULT,
                         tone=t.get("tone") if t.get("tone") in tones else DEFAULT_TONE,
                         secs=_int(t.get("secs"), 0, MAX_TIMER_S, 0)))
     return out[:MAX_TRACKED]
@@ -235,6 +237,23 @@ def sound_text(cfg, t):
     if mode == "before":
         return _("%d s antes de acabar") % t["before"]
     return _(SOUND_TEXT[mode])
+
+
+def parse_secs(text, lo=1, hi=MAX_TIMER_S):
+    """Segundos digitados numa caixa: "45", "45 s", "1:30" (minutos:segundos), "2,5". None se não for um número;
+    o resultado fica entre lo e hi."""
+    digits = (text or "").lower().replace("s", "").strip()
+    if not digits:
+        return None
+    try:
+        if ":" in digits:
+            m, s = digits.split(":", 1)
+            secs = int(m) * 60 + int(s)
+        else:
+            secs = int(float(digits.replace(",", ".")))
+    except ValueError:
+        return None
+    return max(lo, min(hi, secs))
 
 
 def timer_text(t):
@@ -270,9 +289,9 @@ def track(cfg, kind, ident, on=True, where=None, show=None, sound=_KEEP, before=
                     where=where or old.get("where") or default_where(kind, ident),
                     show=show if show in ("counter", "card") else old.get("show", "counter"),
                     sound=(sound if sound in SOUNDS else None) if sound is not _KEEP else old.get("sound"),
-                    before=_int(before, 1, 600, DEFAULT_BEFORE) if before is not None else old.get("before",
-                                                                                                  DEFAULT_BEFORE),
-                    snd=snd if snd in sndlib.KEYS else old.get("snd", sndlib.DEFAULT),
+                    before=_int(before, 1, MAX_BEFORE_S, DEFAULT_BEFORE) if before is not None
+                    else old.get("before", DEFAULT_BEFORE),
+                    snd=snd if sndlib.valid(snd) else old.get("snd", sndlib.DEFAULT),
                     tone=tone if tone in {n for n, _h in itemping.TONES} else old.get("tone", DEFAULT_TONE),
                     secs=_int(secs, 0, MAX_TIMER_S, 0) if secs is not None else old.get("secs", 0))
         new = [item if same(t) else t for t in cur] if old else cur + [item]

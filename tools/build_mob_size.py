@@ -19,7 +19,11 @@ SIZES = {"Small": "S", "Medium": "M", "Large": "L"}
 EXTRA = {20994: "L",              # Betelgeuse (Torre da Constelação)
          21531: "L", 21588: "L",  # Aquila (Destruição da Aeronave) e a forma de sobrecarga
          21533: "L",              # Juncea de Simulação
-         20573: "L"}              # Fantasma de Amdarais (Glast Heim Sombria, desafio)
+         20573: "L",              # Fantasma de Amdarais (Glast Heim Sombria, desafio)
+         20572: "M",              # Fantasma de Himmelmez (a mesma instância, chance de 5% × o nível no lugar dele)
+         # Edda do Biolaboratório (MD_ED_*): a Espadachim Anônima (MVP), os monstros das salas e o objeto escondido
+         20536: "M", 20537: "M", 20538: "M", 20539: "M", 20540: "M", 20541: "M", 20542: "M", 20562: "M"}
+EXTRA.update({j: "M" for j in range(20856, 20873)})   # arena noturna de Geffen (MD_N_ARENA_*, Fei, Alphonse, Fenrir)
 
 
 def parse(path):

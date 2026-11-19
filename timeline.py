@@ -143,6 +143,18 @@ def build(c, key, rng=None):
     hidden = an.hidden_losses(c, x.boss_aids, model, x.start, x.end) if model else []
 
     steps = sorted([(t, d, 0.0) for t, _a, d in out] + [(t, 0, model["hidden"]) for t in hidden] + [(x.end, 0, 0.0)])
+    # chefe que cura parte de cada golpe pouco depois (an.BOSS_HEAL: Amdarais): a cura entra como dano negativo
+    heal = an.BOSS_HEAL.get(mob) if x.hp_table else None
+    if heal:
+        stop = x.end if x.killed else x.end + PAD_MS
+        steps = sorted(steps + [(t + heal["delay_ms"], -heal["frac"] * d, 0.0) for t, _a, d in out
+                                if t + heal["delay_ms"] <= stop])
+    # vida atual mandada pelo servidor (os adversários da arena noturna a mandam quando se movem): cada leitura acerta a
+    # curva no valor de verdade, com as curas que o dano sozinho não mostra (o Bruto se cura 2,5% de cada vez)
+    reads = [(t, None, hp / float(x.hp)) for a in x.boss_aids for t, hp in getattr(c, "hp_seen", {}).get(a, ())
+             if x.hp and t0 <= t <= t1]
+    if reads:
+        steps = sorted(steps + reads, key=lambda s: s[0])
 
     def curve(rate, floor=0.0):
         """(pontos da curva, valor sem piso depois do último golpe) com a regeneração `rate` por segundo."""
@@ -156,8 +168,10 @@ def build(c, key, rng=None):
                 frac = min(1.0, frac + gained(last, last + HP_STEP_MS))
                 last += HP_STEP_MS
                 pts.append((last, frac))
-            if x.hp:
-                raw = min(1.0, frac + gained(last, t)) - d / x.hp - lost
+            if d is None:                  # leitura do servidor: vale o valor dele
+                raw = frac = min(1.0, lost)
+            elif x.hp:
+                raw = min(1.0, min(1.0, frac + gained(last, t)) - d / x.hp - lost)   # a cura não passa do cheio
                 frac = max(floor, raw)
             last = t
             pts.append((t, frac))

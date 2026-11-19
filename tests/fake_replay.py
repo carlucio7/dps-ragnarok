@@ -63,9 +63,10 @@ def auto_attack(src, dst, dmg, action=0, left=0):
     return struct.pack("<HIIIiiiBhBi", rrf.P_ACT3_NEW, src, dst, 0, 0, 0, dmg, 0, 1, action, left)
 
 
-def spawn(aid, kind, job, name, gid=0, boss=False, pos=None, stand=False):
+def spawn(aid, kind, job, name, gid=0, boss=False, pos=None, stand=False, hp=None, raw_name=None):
     """0x09fe com os campos que o medidor le nas posicoes certas; com stand=True, o 0x09ff (aparecer parado), que
-    tem 1 byte a mais antes do nivel. pos = (x, y) da unidade."""
+    tem 1 byte a mais antes do nivel. pos = (x, y) da unidade. hp = (vida máx., vida atual), como os adversários
+    da arena noturna mandam (sem ele, -1 como a LATAM); raw_name = os bytes do nome (ex.: coreano em cp949)."""
     kinds = {v: k for k, v in rrf.OBJ_KIND.items()}
     extra = 1 if stand else 0
     p = bytearray(83 + extra)
@@ -75,8 +76,9 @@ def spawn(aid, kind, job, name, gid=0, boss=False, pos=None, stand=False):
         x, y = pos
         p[63:66] = bytes([x >> 2, ((x & 3) << 6) | (y >> 4), (y & 0x0F) << 4])
     level = (2 if boss else 0) if isinstance(boss, bool) else boss   # 0 normal, 1 chefe menor, 2 MVP
-    struct.pack_into("<iiB", p, 72 + extra, -1, -1, level)           # a LATAM manda -1 no HP
-    p += name.encode("utf-8")
+    max_hp, cur_hp = hp if hp is not None else (-1, -1)              # a LATAM manda -1 no HP
+    struct.pack_into("<iiB", p, 72 + extra, max_hp, cur_hp, level)
+    p += raw_name if raw_name is not None else name.encode("utf-8")
     struct.pack_into("<H", p, 2, len(p))
     return bytes(p)
 
@@ -152,6 +154,29 @@ def quest_done(quest):
     return struct.pack("<HI", rrf.P_QUEST_DONE, quest)
 
 
+def quest_add(quest):
+    """0x0b0c: missão recebida (a espera do Lanche do Diabo nasce na entrega do lanche)."""
+    return struct.pack("<HIBII", rrf.P_QUEST_ADD, quest, 1, 0, 0) + bytes(140)
+
+
+def item_del(slot, count):
+    """0x07fa: o item do slot (da bolsa, como em items_at_start) saiu da bolsa de quem grava."""
+    return struct.pack("<HHHH", rrf.P_ITEM_DEL, 0, slot + 2, count)
+
+
+def pickup(slot, item, count):
+    """0x0b41: item entrou na bolsa de quem grava no slot."""
+    return struct.pack("<HHHI", rrf.P_PICKUP, slot + 2, count, item) + bytes(60)
+
+
+def npc_say(npc, key, *args):
+    """0x00b4: fala de NPC como chave, com os argumentos depois de bytes 0x1d (como a do Oscar no fim da Glast
+    Heim Infernal)."""
+    body = bytes([0x1C]) + key.encode("ascii") + b"".join(bytes([0x1D]) + str(a).encode("utf-8") for a in args)
+    body += bytes([0x1C, 0])
+    return struct.pack("<HHI", rrf.P_NPC_SAY, 8 + len(body), npc) + body
+
+
 def cast(src, dst, skill, ms):
     return struct.pack("<HIIhhHIIB", rrf.P_CAST2, src, dst, 0, 0, skill, 0, ms, 0)
 
@@ -217,6 +242,15 @@ def broadcast(key, value=None):
     texto que entra no anúncio, depois de um byte 0x1d)."""
     arg = b"" if value is None else bytes([0x1D]) + str(value).encode("ascii")
     body = bytes([0x1C]) + key.encode("ascii") + arg + bytes([0x1C, 0])
+    return struct.pack("<HH", rrf.P_BROADCAST, 16 + len(body)) + bytes.fromhex("ffff000090010c0000000000") + body
+
+
+def broadcast_list(key, *args, raw=None):
+    """0x01c3 com vários argumentos (\x1cCHAVE\x1dA\x1dB\x1c), como o da arena noturna: "HP! {0}, Barreira de Aura de
+    {1} estrelas!". raw = o corpo inteiro em bytes (ex.: uma chave dentro de um argumento)."""
+    body = raw if raw is not None else (bytes([0x1C]) + key.encode("ascii")
+                                        + b"".join(bytes([0x1D]) + str(a).encode("utf-8") for a in args) + bytes([0x1C]))
+    body += b"\0"
     return struct.pack("<HH", rrf.P_BROADCAST, 16 + len(body)) + bytes.fromhex("ffff000090010c0000000000") + body
 
 

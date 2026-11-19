@@ -53,6 +53,7 @@ KEEP_LABELS = [("all", "em todos os personagens"), ("char", "só neste personage
 # ao vivo, a aba à vista é refeita com dados novos no máximo a cada LIVE_MIN_S, ou a cada LIVE_COST × o que levou
 # para refazer (até LIVE_MAX_S): uma aba que leva 0,5 s numa sessão longa passa a ser refeita a cada 6 s
 LIVE_MIN_S, LIVE_COST, LIVE_MAX_S = 1.0, 12, 30.0
+COMPACT_H = 820               # janela mais baixa que isto (px a 100%): os quadros do topo viram uma linha de texto
 TONE_LABELS = {"grave": "Grave", "medio": "Médio", "agudo": "Agudo", "bem agudo": "Bem agudo"}   # tom do aviso de item
 OLD_TABS = ["resumo", "jogadores", "monstros", "dps", "buffs", "mortes", "testes", "dedo"]
 FONT_PT = dict(text=10, small=9, head=10, title=13, big=15, tile=17)
@@ -304,6 +305,27 @@ class Tiles(tk.Frame):
             for key, args in self.last.items():
                 self.put(key, *args)
 
+    def slim(self, on, min_w=None):
+        """Janela baixa: sem a linha pequena de cada quadro (e, com `min_w`, colunas mais estreitas, para caber
+        mais numa linha). Volta ao normal com on=False."""
+        on = bool(on)
+        if getattr(self, "_slim", False) == on:
+            return
+        self._slim = on
+        if not hasattr(self, "_min_w0"):
+            self._min_w0 = self.min_w
+        self.min_w = (min_w or self._min_w0) if on else self._min_w0
+        for _v, s in self.cells.values():
+            if s is None:
+                continue
+            if on:
+                s.pack_forget()
+            else:
+                s.pack(fill="x")
+        self.cols = 0                     # refaz as colunas com a largura mínima nova
+        self.width = 0
+        self.reflow()
+
     def put(self, key, value, sub="", color=None, short=None):
         self.last[key] = (value, sub, color, short)
         v, s = self.cells[key]
@@ -320,13 +342,13 @@ class Tiles(tk.Frame):
 class ScrollFrame:
     """Área com barra de rolagem vertical (a roda do mouse rola, exceto sobre tabelas)."""
 
-    def __init__(self, parent, win):
-        self.canvas = tk.Canvas(parent, bg=win.c["panel"], highlightthickness=0, bd=0)
+    def __init__(self, parent, win, bg="panel"):
+        self.canvas = tk.Canvas(parent, bg=win.c[bg], highlightthickness=0, bd=0)
         sb = ttk.Scrollbar(parent, orient="vertical", command=self.canvas.yview, style="An.Vertical.TScrollbar")
         self.canvas.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         self.canvas.pack(side="left", fill="both", expand=True)
-        self.inner = tk.Frame(self.canvas, bg=win.c["panel"])
+        self.inner = tk.Frame(self.canvas, bg=win.c[bg])
         self.item = self.canvas.create_window(0, 0, window=self.inner, anchor="nw")
         self.inner.bind("<Configure>", lambda e: self._fit())
         self.canvas.bind("<Configure>", lambda e: self._fit())
@@ -775,12 +797,34 @@ class AnalysisWindow:
         # deixava os quadros do Resumo trocando de largura sem parar (a janela nunca abria)
         self.normal_geo = None if self.open_zoomed else self.start_geo
         self.top.bind("<Configure>", self.note_geometry, add="+")
+        self.top.bind("<Configure>", self.fit_height, add="+")
         if self.open_zoomed:
             try:
                 self.top.state("zoomed")
             except tk.TclError:
                 pass
         self.bring_to_front()
+
+    def fit_height(self, e=None):
+        """Com a janela baixa, os seis quadros do topo viram uma linha de texto (sobra altura para as abas); com ela
+        alta, voltam. Mudar isso não muda o tamanho da janela (ela tem o tamanho que a pessoa deu), então não volta."""
+        if e is not None and e.widget is not self.top:
+            return
+        try:
+            compact = self.top.winfo_height() < COMPACT_H * self.dpi
+        except tk.TclError:
+            return
+        if compact == self.compact:
+            return
+        self.compact = compact
+        if compact:
+            self.head_tiles.pack_forget()
+            self.head_line.pack(fill="x", padx=16, pady=(0, 2), before=self.nb)
+        else:
+            self.head_line.pack_forget()
+            self.head_tiles.pack(fill="x", padx=14, pady=(2, 0), before=self.nb)
+        if getattr(self, "xp_tiles", None) is not None:      # a aba XP: os quadros só com o número, numa linha
+            self.xp_tiles.slim(compact, min_w=118)
 
     def note_geometry(self, e):
         """Lembra o tamanho e a posição da janela enquanto ela não está maximizada (é o que fica guardado)."""
@@ -928,6 +972,12 @@ class AnalysisWindow:
                     arrowcolor=c["fg"], bordercolor=c["btn"], lightcolor=c["btn"], darkcolor=c["btn"],
                     selectbackground=c["btn"], selectforeground=c["fg"], padding=(6, 3))
         s.map("An.TCombobox", fieldbackground=[("readonly", c["btn"])], foreground=[("readonly", c["fg"])])
+        # a caixa de mapa do simulador de XP: a pergunta principal da aba, em destaque (borda e seta na cor de destaque)
+        tint = _mix(c["btn"], c["accent"], 0.22)
+        s.configure("Map.TCombobox", fieldbackground=tint, background=tint, foreground=c["fg"], arrowcolor=c["accent"],
+                    bordercolor=c["accent"], lightcolor=c["accent"], darkcolor=c["accent"], selectbackground=tint,
+                    selectforeground=c["fg"], padding=(8, 5), arrowsize=15)
+        s.map("Map.TCombobox", fieldbackground=[("focus", _mix(c["btn"], c["accent"], 0.32))])
         self.top.option_add("*TCombobox*Listbox.background", c["btn"])
         self.top.option_add("*TCombobox*Listbox.foreground", c["fg"])
         self.top.option_add("*TCombobox*Listbox.selectBackground", c["accent"])
@@ -938,6 +988,11 @@ class AnalysisWindow:
         s.configure("An.TButton", background=c["btn"], foreground=c["fg"], borderwidth=0, font=f["text"],
                     padding=(12, 5))
         s.map("An.TButton", background=[("active", _mix(c["btn"], c["fg"], 0.1))])
+        # botão em destaque (o relatório de aprendizado): a cor de destaque do tema, texto branco
+        s.configure("AnAccent.TButton", background=c["accent"], foreground="#ffffff", borderwidth=0,
+                    font=f["head"], padding=(14, 6))
+        s.map("AnAccent.TButton", background=[("active", _mix(c["accent"], "#ffffff", 0.15))],
+              foreground=[("active", "#ffffff")])
         s.configure("An.TPanedwindow", background=c["bg"])
         s.configure("Sash", sashthickness=int(6 * self.dpi), gripcount=0, background=c["bg"])
 
@@ -992,6 +1047,9 @@ class AnalysisWindow:
             ("players", _("Jogadores")), ("events", _("Eventos de dano")), ("recorded", _("Gravação"))],
             min_w=112, bg="bg", compact=True)
         self.head_tiles.pack(fill="x", padx=14, pady=(2, 0))
+        # janela baixa (não maximizada): os quadros do topo viram uma linha só e as abas ficam com o espaço
+        self.head_line = self.label(self.top, "", "small", "muted", anchor="w")
+        self.compact = False
 
         self.nb = ttk.Notebook(self.top, style="An.TNotebook")
         self.nb.pack(fill="both", expand=True, padx=8, pady=(4, 8))
@@ -1459,8 +1517,9 @@ class AnalysisWindow:
         m.add_separator()
         m.add_command(label=_("Tirar dos favoritos") if fav else _("Favoritar (fica no topo)"),
                       command=lambda: app.toggle_fav(item))
-        m.add_command(label=_("Parar de avisar quando cair") if item in app.ping_items()
-                      else _("Avisar quando cair (som e lugar)"), command=lambda: app.toggle_ping(item))
+        on, snd = item in app.ping_items(), app.ping_sound_of(item)       # o mesmo submenu do widget: escolhe o som
+        m.add_cascade(label=(_("Aviso quando cair: %s") % (app.sound_name(snd) if snd else _("som padrão"))) if on
+                      else _("Avisar quando cair (som e lugar)"), menu=app.ping_sound_menu(m, item))
         pin = "item:%d" % item
         m.add_command(label=_("Desafixar do widget") if pin in (app.cfg.get("pins") or []) else _("Fixar no widget"),
                       command=lambda: app.toggle_pin_stat(pin))
@@ -1740,7 +1799,18 @@ class AnalysisWindow:
             ("est", _("XP estimada no recorte")), ("min", _("XP por minuto")), ("hour", _("XP por hora")),
             ("kills", _("Abates")), ("factor", _("Fator de bônus")), ("level", _("Nível")),
             ("eta", _("Até o próximo nível")), ("real", _("XP real até a próxima gravação"))], min_w=140, dense=True)
-        self.xp_tiles.pack(fill="x", padx=10, pady=(10, 0))
+        # no alto da aba, sempre à vista: como a conta é feita (abre e fecha) e o relatório de aprendizado
+        acts = tk.Frame(tab, bg=c["panel"])
+        acts.pack(fill="x", padx=10, pady=(8, 0))
+        ttk.Button(acts, text=_("Relatório de aprendizado…"), style="AnAccent.TButton",
+                   command=lambda: self.app.open_report()).pack(side="right")
+        self.label(acts, _("o que o programa aprendeu sobre XP e drops; você lê e manda se quiser"), "small", "muted",
+                   "panel").pack(side="right", padx=8)
+        self.xp_how = self.label(acts, "", "small", "accent", "panel", anchor="w", cursor="hand2")
+        self.xp_how.pack(side="left")
+        self.xp_how.bind("<Button-1>", lambda e: self.xp_toggle_how())
+        self.xp_how_open = False
+        self.xp_tiles.pack(fill="x", padx=10, pady=(6, 0))
         # mapa sem medida depois de 10 min de farm: o aviso de calibrar (só nesta aba e na aba XP do widget)
         self.xp_hint = self.label(tab, "", "text", "fg", "panel", anchor="w", justify="left", wraplength=1150)
         self.xp_hint.configure(fg="#f59e0b")
@@ -1756,13 +1826,18 @@ class AnalysisWindow:
                           "com a XP exata: cada subida de nível (a XP de cada nível é conhecida) e duas gravações "
                           "seguidas do mesmo personagem; trechos com menos de 10 min não contam."),
                    "small", "muted", "panel", anchor="w", justify="left", wraplength=1150)
-        self.xp_hint_before.pack(fill="x", padx=12, pady=(6, 2))
+        # o texto longo fica fechado (abre pelo link do alto); o aviso de calibrar e ele entram logo depois daqui
+        self.xp_anchor = tk.Frame(tab, bg=c["panel"], height=1)
+        self.xp_anchor.pack(fill="x")
+        self.xp_toggle_how(False)
         pw = ttk.PanedWindow(tab, orient="horizontal", style="An.TPanedwindow")
         pw.pack(fill="both", expand=True, pady=(4, 0))
-        left = tk.Frame(pw, bg=c["tile"])
+        left_box = tk.Frame(pw, bg=c["tile"])
         right = tk.Frame(pw, bg=c["panel"])
-        pw.add(left, weight=2)
+        pw.add(left_box, weight=2)
         pw.add(right, weight=3)
+        # a lista de bônus rola: com a janela baixa, nada fica cortado embaixo
+        left = ScrollFrame(left_box, self, bg="tile").inner
         self.section(left, _("Bônus de XP"), bg="tile")
         self.xp_mode = tk.StringVar(self.top, "auto")
         modes = tk.Frame(left, bg=c["tile"])
@@ -1846,17 +1921,13 @@ class AnalysisWindow:
         box.pack(side="left", padx=6)
         box.bind("<<ComboboxSelected>>", lambda e: self.xp_pick_manual())
         self.xp_compare = self.label(left, "", "small", "muted", "tile", anchor="w", justify="left", wraplength=440)
-        self.xp_compare.pack(fill="x", padx=10, pady=(6, 4))
-        row = tk.Frame(left, bg=c["tile"])
-        row.pack(fill="x", padx=10, pady=(0, 10))
-        ttk.Button(row, text=_("Relatório de aprendizado…"), style="An.TButton",
-                   command=lambda: self.app.open_report()).pack(side="left")
-        self.label(row, _("o que o programa aprendeu sobre XP e drops; você lê e manda se quiser"), "small", "muted",
-                   "tile").pack(side="left", padx=6)
+        self.xp_compare.pack(fill="x", padx=10, pady=(6, 10))
         self.xp_chart_title = self.section(right, _("XP ao longo do tempo"))
         self.xp_chart = tk.Canvas(right, height=int(210 * self.dpi * self.zoom), bg=c["panel"], highlightthickness=0,
                                   bd=0)
         self.xp_chart.pack(fill="x", padx=10)
+        # janela baixa: o gráfico encolhe para as tabelas de baixo (monstros, missões, simulador) terem espaço
+        right.bind("<Configure>", lambda e: self.xp_fit_chart(e.height))
         self.xp_chart.bind("<Configure>", lambda e: self.draw_xp_chart())
         self.xp_chart.bind("<Motion>", self.xp_chart_hover)
         self.xp_chart.bind("<Leave>", lambda e: self.xp_chart.delete("hover"))
@@ -1954,6 +2025,26 @@ class AnalysisWindow:
                 pass
         self._xp_after = self.top.after(600, self.xp_save)
 
+    def xp_toggle_how(self, open_=None):
+        """Abre ou fecha o texto de como a XP é estimada (fechado de início: com a janela baixa ele tomava o espaço
+        das tabelas)."""
+        self.xp_how_open = (not self.xp_how_open) if open_ is None else bool(open_)
+        if self.xp_how_open:
+            self.xp_hint_before.pack(fill="x", padx=12, pady=(4, 2), after=self.xp_anchor)
+            self.xp_how.configure(text=_("Como a XP é estimada ▾"))
+        else:
+            self.xp_hint_before.pack_forget()
+            self.xp_how.configure(text=_("Como a XP é estimada ▸"))
+
+    def xp_fit_chart(self, room):
+        """Altura do gráfico de XP pela altura que a coluna tem: até 210 px (a 100%), nunca menos que 110."""
+        want = int(max(110 * self.dpi, min(210 * self.dpi * self.zoom, room * 0.36)))
+        try:
+            if abs(int(self.xp_chart.cget("height")) - want) > 6:
+                self.xp_chart.configure(height=want)
+        except tk.TclError:
+            pass
+
     def xp_save(self):
         def number(text):
             try:
@@ -2011,7 +2102,7 @@ class AnalysisWindow:
                                           "pare a gravação no jogo e comece outra em até 1 minuto (as duas seguidas "
                                           "dão a XP exata).") % hint)
             if not self.xp_hint_shown:
-                self.xp_hint.pack(fill="x", padx=12, pady=(6, 0), before=self.xp_hint_before)
+                self.xp_hint.pack(fill="x", padx=12, pady=(6, 0), before=self.xp_anchor)
                 self.xp_hint_shown = True
         elif self.xp_hint_shown:
             self.xp_hint.pack_forget()
@@ -2047,7 +2138,7 @@ class AnalysisWindow:
                 put("eta", xp.span_text(eta), _("pode ser menos: falta a XP de %d missão(ões) entregue(s)")
                     % xp.quests_uncounted(c, cfg) + dead)
             else:
-                put("eta", xp.span_text(eta) if eta else _("já subiu"),
+                put("eta", xp.span_text(eta) if eta else _("a qualquer momento"),     # a subida não chegou ainda
                     ((_("faltam %s XP") % full(round(left))) if left else _("pela XP estimada")) + dead)
         per = (_("%s por minuto") % dec("%.1f" % est["kills_per_min"])) if est["kills_per_min"] is not None else ""
         if est["unknown"]:
@@ -2073,10 +2164,12 @@ class AnalysisWindow:
         pr = xp.progress(c, cfg)
         if pr is not None and pr["pct"] is not None:   # agora: o último ponto exato + a XP estimada desde ele
             sub = (_("%s agora (sem a XP das missões)") if xp.quests_uncounted(c, cfg)
-                   else _("%s agora (estimado)")) % dec("%.2f%%" % min(100.0, pr["pct"]))
+                   else _("%s agora (estimado)")) % dec("%.2f%%" % min(99.99, pr["pct"]))
             if pr.get("deaths") and pr.get("need"):
                 sub += " · " + xp.death_text(pr["deaths"], 100.0 * pr["lost"] / pr["need"])
             put("level", "%d" % pr["level"], sub)
+        elif pr is not None and not pr["need"]:         # nível máximo da classe: não há XP para o próximo
+            put("level", "%d" % pr["level"], _("nível máximo"))
         else:
             put("level", "%d" % ses.base_level if ses.base_level else "—",
                 dec("%.2f%%" % (100 * prog)) if prog is not None else "")
@@ -2183,7 +2276,7 @@ class AnalysisWindow:
         qrows = []
         for i, q in enumerate(est["quests"]):
             extra = round((q["mult"] - 1.0) * 100)
-            qrows.append(dict(key="d%d" % i, when=dur(q["t"]), name=quests.title(q["quest"]), known=q["xp"] is not None,
+            qrows.append(dict(key="d%d" % i, when=dur(q["t"]), name=quests.row_title(q), known=q["xp"] is not None,
                               xp_txt=full(round(q["xp"])) if q["xp"] is not None else _("fora da conta"),
                               how=(_("recompensa %s, sem bônus") % full(round(q["base"])) if not extra else
                                    _("recompensa %s × %s (manual, Kafra, Njord e Milagre)") % (
@@ -2630,6 +2723,10 @@ class AnalysisWindow:
         ht.put("players", "%d" % len(self.players_rows))
         ht.put("events", "%d" % events)
         ht.put("recorded", dur(c.now))
+        self.head_line.configure(text="   ·   ".join("%s: %s" % p for p in (
+            (_("Dano do grupo"), full(total)), (_("DPS do grupo"), full(round(gdps))), (_("Em combate"), dur(dur_ms)),
+            (_("Jogadores"), "%d" % len(self.players_rows)), (_("Eventos de dano"), "%d" % events),
+            (_("Gravação"), dur(c.now)))))
         if tab == "resumo":
             self.refresh_summary(c)
         elif tab == "jogadores":

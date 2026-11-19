@@ -204,6 +204,7 @@ CATALOG = {
                                                           "HP %d%% con la União: ¡el próximo ataque puede matarte!"),
     "Ataque básico": ("Basic attack", "Ataque básico"),
     "Monstro %d": ("Monster %d", "Monstruo %d"),
+    "Objeto escondido": ("Hidden object", "Objeto oculto"),
     # complementos dos nomes de skill da base do medidor ("Dor Máxima (ataque)") e rótulos próprios
     "ataque": ("attack", "ataque"),
     "água": ("water", "agua"),
@@ -309,6 +310,17 @@ CATALOG = {
     "Skills do chefe": ("Boss skills", "Habilidades del jefe"),
     "pela dificuldade anunciada (%d pontos)": ("from the announced difficulty (%d points)",
                                                "por la dificultad anunciada (%d puntos)"),
+    "pela fala do NPC depois do abate (dificuldade %d)": ("from the NPC's line after the kill (difficulty %d)",
+                                                          "por lo que dice el NPC después de matarlo (dificultad %d)"),
+    "deduzido pela cura do chefe: morreu com %s de vida perdida": (
+        "inferred from the boss's healing: died with %s of HP lost",
+        "deducido por la curación del jefe: murió con %s de vida perdida"),
+    "deduzido pela cura do chefe: morreu com %s de vida perdida (pode ser de %s a %s)": (
+        "inferred from the boss's healing: died with %s of HP lost (could be %s to %s)",
+        "deducido por la curación del jefe: murió con %s de vida perdida (puede ser de %s a %s)"),
+    "deduzido pela cura do chefe: %s, perdeu no máximo %s (no mínimo este nível)": (
+        "inferred from the boss's healing: %s, lost at most %s (at least this level)",
+        "deducido por la curación del jefe: %s, perdió como máximo %s (como mínimo este nivel)"),
     "Visuais": ("Costumes", "Visuales"),
     "Personagem do replay": ("Character from the replay", "Personaje de la repetición"),
     "Look:": ("Look:", "Look:"),
@@ -1250,6 +1262,11 @@ CATALOG = {
     "informado pelo servidor": ("sent by the server", "informado por el servidor"),
     "dano até morrer": ("damage until death", "daño hasta morir"),
     "da base de dados": ("from the database", "de la base de datos"),
+    "da base de dados (confere com o golpe que matou)": ("from the database (matches the killing blow)",
+                                                         "de la base de datos (coincide con el golpe que lo mató)"),
+    "anunciada pela arena (Barreira de Aura de %d estrelas)": ("announced by the arena (Aura Barrier, %d stars)",
+                                                               "anunciada por la arena (Barrera de Aura de %d "
+                                                               "estrellas)"),
     "no mínimo o dano visto": ("at least the damage seen", "como mínimo el daño visto"),
     "HP %s, %s — %s": ("HP %s, %s — %s", "HP %s, %s — %s"),
     "HP do chefe (%s)": ("Boss HP (%s)", "HP del jefe (%s)"),
@@ -1701,7 +1718,7 @@ CATALOG = {
     "ativo em %s da gravação": ("active for %s of the recording", "activo en %s de la grabación"),
     "não estava ativo": ("wasn't active", "no estaba activo"),
     "Até o próximo nível": ("Time to next level", "Hasta el próximo nivel"),
-    "já subiu": ("already up", "ya subió"),
+    "a qualquer momento": ("any moment now", "en cualquier momento"),
     "faltam %s XP": ("%s XP to go", "faltan %s XP"),
     "sem ritmo de XP no recorte": ("no XP pace in the selection", "sin ritmo de XP en la selección"),
     "pela XP estimada": ("by the estimated XP", "según la XP estimada"),
@@ -2950,4 +2967,444 @@ CATALOG.update({
     "não usou %s em nenhum momento da luta (P.ATQ e S.ATQM +50 por 10 s num aliado do grupo)": (
         "never used %s during the fight (P.ATK and S.MATK +50 for 10 s on a party member)",
         "no usó %s en ningún momento de la pelea (P.ATQ y S.ATQM +50 por 10 s en un aliado del grupo)"),
+})
+
+# Próxima versão: resumo da sessão, prévia ao vivo dos cartões, sons da pessoa, som por item, análise em janela
+# baixa, "a qualquer momento" e o simulador por mapa
+CATALOG.update({
+    "Como a XP é estimada ▾": ("How XP is estimated ▾", "Cómo se estima la XP ▾"),
+    "Como a XP é estimada ▸": ("How XP is estimated ▸", "Cómo se estima la XP ▸"),
+    "nível máximo": ("max level", "nivel máximo"),
+    "máximo": ("max", "máximo"),
+    "Aviso quando cair: %s": ("Alert when it drops: %s", "Aviso cuando caiga: %s"),
+    "som padrão": ("default sound", "sonido predeterminado"),
+    "Clique: abrir a análise · botão direito: fechar, escolher o que mostrar ou desligar": (
+        "Click: open the analysis · right-click: close, choose what to show or turn off",
+        "Clic: abrir el análisis · botón derecho: cerrar, elegir qué mostrar o desactivar"),
+    "Segundos antes": ("Seconds before", "Segundos antes"),
+    "Resumo da sessão": ("Session summary", "Resumen de la sesión"),
+    "Pasta com os seus sons…": ("Folder with your sounds…", "Carpeta con tus sonidos…"),
+    "Pasta com os seus sons (.wav ou .mp3)": ("Folder with your sounds (.wav or .mp3)",
+                                              "Carpeta con tus sonidos (.wav o .mp3)"),
+    "Pasta de sons: nenhum .wav ou .mp3 de até 10 MB nela": (
+        "Sound folder: no .wav or .mp3 of up to 10 MB in it", "Carpeta de sonidos: no hay .wav ni .mp3 de hasta 10 MB"),
+    "Não avisar": ("Don't alert", "No avisar"),
+    "Avisar com o som padrão do aviso de item": ("Alert with the default item-alert sound",
+                                                 "Avisar con el sonido predeterminado del aviso de ítem"),
+    "Abrir a análise": ("Open the analysis", "Abrir el análisis"),
+    "Escolher o que o resumo mostra…": ("Choose what the summary shows…", "Elegir qué muestra el resumen…"),
+    "Não mostrar mais o resumo da sessão": ("Don't show the session summary anymore",
+                                            "No mostrar más el resumen de la sesión"),
+    "Quantos segundos antes de %s acabar o som toca?": ("How many seconds before %s ends should the sound play?",
+                                                        "¿Cuántos segundos antes de que %s termine suena el sonido?"),
+    "Pasta de sons: %d som(ns) .wav ou .mp3": ("Sound folder: %d .wav or .mp3 sound(s)",
+                                               "Carpeta de sonidos: %d sonido(s) .wav o .mp3"),
+    "Pasta com os seus sons: %s (%d)…": ("Folder with your sounds: %s (%d)…", "Carpeta con tus sonidos: %s (%d)…"),
+    "mais %d na análise (clique)": ("%d more in the analysis (click)", "%d más en el análisis (clic)"),
+    "Mortes: nenhuma": ("Deaths: none", "Muertes: ninguna"),
+    "Mortes: %d": ("Deaths: %d", "Muertes: %d"),
+    "Gravação de %s em %s": ("%s recording on %s", "Grabación de %s en %s"),
+    "Gravação de %s": ("%s recording", "Grabación de %s"),
+    "XP: +%s do nível (%s)": ("XP: +%s of the level (%s)", "XP: +%s del nivel (%s)"),
+    "XP: +%s": ("XP: +%s", "XP: +%s"),
+    "XP por hora: %s (%s)": ("XP per hour: %s (%s)", "XP por hora: %s (%s)"),
+    "XP por hora: %s": ("XP per hour: %s", "XP por hora: %s"),
+    "Subiu de nível: %d → %d": ("Leveled up: %d → %d", "Subió de nivel: %d → %d"),
+    "Subiu %d níveis: %d → %d": ("Gained %d levels: %d → %d", "Subió %d niveles: %d → %d"),
+    "Nível %d · %s": ("Level %d · %s", "Nivel %d · %s"),
+    "Próximo nível: %s no ritmo da sessão": ("Next level: %s at this session's pace",
+                                             "Próximo nivel: %s al ritmo de la sesión"),
+    "Abates: %d (%s por minuto)": ("Kills: %d (%s per minute)", "Muertes causadas: %d (%s por minuto)"),
+    "Abates: %d": ("Kills: %d", "Muertes causadas: %d"),
+    "Missões entregues: %d": ("Quests turned in: %d", "Misiones entregadas: %d"),
+    "Seu dano: %s · DPS %s": ("Your damage: %s · DPS %s", "Tu daño: %s · DPS %s"),
+    "Maior golpe: %s": ("Biggest hit: %s", "Golpe más alto: %s"),
+    "Chefes: %s": ("Bosses: %s", "Jefes: %s"),
+    "Itens pegos: %d (%d diferentes)": ("Items picked up: %d (%d different)", "Ítems recogidos: %d (%d distintos)"),
+    "Itens pegos: %s": ("Items picked up: %s", "Ítems recogidos: %s"),
+    "Favoritos: %s": ("Favorites: %s", "Favoritos: %s"),
+    "Marcados que caíram: %s": ("Marked items that dropped: %s", "Marcados que cayeron: %s"),
+    "Milagre: %d vezes": ("Miracle: %d times", "Milagro: %d veces"),
+    "Milagre: 1 vez": ("Miracle: once", "Milagro: 1 vez"),
+    "Itens usados: %d (%s ×%d)": ("Items used: %d (%s ×%d)", "Ítems usados: %d (%s ×%d)"),
+    "Do tamanho do seu widget agora (largura, linhas, zoom e tema); o tempo corre como no jogo.": (
+        "The size of your widget right now (width, rows, zoom and theme); time runs as in the game.",
+        "Del tamaño de tu widget ahora (ancho, filas, zoom y tema); el tiempo corre como en el juego."),
+    "O que o widget já mostra sozinho. Tudo vem ligado; desmarque o que não quiser ver. Passe o mouse num cartão para "
+    "ver a prévia ao lado.": (
+        "What the widget shows on its own. Everything starts on; untick what you don't want to see. Hover a card to "
+        "see the preview on the side.",
+        "Lo que el widget ya muestra solo. Todo viene activado; desmarca lo que no quieras ver. Pasa el mouse sobre "
+        "una tarjeta para ver la vista previa al lado."),
+    "O cartão aparece quando o jogo para de gravar (o replay fica 30 s sem crescer, ou começa outra gravação), com as "
+    "informações marcadas abaixo, nesta ordem. As contas são as do widget e da análise. Clique nele para abrir a "
+    "análise; ele some sozinho quando você volta a lutar.": (
+        "The card shows up when the game stops recording (the replay doesn't grow for 30 s, or another recording "
+        "starts), with the information ticked below, in this order. The numbers are the widget's and the analysis'. "
+        "Click it to open the analysis; it goes away by itself when you fight again.",
+        "La tarjeta aparece cuando el juego deja de grabar (el replay pasa 30 s sin crecer o empieza otra grabación), "
+        "con la información marcada abajo, en este orden. Las cuentas son las del widget y del análisis. Haz clic "
+        "en ella para abrir el análisis; desaparece sola cuando vuelves a pelear."),
+    "Efeitos acompanhados": ("Tracked effects", "Efectos seguidos"),
+    "Marcar o padrão": ("Tick the default", "Marcar lo predeterminado"),
+    "Marcar tudo": ("Tick all", "Marcar todo"),
+    "Desmarcar tudo": ("Untick all", "Desmarcar todo"),
+    "Escolha um efeito para trocar o modo dele.": ("Pick an effect to change its mode.",
+                                                   "Elige un efecto para cambiar su modo."),
+    "Escolher o que ele mostra ›": ("Choose what it shows ›", "Elegir qué muestra ›"),
+    "Sons seus: escolha uma pasta com .wav ou .mp3 (até 10 MB cada; toca no máximo 10 s). Eles aparecem em \"Som\" e "
+    "no botão direito dos itens.": (
+        "Your sounds: pick a folder with .wav or .mp3 files (up to 10 MB each; plays at most 10 s). They show up "
+        "in \"Sound\" and in the items' right-click menu.",
+        "Tus sonidos: elige una carpeta con .wav o .mp3 (hasta 10 MB cada uno; suena como máximo 10 s). Aparecen en "
+        "\"Sonido\" y en el botón derecho de los ítems."),
+    "Mostrar o resumo quando a gravação parar": ("Show the summary when the recording stops",
+                                                 "Mostrar el resumen cuando la grabación se detenga"),
+    "No seu widget agora cabem %d linhas no cartão (com %d linhas no widget); o que passar disso vira \"mais N\". "
+    "Para caber mais, aumente o widget pelo canto.": (
+        "Your widget fits %d lines on the card right now (with %d widget rows); anything past that becomes \"N more\". "
+        "To fit more, make the widget bigger from its corner.",
+        "En tu widget caben ahora %d líneas en la tarjeta (con %d filas en el widget); lo que pase de eso se vuelve "
+        "\"N más\". Para que quepan más, agranda el widget por la esquina."),
+    "No seu widget agora cabem %d linhas no cartão: tudo o que está marcado aparece.": (
+        "Your widget fits %d lines on the card right now: everything ticked shows up.",
+        "En tu widget caben ahora %d líneas en la tarjeta: todo lo marcado aparece."),
+    "%s: %d som(ns). WAV ou MP3, até 10 MB cada; toca no máximo 10 s; o volume vale, o tom não.": (
+        "%s: %d sound(s). WAV or MP3, up to 10 MB each; plays at most 10 s; volume applies, tone doesn't.",
+        "%s: %d sonido(s). WAV o MP3, hasta 10 MB cada uno; suena como máximo 10 s; el volumen vale, el tono no."),
+    "Mantidas as mesmas quantidades de abates por minuto (%s por minuto), em %s a XP do recorte teria sido %s": (
+        "Keeping the same kills per minute (%s per minute), on %s the selection's XP would have been %s",
+        "Con las mismas muertes por minuto (%s por minuto), en %s la XP del recorte habría sido %s"),
+    "Mistura do mapa: os seus abates lá.": ("Map mix: your own kills there.", "Mezcla del mapa: tus propias muertes allí."),
+    "Mistura do mapa: quantos nascem de cada monstro (rAthena).": (
+        "Map mix: how many of each monster spawn (rAthena).", "Mezcla del mapa: cuántos nacen de cada monstruo (rAthena)."),
+    "Num mapa de monstros mais fortes os abates por minuto costumam cair: o simulador mantém os seus. A penalidade de "
+    "nível e o spotlight são os de cada monstro; a correção, a medida no mapa (se houver).": (
+        "On a map of stronger monsters the kills per minute usually drop: the simulator keeps yours. The level "
+        "penalty and spotlight are each monster's own; the correction is the one measured on that map (if any).",
+        "En un mapa de monstruos más fuertes las muertes por minuto suelen bajar: el simulador mantiene las tuyas. "
+        "La penalización de nivel y el spotlight son los de cada monstruo; la corrección, la medida en el mapa (si "
+        "la hay)."),
+    " (%s do que foi)": (" (%s vs. what it was)", " (%s respecto a lo que fue)"),
+    "E se fosse em outro mapa?": ("What if it were on another map?", "¿Y si fuera en otro mapa?"),
+    "Da mistura": ("Of the mix", "De la mezcla"),
+    "XP por abate": ("XP per kill", "XP por muerte"),
+    "Escolha um mapa (ou digite parte do nome): o simulador mantém os seus abates por minuto e troca cada um por um "
+    "monstro do mapa.": (
+        "Pick a map (or type part of its name): the simulator keeps your kills per minute and swaps each one for a "
+        "monster of that map.",
+        "Elige un mapa (o escribe parte del nombre): el simulador mantiene tus muertes por minuto y cambia cada una "
+        "por un monstruo del mapa."),
+    "Por hora: %s.": ("Per hour: %s.", "Por hora: %s."),
+    "%s dos monstros dele não têm XP no programa (ficaram de fora).": (
+        "%s of its monsters have no XP in the program (left out).",
+        "%s de sus monstruos no tienen XP en el programa (quedaron fuera)."),
+    "Ainda não sei os monstros de %s: o /navi do jogo não tem esse mapa e você ainda não caçou nele com o programa "
+    "aberto.": (
+        "I don't know the monsters of %s yet: the game's /navi doesn't have that map and you haven't hunted there "
+        "with the program open.",
+        "Todavía no sé los monstruos de %s: el /navi del juego no tiene ese mapa y aún no cazaste ahí con el "
+        "programa abierto."),
+    "seus abates lá: %d": ("your kills there: %d", "tus muertes allí: %d"),
+    "nv %d": ("lv %d", "nv %d"),
+    "nv %d–%d": ("lv %d–%d", "nv %d–%d"),
+    "Monstros de %s (%s)": ("Monsters of %s (%s)", "Monstruos de %s (%s)"),
+    "Mistura do mapa: quantos nascem de cada monstro (a lista do /navi do jogo).": (
+        "Map mix: how many of each monster spawn (the game's /navi list).",
+        "Mezcla del mapa: cuántos nacen de cada monstruo (la lista del /navi del juego)."),
+    "Duração e mapa": ("Duration and map", "Duración y mapa"),
+    "XP ganha": ("XP gained", "XP ganada"),
+    "Níveis que subiu": ("Levels gained", "Niveles subidos"),
+    "Nível agora": ("Level now", "Nivel ahora"),
+    "Tempo até o próximo nível": ("Time to next level", "Tiempo hasta el próximo nivel"),
+    "Seu dano e DPS": ("Your damage and DPS", "Tu daño y DPS"),
+    "Chefes derrotados": ("Bosses defeated", "Jefes derrotados"),
+    "Favoritos que caíram": ("Favorites that dropped", "Favoritos que cayeron"),
+    "Itens marcados que caíram": ("Marked items that dropped", "Ítems marcados que cayeron"),
+    "Quando a gravação para: as informações que você escolher": (
+        "When the recording stops: the information you choose", "Cuando la grabación se detiene: la información que elijas"),
+    "Contador: uma linha no pé do widget, embaixo das outras, só enquanto o efeito está ativo, com o tempo e a barra "
+    "esvaziando. Quando acaba, pisca \"acabou\" e some.": (
+        "Counter: a line at the bottom of the widget, under the others, only while the effect is active, with the "
+        "time and an emptying bar. When it ends, it flashes \"over\" and goes away.",
+        "Contador: una línea al pie del widget, debajo de las otras, solo mientras el efecto está activo, con el "
+        "tiempo y la barra vaciándose. Cuando termina, parpadea \"terminó\" y desaparece."),
+    "Faixa fixa: fica sempre à vista na faixa abaixo das abas (junto com o que mais estiver fixado, até 2), com o tempo "
+    "quando está ativo e \"—\" quando não está. Com um cartão aberto, vai para o lado do DPS.": (
+        "Pinned strip: always in view on the strip below the tabs (with whatever else is pinned, up to 2), showing "
+        "the time when active and \"—\" when not. With a card open, it moves next to the DPS.",
+        "Franja fija: siempre a la vista en la franja debajo de las pestañas (junto con lo demás fijado, hasta 2), "
+        "con el tiempo cuando está activo y \"—\" cuando no. Con una tarjeta abierta, pasa al lado del DPS."),
+    "Cartão: cobre as linhas do widget enquanto o efeito dura, com o alvo, o tempo que falta e a barra; fica amarelo "
+    "no fim e vermelho quando acaba. Outros cartões (morte, chefe, item) passam na frente.": (
+        "Card: covers the widget's rows while the effect lasts, with the target, the time left and the bar; turns "
+        "yellow near the end and red when it's over. Other cards (death, boss, item) go in front.",
+        "Tarjeta: cubre las filas del widget mientras dura el efecto, con el objetivo, el tiempo que falta y la "
+        "barra; se pone amarilla al final y roja cuando termina. Otras tarjetas (muerte, jefe, ítem) pasan delante."),
+})
+CATALOG.update({
+    "Monstros de %s": ("Monsters of %s", "Monstruos de %s"),
+    ", com os bônus trocados acima": (", with the bonuses changed above", ", con los bonos cambiados arriba"),
+})
+CATALOG.update({
+    # resumo da sessão: destaques, recordes e o mapa da caça
+    "Resumo da última sessão": ("Last session summary", "Resumen de la última sesión"),
+    "%s caçando em %s": ("%s hunting on %s", "%s cazando en %s"),
+    " e mais 1 mapa": (" and 1 more map", " y 1 mapa más"),
+    " e mais %d mapas": (" and %d more maps", " y %d mapas más"),
+    "nenhuma morte": ("no deaths", "ninguna muerte"),
+    "recorde de XP/h": ("XP/h record", "récord de XP/h"),
+    "recorde de golpe": ("hit record", "récord de golpe"),
+    "recorde de abates/min": ("kills/min record", "récord de muertes/min"),
+    "%d Milagres": ("%d Miracles", "%d Milagros"),
+    "%d mortes": ("%d deaths", "%d muertes"),
+    "%s itens pegos": ("%s items picked up", "%s ítems recogidos"),
+    "%s itens usados": ("%s items used", "%s ítems usados"),
+    "%s abates": ("%s kills", "%s muertes"),
+    "1º no dano entre %d": ("1st in damage of %d", "1º en daño entre %d"),
+    "maior golpe: %s": ("biggest hit: %s", "mayor golpe: %s"),
+    "Do nível %d ao %d em %s": ("From level %d to %d in %s", "Del nivel %d al %d en %s"),
+    "Seu maior golpe com este personagem: %s (antes, %s)": (
+        "Your biggest hit with this character: %s (before, %s)", "Tu mayor golpe con este personaje: %s (antes, %s)"),
+    "Sua melhor XP por hora em %s: %s (antes, %s)": (
+        "Your best XP per hour on %s: %s (before, %s)", "Tu mejor XP por hora en %s: %s (antes, %s)"),
+    "Seus abates por minuto em %s: %s (antes, %s)": (
+        "Your kills per minute on %s: %s (before, %s)", "Tus muertes por minuto en %s: %s (antes, %s)"),
+    "O Milagre veio %d vezes nesta gravação": (
+        "The Miracle came %d times in this recording", "El Milagro llegó %d veces en esta grabación"),
+    "Faltam só %s para o nível %d: uns %s no ritmo de hoje": (
+        "Only %s to level %d: about %s at today's pace", "Solo faltan %s para el nivel %d: unos %s al ritmo de hoy"),
+    "Faltam só %s para o nível %d": ("Only %s to level %d", "Solo faltan %s para el nivel %d"),
+    "%s sem cair nenhuma vez": ("%s without falling once", "%s sin caer ni una vez"),
+    "%s gravando": ("%s recording", "%s grabando"),
+    "%d mortes, mas você seguiu até o fim. Na próxima vai!": (
+        "%d deaths, but you kept going to the end. Next time!",
+        "%d muertes, pero seguiste hasta el final. ¡La próxima sale!"),
+    "Caiu e você pegou: %s": ("Dropped and you picked it up: %s", "Cayó y lo recogiste: %s"),
+    "Mais pegos: %s": ("Most picked up: %s", "Más recogidos: %s"),
+    "Mais usados: %s": ("Most used: %s", "Más usados: %s"),
+    "%s do dano do grupo de %d": ("%s of the damage of a party of %d", "%s del daño del grupo de %d"),
+    "%s: ninguém do grupo bateu mais forte": ("%s: nobody in the party hit harder",
+                                               "%s: nadie del grupo golpeó más fuerte"),
+    "%s por minuto, em média": ("%s per minute on average", "%s por minuto en promedio"),
+    # os destaques na aba Cartões: nome e quando aparece
+    "Sorte grande": ("Lucky drop", "Gran suerte"),
+    "Caiu uma carta (ou um item favorito) e você pegou": (
+        "A card (or a favorite item) dropped and you picked it up",
+        "Cayó una carta (o un ítem favorito) y la recogiste"),
+    "Subiu de nível": ("Level up", "Subió de nivel"),
+    "Subiu um ou mais níveis na gravação": (
+        "Gained one or more levels in the recording", "Subiste uno o más niveles en la grabación"),
+    "Recorde pessoal": ("Personal best", "Récord personal"),
+    "Bateu um recorde seu: o maior golpe do personagem, ou a XP por hora ou os abates por minuto num mapa": (
+        "Beat one of your records: the character's biggest hit, or XP per hour or kills per minute on a map",
+        "Superaste un récord tuyo: el mayor golpe del personaje, o la XP por hora o las muertes por minuto en un mapa"),
+    "Maior dano do grupo": ("Top damage in the party", "Mayor daño del grupo"),
+    "Você deu mais dano que todos do seu grupo": (
+        "You dealt more damage than everyone in your party", "Hiciste más daño que todos en tu grupo"),
+    "Escravo do Milagre": ("Slave to the Miracle", "Esclavo del Milagro"),
+    "O Milagre veio %d vezes ou mais": ("The Miracle came %d times or more", "El Milagro llegó %d veces o más"),
+    "Caçador de chefes": ("Boss hunter", "Cazador de jefes"),
+    "Derrotou um ou mais chefes": ("Defeated one or more bosses", "Derrotaste uno o más jefes"),
+    "Quase lá": ("Almost there", "Casi"),
+    "Passou de %d%% do nível: falta pouco para subir": (
+        "Past %d%% of the level: almost leveling up", "Pasaste el %d%% del nivel: falta poco para subir"),
+    "Maior golpe do grupo": ("Biggest hit in the party", "Mayor golpe del grupo"),
+    "O maior golpe da gravação no seu grupo foi seu": (
+        "The biggest hit of the recording in your party was yours", "El mayor golpe de la grabación en tu grupo fue tuyo"),
+    "Máquina de abates": ("Killing machine", "Máquina de matar"),
+    "%d abates ou mais": ("%d kills or more", "%d muertes o más"),
+    "Bolsa cheia": ("Full bag", "Bolsa llena"),
+    "Pegou %d itens ou mais": ("Picked up %d items or more", "Recogiste %d ítems o más"),
+    "Gastou bonito": ("Big spender", "Gastaste en grande"),
+    "Usou %d itens ou mais": ("Used %d items or more", "Usaste %d ítems o más"),
+    "Sem mortes": ("No deaths", "Sin muertes"),
+    "Nenhuma morte numa gravação de %d min ou mais": (
+        "No deaths in a recording of %d min or more", "Ninguna muerte en una grabación de %d min o más"),
+    "Maratona": ("Marathon", "Maratón"),
+    "Gravação de %d h ou mais": ("Recording of %d h or more", "Grabación de %d h o más"),
+    "Sessão difícil": ("Tough session", "Sesión difícil"),
+    "%d mortes ou mais: um incentivo para a próxima": (
+        "%d deaths or more: a nudge for next time", "%d muertes o más: un empujón para la próxima"),
+    # os títulos (um deles por gravação)
+    "Sorte grande!": ("Lucky drop!", "¡Gran suerte!"),
+    "Que sorte!": ("So lucky!", "¡Qué suerte!"),
+    "Olha a carta!": ("Look, a card!", "¡Mira la carta!"),
+    "Caiu um favorito!": ("A favorite dropped!", "¡Cayó un favorito!"),
+    "Subiu de nível!": ("Level up!", "¡Subiste de nivel!"),
+    "Mais um nível!": ("One more level!", "¡Un nivel más!"),
+    "Level up!": ("Level up!", "¡Level up!"),
+    "Subiu %d níveis!": ("Up %d levels!", "¡Subiste %d niveles!"),
+    "%d níveis de uma vez!": ("%d levels in one go!", "¡%d niveles de una vez!"),
+    "Recorde pessoal!": ("Personal best!", "¡Récord personal!"),
+    "Novo recorde!": ("New record!", "¡Nuevo récord!"),
+    "Maior dano do grupo!": ("Top damage in the party!", "¡Mayor daño del grupo!"),
+    "Carregou o grupo!": ("Carried the party!", "¡Cargaste al grupo!"),
+    "Ninguém bateu mais!": ("Nobody hit harder!", "¡Nadie pegó más!"),
+    "Chefe derrotado!": ("Boss down!", "¡Jefe derrotado!"),
+    "Chefe no chão!": ("Boss on the floor!", "¡Jefe al suelo!"),
+    "Caçador de chefes!": ("Boss hunter!", "¡Cazador de jefes!"),
+    "Chefes no chão!": ("Bosses down!", "¡Jefes al suelo!"),
+    "Quase lá!": ("Almost there!", "¡Casi!"),
+    "Falta pouco!": ("So close!", "¡Falta poco!"),
+    "Na reta final!": ("Home stretch!", "¡En la recta final!"),
+    "Maior golpe do grupo!": ("Biggest hit in the party!", "¡Mayor golpe del grupo!"),
+    "Golpe mais forte do grupo!": ("Strongest hit in the party!", "¡El golpe más fuerte del grupo!"),
+    "Máquina de abates!": ("Killing machine!", "¡Máquina de matar!"),
+    "Exterminador!": ("Exterminator!", "¡Exterminador!"),
+    "Bolsa cheia!": ("Full bag!", "¡Bolsa llena!"),
+    "Chuva de itens!": ("Raining items!", "¡Lluvia de ítems!"),
+    "Gastou bonito!": ("Big spender!", "¡Gastaste en grande!"),
+    "Sem economia!": ("No holding back!", "¡Sin ahorrar!"),
+    "Sessão sem mortes!": ("No-death session!", "¡Sesión sin muertes!"),
+    "Intocável!": ("Untouchable!", "¡Intocable!"),
+    "Nem um arranhão!": ("Not a scratch!", "¡Ni un rasguño!"),
+    "Maratona!": ("Marathon!", "¡Maratón!"),
+    "Que fôlego!": ("What stamina!", "¡Qué aguante!"),
+    "Dia puxado": ("Rough day", "Día pesado"),
+    # a aba Cartões: as páginas Cartões do programa e Resumo da sessão
+    "O que o widget já mostra sozinho. Tudo vem ligado: clique no ✓ (ou dê dois cliques) para desligar ou ligar. "
+    "Escolha um cartão para ver a prévia ao lado e as opções dele embaixo.": (
+        "What the widget already shows on its own. Everything starts on: click the ✓ (or double-click) to turn it "
+        "off or on. Pick a card to see the preview on the side and its options below.",
+        "Lo que el widget ya muestra solo. Todo viene activado: haz clic en el ✓ (o doble clic) para desactivar o "
+        "activar. Elige una tarjeta para ver la vista previa al lado y sus opciones abajo."),
+    "Ligado": ("On", "Activado"),
+    "O cartão aparece assim que a gravação para: quando o jogo solta o arquivo do replay, é fechado ou começa outra "
+    "gravação (ou, de reserva, com o replay 15 s sem crescer). O título é o destaque da sessão, com uma animação "
+    "curta; embaixo vêm os outros destaques e as informações marcadas. Clique nele para abrir a análise; ele some "
+    "quando você volta a lutar. Para ver de novo: menu do widget › Resumo da última sessão.": (
+        "The card shows as soon as the recording stops: when the game lets go of the replay file, is closed or "
+        "starts another recording (or, as a fallback, when the replay hasn't grown for 15 s). The title is the "
+        "session's highlight, with a short animation; below come the other highlights and the checked information. "
+        "Click it to open the analysis; it goes away when you fight again. To see it again: widget menu › Last "
+        "session summary.",
+        "La tarjeta aparece en cuanto la grabación se detiene: cuando el juego suelta el archivo del replay, se "
+        "cierra o empieza otra grabación (o, de reserva, con el replay 15 s sin crecer). El título es lo destacado "
+        "de la sesión, con una animación corta; debajo vienen los otros destacados y la información marcada. Haz "
+        "clic para abrir el análisis; desaparece cuando vuelves a pelear. Para verla de nuevo: menú del widget › "
+        "Resumen de la última sesión."),
+    "Informações": ("Information", "Información"),
+    "Destaques": ("Highlights", "Destacados"),
+    "Ligar todos": ("Turn all on", "Activar todos"),
+    "Desligar todos": ("Turn all off", "Desactivar todos"),
+    "Padrão": ("Default", "Predeterminado"),
+    "Nada": ("None", "Nada"),
+    "Todos:": ("All:", "Todos:"),
+    "Tocar um som": ("Play a sound", "Reproducir un sonido"),
+    "Cartão": ("Card", "Tarjeta"),
+    "Quando aparece": ("When it shows", "Cuándo aparece"),
+    "Quanto fica": ("How long it stays", "Cuánto dura"),
+    "Animar o destaque (confete, moedinhas, estrelas, chuva...)": (
+        "Animate the highlight (confetti, coins, stars, rain...)",
+        "Animar el destacado (confeti, monedas, estrellas, lluvia...)"),
+    "Informação": ("Information", "Información"),
+    "Exemplo": ("Example", "Ejemplo"),
+    "Destaque": ("Highlight", "Destacado"),
+    "Escolha um cartão na lista acima para ver as opções dele.": (
+        "Pick a card in the list above to see its options.",
+        "Elige una tarjeta en la lista de arriba para ver sus opciones."),
+    "com som": ("with sound", "con sonido"),
+    "até fechar (10 min no máximo)": ("until closed (10 min at most)", "hasta cerrarla (10 min como máximo)"),
+    "enquanto o HP estiver baixo": ("while HP is low", "mientras el HP esté bajo"),
+    "até voltar a gravar": ("until recording again", "hasta volver a grabar"),
+    "Informações (%d de %d)": ("Information (%d of %d)", "Información (%d de %d)"),
+    "Destaques (%d de %d)": ("Highlights (%d of %d)", "Destacados (%d de %d)"),
+    "No seu widget agora cabem %d linhas de informações no cartão (com %d linhas no widget); o que passar disso vira "
+    "\"mais N\". Para caber mais, aumente o widget pelo canto.": (
+        "Your widget fits %d lines of information on the card right now (with %d rows in the widget); anything "
+        "beyond that becomes \"N more\". To fit more, enlarge the widget from its corner.",
+        "Tu widget ahora tiene espacio para %d líneas de información en la tarjeta (con %d filas en el widget); lo "
+        "que pase de eso se vuelve \"N más\". Para que quepa más, agranda el widget desde la esquina."),
+    "No seu widget agora cabem %d linhas de informações no cartão: tudo o que está marcado aparece.": (
+        "Your widget fits %d lines of information on the card right now: everything checked shows.",
+        "Tu widget ahora tiene espacio para %d líneas de información en la tarjeta: todo lo marcado aparece."),
+})
+CATALOG.update({
+    # resumo da sessão: one shot, golpes e dano (luva de boxe) e o "Intocável" (dano sofrido sem morrer)
+    "One shot": ("One shot", "One shot"),
+    "Derrubou um chefe com um golpe só": ("Took down a boss with a single hit", "Derribaste a un jefe de un solo golpe"),
+    "ONE SHOT!": ("ONE SHOT!", "¡ONE SHOT!"),
+    "Um golpe só!": ("Just one hit!", "¡Un solo golpe!"),
+    "%s com um golpe": ("%s in one hit", "%s de un golpe"),
+    "%s caiu com um golpe só: %s": ("%s went down with a single hit: %s", "%s cayó de un solo golpe: %s"),
+    "%s de um golpe só: %s nem viu": ("%s in a single hit: %s never saw it coming", "%s de un solo golpe: %s ni lo vio"),
+    "Intocável": ("Untouchable", "Intocable"),
+    "Levou %d%% da vida em 10 s sem morrer, ou %d vezes a vida numa gravação sem nenhuma morte": (
+        "Took %d%% of your HP in 10 s without dying, or %d times your HP in a recording with no deaths",
+        "Recibiste el %d%% de tu vida en 10 s sin morir, o %d veces tu vida en una grabación sin ninguna muerte"),
+    "Inquebrável!": ("Unbreakable!", "¡Irrompible!"),
+    "Inabalável!": ("Unshakable!", "¡Inquebrantable!"),
+    "Levou %s da sua vida em %d s e não caiu": (
+        "Took %s of your HP in %d s and didn't fall", "Recibiste el %s de tu vida en %d s y no caíste"),
+    "%s da vida em %d s": ("%s of HP in %d s", "%s de vida en %d s"),
+    "Levou %s vezes a sua vida nesta gravação e não morreu nenhuma vez": (
+        "Took %s times your HP in this recording and never died", "Recibiste %s veces tu vida en esta grabación y no "
+                                                                  "moriste ni una vez"),
+    "%s vidas sem morrer": ("%s lives' worth without dying", "%s vidas sin morir"),
+})
+CATALOG.update({
+    # resumo da sessão: o primeiro cartão de dano é o maior DPS do grupo (o mesmo DPS do widget)
+    "Maior DPS do grupo": ("Top DPS in the party", "Mayor DPS del grupo"),
+    "O seu DPS foi o maior do seu grupo (o mesmo DPS do widget)": (
+        "Your DPS was the highest in your party (the same DPS the widget shows)",
+        "Tu DPS fue el mayor de tu grupo (el mismo DPS del widget)"),
+    "Maior DPS do grupo!": ("Top DPS in the party!", "¡Mayor DPS del grupo!"),
+    "1º no DPS entre %d": ("1st in DPS of %d", "1º en DPS entre %d"),
+    "DPS %s · %s do dano do grupo de %d": ("DPS %s · %s of the damage of a party of %d",
+                                          "DPS %s · %s del daño del grupo de %d"),
+})
+CATALOG.update({
+    # simulador por mapa: os monstros que no LATAM são de outra versão (nível diferente no /navi do jogo)
+    "Atenção: no LATAM estes monstros são de outra versão, e a XP deles aqui pode estar bem longe da real.": (
+        "Careful: in LATAM these monsters are a different version, and their XP here may be far from the real one.",
+        "Atención: en LATAM estos monstruos son de otra versión, y su XP aquí puede estar muy lejos de la real."),
+    "No LATAM, %d monstros deste mapa têm outro nível (%s no jogo, %s na nossa tabela de XP, que vem da versão "
+    "coreana): lá eles são de outra versão, e a XP deles pode não bater. Uma caçada sua lá, com o programa aberto, faz o "
+    "simulador usar a sua medida.": (
+        "In LATAM, %d monsters of this map have another level (%s in the game, %s in our XP table, which comes from the "
+        "Korean version): there they are a different version, and their XP may not match. One hunt of yours there, "
+        "with the program open, makes the simulator use your measurement.",
+        "En LATAM, %d monstruos de este mapa tienen otro nivel (%s en el juego, %s en nuestra tabla de XP, que viene de "
+        "la versión coreana): allí son de otra versión, y su XP puede no coincidir. Una cacería tuya allí, con el "
+        "programa abierto, hace que el simulador use tu medida."),
+})
+CATALOG.update({
+    # simulador por mapa: a Biosfera do LATAM é a versão de antes da reforma coreana de 2022 (xp.BIO_LATAM)
+    "Atenção: esta conta usa a XP da Biosfera coreana, que não é a do LATAM. Numa gravação real no bl_lava, a XP foi "
+    "só uns %s a %s disso": (
+        "Careful: this uses the Korean Biosphere XP, which is not LATAM's. In a real recording on bl_lava, the XP was "
+        "only about %s to %s of that",
+        "Atención: esta cuenta usa la XP de la Biosfera coreana, que no es la del LATAM. En una grabación real en "
+        "bl_lava, la XP fue solo de un %s a un %s de eso"),
+    ": por hora, algo entre %s e %s.": (": per hour, somewhere between %s and %s.", ": por hora, algo entre %s y %s."),
+    "Biosfera: esta conta usa a XP medida no LATAM nas suas caçadas (a nossa tabela é a coreana, de outra versão, que "
+    "rende bem mais).": (
+        "Biosphere: this uses the XP measured in LATAM on your hunts (our table is the Korean one, a different version "
+        "that gives much more).",
+        "Biosfera: esta cuenta usa la XP medida en LATAM en tus cacerías (nuestra tabla es la coreana, de otra versión, "
+        "que da mucho más)."),
+    "Por que a Biosfera é diferente: no LATAM ela é a versão de antes da reforma coreana de agosto de 2022 (%d monstros "
+    "deste mapa têm outro nível lá: %s no jogo, %s na nossa tabela; e uns 3 milhões de HP, contra 21 a 31 milhões na "
+    "coreana). A nossa tabela de XP é a de depois da reforma, que aumentou muito a XP. A faixa de %s a %s vem de uma "
+    "gravação de 1 minuto no bl_lava (17 abates) e varia com o evento do servidor daquele dia, que o replay não mostra. "
+    "Para medir de verdade: cace 10 minutos ou mais num mapa da Biosfera com o programa aberto e, ao parar, comece outra "
+    "gravação logo em seguida (as duas juntas dão a XP exata). Daí em diante o simulador usa a sua medida, que vale só "
+    "para aquele mapa: a previsão dos outros mapas não muda.": (
+        "Why the Biosphere is different: in LATAM it is the version from before the Korean rework of August 2022 (%d "
+        "monsters of this map have another level there: %s in the game, %s in our table; and about 3 million HP, "
+        "against 21 to 31 million in the Korean one). Our XP table is the post-rework one, which raised the XP a lot. "
+        "The %s to %s range comes from a 1-minute recording on bl_lava (17 kills) and varies with that day's server "
+        "event, which the replay doesn't show. To measure it for real: hunt 10 minutes or more on a Biosphere map with "
+        "the program open and, when you stop, start another recording right away (the two together give the exact "
+        "XP). From then on the simulator uses your measurement, which applies only to that map: the forecast for other "
+        "maps doesn't change.",
+        "Por qué la Biosfera es diferente: en LATAM es la versión de antes de la reforma coreana de agosto de 2022 (%d "
+        "monstruos de este mapa tienen otro nivel allí: %s en el juego, %s en nuestra tabla; y unos 3 millones de HP, "
+        "contra 21 a 31 millones en la coreana). Nuestra tabla de XP es la de después de la reforma, que aumentó mucho "
+        "la XP. El rango de %s a %s viene de una grabación de 1 minuto en bl_lava (17 muertes) y varía con el evento "
+        "del servidor de ese día, que el replay no muestra. Para medirla de verdad: caza 10 minutos o más en un mapa de "
+        "la Biosfera con el programa abierto y, al parar, empieza otra grabación enseguida (las dos juntas dan la XP "
+        "exacta). Desde entonces el simulador usa tu medida, que vale solo para ese mapa: la previsión de los demás "
+        "mapas no cambia."),
 })

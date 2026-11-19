@@ -273,6 +273,24 @@ BOSS_REGEN = {20994: 0.001}
 BOSS_MODEL = {_mob: dict(regen=(0.0054, 0.0054, 0.0105), form=21588, hidden=0.044, delay_ms=2000, room=True,
                          hidden_skills=(2218, 2219, 2220, 2221))
               for _mob in AQUILA}
+# Fantasma de Amdarais (Glast Heim Infernal, o desafio): vida por dificuldade da wiki (hazyforest, instances:ogh_cm:
+# 450M + 150M × nível, 2B no 10). Ele cura boa parte do dano que leva, então o dano visto passa muito da vida (2,3B
+# sem morrer no nível 5): a dificuldade vem da fala do Oscar depois do abate ("vocês derrotaram ... na dificuldade
+# N") ou da cura. Não há pacote de cura nem de HP: é um modelo, ajustado em 5 lutas (2 com a fala do Oscar). Num
+# abate visto do começo, ~65% de cada golpe volta ~1 s depois (fecha os níveis 1 e 2–3 conhecidos); a cura parece
+# crescer com a dificuldade (no nível 7, 93–99%), então sem abate (ou com a luta já em andamento) o programa só
+# diz "no mínimo", com a cura de 95% (`frac_max`): o mínimo assim nunca passa do nível real nas lutas conhecidas.
+# A Fantasma de Himmelmez sai no lugar dele com chance de 5% × o nível (dito por quem joga: 50% no nível 10). A wiki
+# dá a mesma fórmula de vida e a mesma regeneração para o chefe da instância; a cura igual à do Amdarais é
+# suposição até haver replay dela.
+AMDARAIS, HIMMELMEZ = 20573, 20572
+for _mob in (AMDARAIS, HIMMELMEZ):
+    BOSS_LEVELS[_mob] = [(_("Nível %d") % _n, _hp) for _n, _hp in enumerate(
+        (600000000, 750000000, 900000000, 1050000000, 1200000000, 1350000000, 1500000000, 1650000000, 1800000000,
+         2000000000), 1)]
+BOSS_HEAL = {_mob: dict(frac=0.65, frac_max=0.95, delay_ms=1000) for _mob in (AMDARAIS, HIMMELMEZ)}
+SAID_LEVEL = {AMDARAIS, HIMMELMEZ}   # chefes cuja dificuldade um NPC diz depois do abate (meter.LEVEL_SAY_KEY)
+SAID_AFTER_MS = 600000        # a fala vem depois da morte do chefe, ao pegar a recompensa
 
 
 def boss_regen(model, mob, hp):
@@ -334,6 +352,13 @@ def boss_hp(c, key, total, killed, dur_ms=0):
         if points in POINTS_LEVEL.get(mob_id, {}):
             i = POINTS_LEVEL[mob_id][points]
             return levels[i][1], levels[i][0], _("pela dificuldade anunciada (%d pontos)") % points
+        said = said_level(c, key) if mob_id in SAID_LEVEL else None
+        if said is not None and 1 <= said <= len(levels):
+            return levels[said - 1][1], levels[said - 1][0], _("pela fala do NPC depois do abate (dificuldade %d)") % said
+        heal = BOSS_HEAL.get(mob_id)
+        by_heal = _hp_by_heal(c, key, levels, heal, killed and not midway, midway) if heal else None
+        if by_heal:
+            return by_heal
         grow = 1 + BOSS_REGEN.get(mob_id, 0) * dur_ms / 1000.0      # HP + o que regenerou na luta
         when = _dur(dur_ms)
         if killed and not midway:
@@ -350,15 +375,84 @@ def boss_hp(c, key, total, killed, dur_ms=0):
         return levels[least][1], levels[least][0], _("deduzido: %s, %s de dano visto em %s de luta (no "
                                                      "mínimo este nível)") % (why, _full(total), when)
     _mob, max_hp, _boss = monster_info(c, key)
+    ann = getattr(c, "announced_hp", {}).get(key)
+    if ann:
+        return ann[0], "", _("anunciada pela arena (Barreira de Aura de %d estrelas)") % ann[1]
     if e is not None and e.max_hp and e.max_hp > 0:
         return e.max_hp, "", _("informado pelo servidor")
     if killed and midway:
         return total, "", _("no mínimo o dano visto (a gravação começou com a luta em andamento)")
+    if killed and max_hp > 0:
+        # a base confere com o abate quando ele ainda estava vivo antes do golpe que matou e morreu com ele: num
+        # abate de um golpe só (Torneio de Magia, Edda do Biolaboratório), o dano é o golpe inteiro, não a vida
+        dmgs = [h.dmg for h in c.hits if h.out and h.dst == key and h.dmg > 0]
+        if dmgs and total - dmgs[-1] < max_hp <= total:
+            return max_hp, "", _("da base de dados (confere com o golpe que matou)")
     if killed:
         return total, "", _("dano até morrer")
     if max_hp >= total:
         return max_hp, "", _("da base de dados")
     return total, "", _("no mínimo o dano visto")
+
+
+def _boss_aids(c, key):
+    return {key} | {k for k, v in c.alias.items() if v == key}
+
+
+def said_level(c, key):
+    """Dificuldade que o NPC disse depois do abate deste chefe (o Oscar, na Glast Heim Infernal), ou None. A fala só
+    está no replay se a gravação seguiu até a hora da recompensa."""
+    said = getattr(c, "said_level", None)
+    if not said:
+        return None
+    died = [c.deaths[a] for a in _boss_aids(c, key) if a in c.deaths]
+    if not died:
+        return None
+    t0 = max(died)
+    return next((n for t, n in said if t0 <= t <= t0 + SAID_AFTER_MS), None)
+
+
+def heal_lost(c, key, model, frac=None):
+    """[(t, vida perdida)] depois de cada golpe no chefe, com a cura do modelo (BOSS_HEAL: a fração `frac` de cada
+    golpe volta `delay_ms` depois): o que o chefe perdeu de verdade, e não o dano visto."""
+    aids = _boss_aids(c, key)
+    hits = sorted((h.t, h.dmg) for h in c.hits if h.out and h.dst in aids and h.dmg > 0)
+    frac, delay = model["frac"] if frac is None else frac, model["delay_ms"]
+    out, heals, k, lost = [], [], 0, 0.0
+    for t, dmg in hits:
+        while k < len(heals) and heals[k][0] <= t:
+            lost = max(0.0, lost - heals[k][1])
+            k += 1
+        lost += dmg
+        heals.append((t + delay, frac * dmg))
+        out.append((t, lost))
+    return out
+
+
+def _hp_by_heal(c, key, levels, model, killed, midway):
+    """(HP, rótulo, como) de um chefe que cura o dano que leva (BOSS_HEAL), pela vida perdida de verdade. Morto: o
+    nível em que ele morreria no último golpe (vida entre a perdida antes dele e a perdida com ele; se couberem
+    vários, o menor); vivo, ou com a luta já em andamento quando a gravação começou: o menor nível que aguenta a
+    maior perda vista com a cura mais alta (`frac_max`), um mínimo que não passa do real."""
+    lost = heal_lost(c, key, model, None if killed else model.get("frac_max"))
+    if not lost:
+        return None
+    if killed:
+        before = max((v for _t, v in lost[:-1]), default=0.0)
+        end = lost[-1][1]
+        fit = [i for i, (_n, hp) in enumerate(levels) if before < hp <= end]
+        if len(fit) > 1:
+            return levels[fit[0]][1], levels[fit[0]][0], _(
+                "deduzido pela cura do chefe: morreu com %s de vida perdida (pode ser de %s a %s)") % (
+                _full(end), levels[fit[0]][0], levels[fit[-1]][0])
+        i = fit[0] if fit else min(range(len(levels)), key=lambda k: abs(math.log(max(1.0, end) / levels[k][1])))
+        return levels[i][1], levels[i][0], _("deduzido pela cura do chefe: morreu com %s de vida perdida") % _full(end)
+    top = max(v for _t, v in lost)
+    fit = [i for i, (_n, hp) in enumerate(levels) if hp > top]
+    i = fit[0] if fit else len(levels) - 1
+    why = _("a gravação começou com a luta em andamento") if midway else _("não morreu")
+    return levels[i][1], levels[i][0], _("deduzido pela cura do chefe: %s, perdeu no máximo %s (no mínimo este "
+                                          "nível)") % (why, _full(top))
 
 
 def relieve_level(c, key):
@@ -455,6 +549,9 @@ def monster_info(c, key):
     e = c.entities.get(key)
     mob_id = e.job if e is not None else 0
     max_hp = e.max_hp if e is not None and e.max_hp and e.max_hp > 0 else 0
+    ann = getattr(c, "announced_hp", {}).get(key)
+    if ann:                        # arena noturna: a vida anunciada (o servidor manda 2 bilhões, a da base)
+        max_hp = ann[0]
     if not max_hp:
         m = meter.MONSTERS.get(str(mob_id))
         max_hp = m.get("hp", 0) if m else 0

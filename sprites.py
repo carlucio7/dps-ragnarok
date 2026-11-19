@@ -35,6 +35,7 @@ PAL = "data\\palette\\"
 LUA = "data\\luafiles514\\lua files\\datainfo\\"
 PREFIXES = (HUMAN, DORAM, ACC, ROBE, SHIELD, PAL, LUA)
 MONSTER = "data\\sprite\\몬스터\\"
+EFFECT_SPR = "data\\sprite\\이팩트\\"   # sprites de efeito (os números de dano: 숫자)
 SEX = {0: "여", 1: "남"}
 
 # grupos de ação do .act de jogador (cada grupo tem 8 direções)
@@ -1393,7 +1394,7 @@ class Bestiary:
     Só lê o que for pedido, e guarda."""
 
     def __init__(self, grf_path):
-        self.grf = Grf(grf_path, prefixes=(MONSTER, LUA, ITEM_ART, ITEM_ICON))
+        self.grf = Grf(grf_path, prefixes=(MONSTER, LUA, ITEM_ART, ITEM_ICON, EFFECT_SPR))
 
         def table(name, glob):
             data = self.grf.read(LUA + name)
@@ -1418,6 +1419,31 @@ class Bestiary:
     def has(self, mob):
         name = self.names.get(mob)
         return bool(name) and self.grf.has(MONSTER + name + ".spr")
+
+    def digits(self):
+        """Os números de dano do jogo (o sprite 숫자 dos efeitos): [(w, h, pixels)] dos dígitos 0 a 9, com o fundo
+        transparente (a cor do canto, quando ele não vem transparente); None se o jogo não tiver."""
+        if "digits" not in self.cache:
+            out = None
+            data = self.grf.read(EFFECT_SPR + "숫자.spr")
+            if data:
+                try:
+                    sp = Sprite(data)
+                    out = []
+                    for i in range(10):
+                        img = sp.image(0, i)
+                        if img is None:
+                            out = None
+                            break
+                        w, h, px = img
+                        key = px[0] if px and px[0][3] else None
+                        if key is not None:
+                            px = [(r, g, b, 0) if (r, g, b, a) == key else (r, g, b, a) for r, g, b, a in px]
+                        out.append((w, h, px))
+                except (ValueError, struct.error, IndexError):
+                    out = None
+            self.cache["digits"] = out
+        return self.cache["digits"]
 
     def has_trap(self):
         return self.grf.has(ITEM_ART + TRAP_ART)

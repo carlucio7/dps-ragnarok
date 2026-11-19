@@ -37,7 +37,6 @@ MIRACLE_SAME_PROC_MS = 5000           # dois "ligou" em menos de 5 s são o mesm
 LOOT_KILL_MS = 2000           # o item cai até isso depois de o monstro morrer
 LOOT_MATCH_MS = 1500          # sumiu do chão e entrou na bolsa de quem grava com essa diferença: foi ele que pegou          # a unidade marcadora aparece até isso antes do monstro da fase (Betelgeuse: ~0,9 s)
 DUMMY_MIN, DUMMY_MAX = 21060, 21099   # bonecos de treino
-MVP_HP = 1000000
 # (traduzidos na hora do aviso: os nomes do jogo só carregam depois do import)
 FUSION_WARNINGS = [(0.28, "HP %d%% com a União: abaixo de 20%% o próximo ataque mata"),
                    (0.22, "HP %d%% com a União: o próximo ataque pode matar!")]
@@ -206,6 +205,17 @@ DISGUISE_KEYS = {"\x1c52Z2Bw\x1c"}
 def monster_name(mob_id):
     m = MONSTERS.get(str(mob_id))
     return game_name("monster", mob_id, m.get("name") if m else None)
+
+
+_rathena_mvp = {}
+
+
+def rathena_mvp(mob_id):
+    """MVP pela base do rAthena (True/False), ou None quando o monstro não está lá (os novos da LATAM)."""
+    if not _rathena_mvp:
+        _rathena_mvp.update({int(k): bool(v.get("mvp")) for k, v in (_load("rathena.json").get("mobs") or {}).items()})
+        _rathena_mvp.setdefault(-1, False)          # já carregado, mesmo sem monstros
+    return _rathena_mvp.get(mob_id)
 
 
 STATUSES = _load("status.json")
@@ -447,6 +457,7 @@ class Stat:
 
 # chefe que muda: Mudar Propriedade (skill -> elemento novo) e Imunidade a uma propriedade (status -> elemento)
 POINTS_KEY = "gQdADQ"         # "A dificuldade atual de Betelgeuse é de {0} pontos."
+LEVEL_SAY_KEY = "qJbNDA"      # Oscar no fim da Glast Heim Infernal: "vocês derrotaram a {1} na dificuldade {0}"
 PROP_SKILLS = {162: "Water", 163: "Earth", 164: "Fire", 165: "Wind", 166: "Poison", 167: "Holy", 168: "Dark",
                169: "Ghost"}
 IMMUNE_EFST = {1016: "Neutral", 1017: "Water", 1018: "Earth", 1019: "Fire", 1020: "Wind", 1021: "Poison",
@@ -473,6 +484,12 @@ SELF_DESTRUCT = 173           # Autodestruição (os Robovacs do Aquila tiram HP
 # recarga do éter verde terminou (a defesa do núcleo some por 5 s: a quebra de defesa)
 ROOM_KEYS = {"ni0XDg": ("overload", True), "nS0XDg": ("overload", False), "my0XDg": ("defbreak", True)}
 DEF_BREAK_SAME_MS = 2000      # o mesmo anúncio repetido em menos que isso é a mesma quebra
+# Arena noturna de Geffen (torneio de magia noturno): antes de cada rodada a sala anuncia a vida do adversário e as
+# estrelas da Barreira de Aura (cada estrela = 10% de redução de dano, o Alívio dele); o adversário aparece ~8 s
+# depois. O servidor manda 2 bilhões como vida máxima deles (a da base), mas a vida atual é a de verdade.
+ARENA_HP_KEY = "lGJyDQ"       # "HP! {0}, Barreira de Aura de {1} estrelas!"
+ARENA_NEXT_MS = 30000
+SURVIVED_FRAC = 0.5           # sumiu "morto" tendo levado menos que metade da última vida mandada: saiu vivo
 HATE_SKILL = 434              # Oposição Solar, Lunar e Estelar: o nível do uso diz a casa (1, 2, 3)
 HIDE_NAMES = False            # ligado só enquanto se copia uma imagem sem nomes: cada jogador aparece como a classe
 BOSS_ALERT_HP = 50000000      # sem marca de MVP, só avisa de chefe com pelo menos isto de HP na tabela
@@ -524,6 +541,11 @@ class Combat:
         self.party = set()            # membros do grupo (quem recebe 0x080e) — você entra à parte
         self.res_log = []             # (t, aid) de cada ressurreição
         self.spawned = {}             # AID -> quando apareceu pela primeira vez (começo de cada fase de um MVP)
+        self.job_marks = {}           # monstro (id) -> marca de chefe do último pacote de aparecer (0, 1, 2)
+        self.announced_hp = {}        # AID -> (vida anunciada, estrelas da Barreira de Aura): adversário da arena
+        self._arena_next = None       # (t, vida, estrelas) anunciados para o próximo adversário que aparecer
+        self.hp_seen = {}             # AID -> [(t, vida atual)] dos pacotes de aparecer que trazem a vida
+        self.left_alive = {}          # AID -> (t, vida que sobrou): o servidor o tirou como "morto", mas estava vivo
         self.phase_marks = []         # (t, fase de verdade) quando aparece uma unidade de PHASE_MARKERS
         self._marker_job = {}         # AID da unidade marcadora -> tipo com que apareceu por último
         self.status_val = {}          # (aid, efst, início) -> val1 (nível/força do efeito)
@@ -569,6 +591,7 @@ class Combat:
         self.off_life = {}            # (t, AID) -> o off_dmg da vida que acabou nessa morte
         self.off_last = None          # quando quem grava bateu por último num monstro fora do filtro (ms do replay)
         self.boss_points = []         # (t, pontos) da dificuldade anunciada na sala do chefe (Betelgeuse)
+        self.said_level = []          # (t, dificuldade) dita por um NPC depois do abate (Oscar, Glast Heim Infernal)
         # drops: itens que caíram ou estavam no chão, o que entrou na bolsa de quem grava e prêmios de MVP
         self.ground = {}              # id do item no chão -> drop (enquanto está no chão)
         self.drop_ids = {}            # id do item no chão -> drop (todos, para saber quem pegou)
@@ -600,6 +623,8 @@ class Combat:
         self.level_ups = []           # (t, nível novo) de quem grava
         self.hate_marks = []          # (t, casa 0 Solar / 1 Lunar / 2 Estelar, id do monstro, já estava marcado?)
         self.quests_done = []         # (t, id da missão) concluída ou entregue por quem grava
+        self.quests_added = []        # (t, id da missão) recebida por quem grava (a espera do lanche nasce na entrega)
+        self.bag_out = []             # (t, item, quantidade) que saiu da bolsa de quem grava (entregue a NPC, gasto)
         # áreas de suporte no chão (Vulcão, Insígnias, Proteger Terreno, Prisão de Teia): dict(t, seen, src, skill,
         # level, units=[[início, fim ou None, x, y, raio]]), uma por lançamento
         self.areas = []
@@ -657,7 +682,8 @@ class Combat:
         disfarce conhecido, o mesmo nome em monstros diferentes, ou um rótulo de script sem nada antes do "#"."""
         name = e.name or ""
         return (name in DISGUISE_KEYS or len(self.name_jobs.get(name, ())) > 1
-                or (name.startswith("#") and not name.startswith("\x1c")))
+                or (name.startswith("#") and not name.startswith("\x1c"))
+                or any("가" <= ch <= "힣" for ch in name))     # em coreano: o servidor não traduziu
 
     def mob_name(self, e):
         """Nome para mostrar de um monstro: o que o jogo mostra (o nome mandado, sem o "#..." dos rótulos de script)
@@ -669,7 +695,12 @@ class Combat:
         name = clientdata.NAMES.resolve(e.name) if e.name else None
         if name and "#" in name:
             name = name.split("#", 1)[0].strip()             # o jogo esconde o que vem depois do "#"
-        return name or monster_name(e.job) or _("Monstro %d") % e.job
+        name = name or monster_name(e.job)
+        if not name and (e.name or "").startswith("#"):
+            # só um rótulo de script ("#bb5m1_1"): objeto escondido da instância, sem nome no jogo (HIDDEN_MOB8 no
+            # Edda do Biolaboratório, que leva golpes de 1 de dano e some quando a etapa termina)
+            return _("Objeto escondido")
+        return name or _("Monstro %d") % e.job
 
     def owner_of(self, aid):
         o = self.owner.get(aid)
@@ -746,15 +777,46 @@ class Combat:
         return "#%d" % aid
 
     def is_mvp(self, aid):
-        """MVP (marca 2 no spawn), boneco de treino, ou chefe em fases/HP de MVP na tabela."""
+        """MVP: marca 2 no pacote de aparecer, chefe em fases ou boneco de treino. A marca do servidor manda: um
+        monstro marcado como comum (0) ou chefe menor (1) não é MVP, por mais vida que tenha (os comuns de hoje
+        passam de 1 milhão: Torre do Relógio, Edda do Biolaboratório, Torneio de Magia). Sem marca (já estava na
+        tela quando a gravação começou): a marca do mesmo monstro em outro pacote, a base do rAthena ou vida de
+        chefe na tabela."""
         aid = self.alias.get(aid, aid)
         e = self.entities.get(aid)
         if e is None:
             return False
         if e.boss == 2 or e.job in PHASED_BOSSES or DUMMY_MIN <= e.job <= DUMMY_MAX:
             return True
-        m = MONSTERS.get(str(e.job))
-        return e.boss != 1 and bool(m) and (m.get("hp") or 0) >= MVP_HP   # visível desde o início (sem marca)
+        if e.boss is not None:
+            return False
+        mark = self.job_marks.get(e.job)
+        if mark is not None:
+            return mark == 2
+        known = rathena_mvp(e.job)
+        if known is not None:
+            return known
+        m = MONSTERS.get(str(e.job)) or {}
+        return (m.get("hp") or 0) >= BOSS_ALERT_HP
+
+    def survived(self, aid):
+        """Vida que sobrou (ou None) de um monstro que o servidor tirou como "morto": quando ele mandou a vida atual
+        (pacote de aparecer, como os adversários da arena noturna) e o dano visto depois disso não chega à metade
+        dela, ele não morreu; o tempo da rodada acabou. Na arena o Bruto saiu com ~356 mi depois de 1 minuto.
+        Só vale para os adversários anunciados pela arena: em outros mapas muitos monstros mandam a vida e morrem de
+        dano que a gravação não mostra (outros jogadores, a autodestruição dos Robovacs, scripts), varrido em 2026-11-18
+        nos replays da pasta."""
+        seen = self.hp_seen.get(aid)
+        if not seen or aid not in self.announced_hp:
+            return None
+        t0, hp = seen[-1]
+        dmg = 0
+        for h in reversed(self.hits):
+            if h.t < t0:
+                break
+            if h.out and h.dst_raw == aid:
+                dmg += h.dmg
+        return hp - dmg if dmg < hp * SURVIVED_FRAC else None
 
     def counts_target(self, aid):
         return self.targets != "mvp" or self.is_mvp(aid)
@@ -796,7 +858,16 @@ class Combat:
         elif pid in rrf.SPAWN_PACKETS:
             e = rrf.parse_spawn(pid, d)
             if e is not None:
+                first = e.aid not in self.spawned
                 self.spawned.setdefault(e.aid, t)
+                if e.kind == "mob":
+                    if first and self._arena_next is not None and not self.is_friendly(e.aid):
+                        at, hp, stars = self._arena_next
+                        if t - at <= ARENA_NEXT_MS:
+                            self.announced_hp[e.aid] = (hp, stars)
+                        self._arena_next = None
+                    if e.hp > 0 and e.max_hp > 0:
+                        self.hp_seen.setdefault(e.aid, []).append((t, e.hp))
                 if e.job in MARKER_JOBS and self._marker_job.get(e.aid) != e.job:
                     self._marker_job[e.aid] = e.job          # cada passo dela repete o pacote: conta só a troca
                     if e.job in PHASE_MARKERS:
@@ -808,6 +879,7 @@ class Combat:
                         self.add_pos(e.aid, t, mv[0], mv[1])
                 if e.kind == "mob":
                     self._last_xy[e.aid] = (pid, d)
+                    self.job_marks[e.job] = e.boss
                     if e.boss:
                         self.see(e.aid, t, True)
                 self.add_entity(e)
@@ -912,7 +984,12 @@ class Combat:
                     self.see(aid, t, False)
                 if d[6] == 1 or (e is not None and e.kind == "mob"):
                     self.end_statuses(aid, t)          # monstro morto/sumido perde os debuffs
-                if d[6] == 1:
+                left = self.survived(aid) if d[6] == 1 and e is not None and e.kind == "mob" else None
+                if left is not None:
+                    # o tempo da rodada da arena acabou: o servidor tira o adversário como "morto", mas ele saiu vivo
+                    self.left_alive[aid] = (t, left)
+                    self.version += 1
+                elif d[6] == 1:
                     self.dead.add(aid)
                     self.deaths[aid] = t
                     self.death_log.append((t, aid))
@@ -935,6 +1012,9 @@ class Combat:
             for key in rrf.broadcast_keys(d):
                 if key in ROOM_KEYS:
                     self.on_room(t, *ROOM_KEYS[key])
+            for key, args in rrf.broadcast_arglist(d):
+                if key == ARENA_HP_KEY and len(args) >= 2 and args[0].isdigit() and args[1].isdigit():
+                    self._arena_next = (t, int(args[0]), int(args[1]))
             for key, value in rrf.broadcast_args(d):
                 if key == POINTS_KEY and value.isdigit():
                     self.boss_points.append((t, int(value)))
@@ -962,7 +1042,25 @@ class Combat:
             r = rrf.parse_pickup(d)
             if r is not None:
                 self.add_pickup(t, r[0], r[1])
+                slot = struct.unpack_from("<H", d, 2)[0] - 2
+                old = self.bag.get(slot)
+                if old is None or old.item_id != r[0]:     # a bolsa segue certa para saber o que sai dela depois
+                    self.bag[slot] = rrf.Item(slot, r[0], r[2])
                 self.version += 1
+        elif pid == rrf.P_ITEM_DEL:
+            r = rrf.parse_item_del(d)
+            if r is not None:
+                it = self.bag.get(r[0])
+                self.bag_out.append((t, it.item_id if it is not None else 0, r[1]))
+        elif pid == rrf.P_QUEST_ADD:
+            if len(d) >= 6:
+                self.quests_added.append((t, struct.unpack_from("<I", d, 2)[0]))
+                self.version += 1
+        elif pid == rrf.P_NPC_SAY:
+            for key, args in rrf.npc_say_args(d):
+                if key == LEVEL_SAY_KEY and args and args[0].isdigit():
+                    self.said_level.append((t, int(args[0])))
+                    self.version += 1
         elif pid == rrf.P_MVP_ITEM:
             if len(d) >= 6:
                 self.mvp_items.append((t, struct.unpack_from("<I", d, 2)[0]))
@@ -1099,6 +1197,8 @@ class Combat:
         aid = self.alias.get(aid, aid)
         e = self.entities.get(aid)
         if e is None or e.kind != "mob" or self.is_friendly(aid) or DUMMY_MIN <= e.job <= DUMMY_MAX:
+            return False
+        if e.boss == 0 and e.job not in PHASED_BOSSES:      # o servidor diz que é um monstro comum
             return False
         m = MONSTERS.get(str(e.job)) or {}
         return e.boss == 2 or e.job in PHASED_BOSSES or (m.get("hp") or 0) >= BOSS_ALERT_HP
@@ -1664,6 +1764,10 @@ class Combat:
             self.recent.append((x.time, x.damage))
 
     def reset(self):
+        if self.death_log:
+            # os abates (e mortes) de antes somem: a XP exata de um trecho que começou antes daqui não se compara
+            # mais com os abates dele (xp.level_segments)
+            self.reset_t = self.now
         self.current = self.total = None
         self.history = []
         self.closed_ms = 0
@@ -1799,6 +1903,7 @@ class Combat:
         return enc is self.current and self.active()
 
     was_reset = False
+    reset_t = None          # instante do último Zerar que apagou abates
 
     # --- leitura para a interface ------------------------------------
 
@@ -2018,6 +2123,55 @@ def game_running():
     except Exception:  # noqa: BLE001 - o lembrete é um extra
         return False
     return False
+
+
+_RM = None
+
+
+def file_holders(path):
+    """Os programas (nome do .exe, em minúsculas) com o arquivo aberto agora, fora este; None se não deu para saber.
+    Vem do Restart Manager do Windows, que só consulta a lista de arquivos abertos de cada processo: o arquivo não é
+    aberto, então não atrapalha o jogo que está gravando. Uns 10 ms."""
+    global _RM
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes as wt
+        if _RM is None:
+            class Unique(ctypes.Structure):
+                _fields_ = [("pid", wt.DWORD), ("started", wt.FILETIME)]
+
+            class Info(ctypes.Structure):
+                _fields_ = [("proc", Unique), ("app", ctypes.c_wchar * 256), ("service", ctypes.c_wchar * 64),
+                            ("kind", ctypes.c_int), ("status", ctypes.c_ulong), ("session", wt.DWORD),
+                            ("restartable", wt.BOOL)]
+            _RM = (ctypes.WinDLL("rstrtmgr"), Info)
+        rm, Info = _RM
+        handle = wt.DWORD()
+        key = ctypes.create_unicode_buffer(64)
+        if rm.RmStartSession(ctypes.byref(handle), 0, key) != 0:
+            return None
+        try:
+            files = (ctypes.c_wchar_p * 1)(os.path.abspath(path))
+            if rm.RmRegisterResources(handle, 1, files, 0, None, 0, None) != 0:
+                return None
+            need, n, why = ctypes.c_uint(0), ctypes.c_uint(16), wt.DWORD()
+            info = (Info * 16)()
+            if rm.RmGetList(handle, ctypes.byref(need), ctypes.byref(n), info, ctypes.byref(why)) not in (0, 234):
+                return None
+            me = os.getpid()
+            names = set()
+            for i in range(min(n.value, 16)):
+                if info[i].proc.pid != me:
+                    names.add((info[i].app or "?").lower())
+            if need.value > 16:                      # mais de 16 programas com o arquivo: alguém está com ele
+                names.add("?")
+            return names
+        finally:
+            rm.RmEndSession(handle)
+    except Exception:  # noqa: BLE001 - quem não tiver o Restart Manager fica com a espera de 15 s
+        return None
 
 
 def find_replay_dirs():

@@ -12,12 +12,12 @@ Medidor de DPS e análise de replays para Ragnarok Online (ROLatam).
 
 Um widget que mostra o seu DPS e o ranking do grupo em tempo real, lendo a gravação de replay do próprio jogo.
 
-- **Widget:** DPS ao vivo, ranking do grupo, skills, alvos, drops e XP. Fixe até duas informações para ver em qualquer aba. Ele avisa quando o chefe muda (propriedade, tamanho, Dor Máxima, defesa), mostra o que te matou e resume a luta quando o chefe morre.
-- **Cartões e efeitos:** ligue ou desligue cada cartão do widget e acompanhe qualquer buff, debuff ou efeito de chão (Garra Sombria, Cometa, Pólen...) com o tempo que falta.
+- **Widget:** DPS ao vivo, ranking do grupo, skills, alvos, drops e XP. Fixe até duas informações para ver em qualquer aba. Ele avisa quando o chefe muda (propriedade, tamanho, Dor Máxima, defesa), mostra o que te matou, resume a luta quando o chefe morre e a sessão quando a gravação para.
+- **Cartões e efeitos:** ligue ou desligue cada cartão do widget e acompanhe qualquer buff, debuff ou efeito de chão (Garra Sombria, Cometa, Pólen...) com o tempo que falta, com prévia ao vivo e sons seus (.wav ou .mp3).
 - **Análise completa:** resumo, jogadores, equipamento com os ícones dos itens, monstros animados, drops, XP, buffs, mortes, testes de build lado a lado e visuais.
 - **Linha do tempo:** cada luta contra chefe com DPS, HP do chefe, a força de cada golpe, Lex Aeterna, debuffs, mortes e skills.
 - **Dedo Duro:** o que faltou nas lutas contra chefe (buffs, debuffs, Garra Sombria, Oposição, Vulcão e Insígnia, mortes).
-- **XP:** estimativa por minuto e por hora, tempo até o próximo nível com as missões entregues, progresso das caças, comparação entre gravações e um simulador de bônus. O modo automático se corrige com a XP exata, e o relatório de aprendizado mostra o que o programa aprendeu.
+- **XP:** estimativa por minuto e por hora, tempo até o próximo nível com as missões entregues, progresso das caças, comparação entre gravações e um simulador de bônus e de outros mapas. O modo automático se corrige com a XP exata, e o relatório de aprendizado mostra o que o programa aprendeu.
 - **Copiar imagem:** o widget e a análise viram imagem pronta para colar no Discord, com a opção de esconder os nomes.
 - **Drops:** coloridos por tipo, com favoritos e itens ocultos. Marque um item para ouvir um som quando ele cair e ver onde caiu, com o /navi a um clique.
 
@@ -44,12 +44,12 @@ Um widget que mostra o seu DPS e o ranking do grupo em tempo real, lendo a grava
 
 A widget that shows your DPS and the party ranking in real time by reading the game's own replay recording.
 
-- **Widget:** live DPS, party ranking, skills, targets, drops and XP. Pin up to two pieces of info to see on any tab. It warns when the boss changes (property, size, Max Pain, defense), shows what killed you and sums up the fight when the boss dies.
-- **Cards and effects:** turn each widget card on or off and track any buff, debuff or ground effect (Dark Claw, Magic Poison, All Bloom...) with the time left.
+- **Widget:** live DPS, party ranking, skills, targets, drops and XP. Pin up to two pieces of info to see on any tab. It warns when the boss changes (property, size, Max Pain, defense), shows what killed you, sums up the fight when the boss dies and the session when the recording stops.
+- **Cards and effects:** turn each widget card on or off and track any buff, debuff or ground effect (Dark Claw, Magic Poison, All Bloom...) with the time left, with a live preview and your own sounds (.wav or .mp3).
 - **Full analysis:** summary, players, equipment with item icons, animated monsters, drops, XP, buffs, deaths, build tests side by side and costumes.
 - **Timeline:** each boss fight with DPS, boss HP, the strength of each hit, Lex Aeterna, debuffs, deaths and skills.
 - **Snitch:** what was missing in boss fights (buffs, debuffs, Dark Claw, Opposition, Volcano and Insignia, deaths).
-- **XP:** estimate per minute and per hour, time to the next level with turned-in quests, hunt progress, comparison between recordings and a bonus simulator. The automatic mode corrects itself with the exact XP, and the learning report shows what the program learned.
+- **XP:** estimate per minute and per hour, time to the next level with turned-in quests, hunt progress, comparison between recordings and a simulator for other bonuses and maps. The automatic mode corrects itself with the exact XP, and the learning report shows what the program learned.
 - **Copy image:** the widget and the analysis become an image ready to paste on Discord, with the option to hide names.
 - **Drops:** colored by type, with favorites and hidden items. Mark an item to hear a sound when it drops and see where it fell, with the /navi one click away.
 
@@ -63,12 +63,12 @@ A widget that shows your DPS and the party ranking in real time by reading the g
 
 Un widget que muestra tu DPS y el ranking del grupo en tiempo real, leyendo la grabación de replay del propio juego.
 
-- **Widget:** DPS en vivo, ranking del grupo, habilidades, objetivos, drops y XP. Fija hasta dos datos para verlos en cualquier pestaña. Avisa cuando el jefe cambia (propiedad, tamaño, Dolor Máximo, defensa), muestra qué te mató y resume la pelea cuando el jefe muere.
-- **Tarjetas y efectos:** activa o desactiva cada tarjeta del widget y sigue cualquier buff, debuff o efecto de suelo (Garra Tenebrosa, Veneno mágico, Polen...) con el tiempo que falta.
+- **Widget:** DPS en vivo, ranking del grupo, habilidades, objetivos, drops y XP. Fija hasta dos datos para verlos en cualquier pestaña. Avisa cuando el jefe cambia (propiedad, tamaño, Dolor Máximo, defensa), muestra qué te mató, resume la pelea cuando el jefe muere y la sesión cuando se detiene la grabación.
+- **Tarjetas y efectos:** activa o desactiva cada tarjeta del widget y sigue cualquier buff, debuff o efecto de suelo (Garra Tenebrosa, Veneno mágico, Polen...) con el tiempo que falta, con vista previa en vivo y tus propios sonidos (.wav o .mp3).
 - **Análisis completo:** resumen, jugadores, equipo con los íconos de los objetos, monstruos animados, drops, XP, buffs, muertes, pruebas de build lado a lado y visuales.
 - **Línea de tiempo:** cada pelea contra jefe con DPS, HP del jefe, la fuerza de cada golpe, Lex Aeterna, debuffs, muertes y habilidades.
 - **Soplón:** qué faltó en las peleas contra jefes (buffs, debuffs, Garra Tenebrosa, Oposición, Volcán e Insignia, muertes).
-- **XP:** estimación por minuto y por hora, tiempo hasta el próximo nivel con las misiones entregadas, progreso de las cazas, comparación entre grabaciones y un simulador de bonos. El modo automático se corrige con la XP exacta, y el informe de aprendizaje muestra lo que el programa aprendió.
+- **XP:** estimación por minuto y por hora, tiempo hasta el próximo nivel con las misiones entregadas, progreso de las cazas, comparación entre grabaciones y un simulador de bonos y de otros mapas. El modo automático se corrige con la XP exacta, y el informe de aprendizaje muestra lo que el programa aprendió.
 - **Copiar imagen:** el widget y el análisis se convierten en una imagen lista para pegar en Discord, con la opción de ocultar los nombres.
 - **Drops:** con colores por tipo, favoritos y objetos ocultos. Marca un objeto para oír un sonido cuando caiga y ver dónde cayó, con el /navi a un clic.
 

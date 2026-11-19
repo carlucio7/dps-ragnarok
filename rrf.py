@@ -204,14 +204,29 @@ class Header:
         return []
 
 
+def _korean(text):
+    """Só sílabas do coreano (pelo menos duas), espaços, dígitos e pontuação: nome em coreano que o servidor não
+    traduziu. Nome em português sempre tem letra latina, então nunca passa por aqui."""
+    hangul = sum(1 for ch in text if "가" <= ch <= "힣")
+    return hangul >= 2 and all("가" <= ch <= "힣" or (ch < "\x80" and not ch.isalpha()) for ch in text)
+
+
 def decode_name(raw):
     raw = raw.split(b"\0", 1)[0]
-    for enc in ("utf-8", "cp1252"):
-        try:
-            return raw.decode(enc)
-        except UnicodeDecodeError:
-            pass
-    return raw.decode("latin-1")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    try:                       # coreano (cp949) sem tradução: "알퐁스 쥬니어#0" (Alfonso Jr. na arena de Geffen)
+        text = raw.decode("cp949")
+        if _korean(text):
+            return text
+    except UnicodeDecodeError:
+        pass
+    try:
+        return raw.decode("cp1252")
+    except UnicodeDecodeError:
+        return raw.decode("latin-1")
 
 
 def entity_name(raw):
@@ -367,6 +382,9 @@ P_OPTION = 0x0229          # opções visuais de uma unidade (montaria, falcão,
 P_STARSKILL = 0x020E       # ZC_STARSKILL: alvo da Oposição (monstro no byte 26, casa 0-2 no 30, resultado no 31)
 P_QUEST_DONE = 0x02B4      # ZC_DEL_QUEST: missão concluída ou entregue (id no byte 2)
 P_QUEST_HUNT = 0x0AFE      # ZC_UPDATE_MISSION_HUNT: progresso de caça das missões (a cada abate que conta)
+P_QUEST_ADD = 0x0B0C       # missão recebida (id no byte 2); a espera do Lanche do Diabo nasce na entrega do lanche
+P_ITEM_DEL = 0x07FA        # ZC_DELETE_ITEM_FROM_BODY: item saiu da bolsa (entregue a um NPC, gasto): tipo, índice, qtd.
+P_NPC_SAY = 0x00B4         # ZC_SAY_DIALOG: fala de NPC (nas instâncias vem como chave, \x1cCHAVE\x1dARG\x1c)
 P_SPRITE = 0x01B0          # ZC_SPRITE_CHANGE: monstro trocou de forma (ex.: Aquila em sobrecarga = 21588)
 P_EFFECT = 0x01F3          # efeito especial numa unidade
 P_RESURRECT = 0x0148       # jogador ressuscitou
@@ -411,7 +429,7 @@ STATUS_PACKETS = {P_STATUS, P_STATUS2, P_STATUS3}
 WANTED = STAT_PACKETS | DAMAGE_PACKETS | SPAWN_PACKETS | SKILL_USE_PACKETS | CAST_PACKETS | STATUS_PACKETS | POSITION_PACKETS | ITEM_PACKETS | {
     P_VANISH, P_MAPMOVE, P_GROUND_UNIT, P_HP_INFO, 0x010F, P_PARAM, P_PARTY_HP, P_WEAR, P_TAKEOFF, P_ITEM_ADD,
     P_OPTION, P_EFFECT, P_RESURRECT, P_SPRITE, P_STARSKILL, P_QUEST_DONE, P_QUEST_HUNT, P_GROUND_GONE,
-    P_GROUND_SKILL, P_BROADCAST}
+    P_GROUND_SKILL, P_BROADCAST, P_QUEST_ADD, P_ITEM_DEL, P_NPC_SAY}
 
 
 def posdir(b):
@@ -458,6 +476,19 @@ def broadcast_args(d):
     """[(chave, valor)] dos anúncios que levam um número ou texto dentro (\x1cCHAVE\x1dVALOR\x1c), como "A
     dificuldade atual de Betelgeuse é de {0} pontos."."""
     return [(k.decode("ascii"), v.decode("ascii", "replace")) for k, v in _BROADCAST_ARG.findall(d[4:])]
+
+
+_NESTED_KEY = re.compile(rb"\x1c[A-Za-z0-9+/]{2,8}\x1c")
+_ARG_LIST = re.compile(rb"\x1c([A-Za-z0-9+/]{2,8})\x1d([^\x1c]*)\x1c")
+
+
+def broadcast_arglist(d):
+    """[(chave, [argumentos])] dos anúncios com um ou mais argumentos (\x1cCHAVE\x1dA\x1dB\x1c), como o da arena
+    noturna de Geffen: "HP! {0}, Barreira de Aura de {1} estrelas!". Uma chave dentro de um argumento (o título em
+    "{0}! {1}!!!!") vira um argumento vazio."""
+    body = _NESTED_KEY.sub(b"", d[4:])
+    return [(k.decode("ascii"), [a.decode("utf-8", "replace") for a in v.split(b"\x1d")])
+            for k, v in _ARG_LIST.findall(body)]
 
 
 SP_HP, SP_MAXHP = 5, 6
@@ -522,7 +553,9 @@ def parse_damage(t, pid, d):
 class Entity:
     __slots__ = ("aid", "gid", "kind", "job", "name", "max_hp", "hp", "boss", "option")
 
-    def __init__(self, aid, gid, kind, job, name, max_hp=0, hp=0, boss=False, option=0):
+    def __init__(self, aid, gid, kind, job, name, max_hp=0, hp=0, boss=None, option=0):
+        # boss: a marca do pacote de aparecer (0 comum, 1 chefe, 2 MVP); None = não se sabe (o 0x0857 das entidades
+        # já na tela no começo da gravação não traz a marca)
         self.aid, self.gid, self.kind, self.job = aid, gid, kind, job
         self.name, self.max_hp, self.hp, self.boss = name, max_hp, hp, boss
         self.option = option
@@ -828,6 +861,27 @@ def parse_pickup_action(pid, d):
         return struct.unpack_from("<II", d, 2)
     except (KeyError, IndexError, struct.error):
         return None
+
+
+def parse_item_del(d):
+    """0x07fa: (slot da bolsa, quantidade) do item que saiu da bolsa de quem grava (entregue a um NPC, gasto)."""
+    try:
+        _kind, index, count = struct.unpack_from("<HHH", d, 2)
+        return index - 2, count
+    except struct.error:
+        return None
+
+
+def npc_say_args(d):
+    """[(chave, [argumentos])] das falas de NPC que vêm como chave com argumentos (\x1cCHAVE\x1dA\x1dB\x1c), como
+    a do Oscar no fim da Glast Heim Infernal: "vocês derrotaram a {1} na dificuldade {0}"."""
+    out = []
+    for m in _SAY_ARGS.finditer(d[8:]):
+        out.append((m.group(1).decode("ascii"), [a.decode("utf-8", "replace") for a in m.group(2).split(b"\x1d")]))
+    return out
+
+
+_SAY_ARGS = re.compile(rb"\x1c([A-Za-z0-9+/]{2,8})\x1d([^\x1c]*)")
 
 
 def parse_pickup(d):

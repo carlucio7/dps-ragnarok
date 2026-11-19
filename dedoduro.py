@@ -63,7 +63,16 @@ ELEMENT_PT = {"Neutral": _("Neutro"), "Water": _("Água"), "Earth": _("Terra"), 
 BOSS_ELEMENTS = {20994: ("Neutral", 2),           # Betelgeuse
                  21531: ("Neutral", 3), 21588: ("Neutral", 1),   # Aquila e a forma de sobrecarga
                  20573: ("Dark", 3),             # Fantasma de Amdarais
+                 20572: ("Holy", 3),             # Fantasma de Himmelmez (vira Sombrio abaixo de 15% do HP)
+                 20536: ("Fire", 2),             # Espadachim Anônima (Edda do Biolaboratório; Divine Pride)
                  21533: ("Poison", 4)}           # Juncea de Simulação
+# Monstros comuns que o rAthena não tem (Divine Pride): a aba Monstros mostra a propriedade deles
+MOB_ELEMENTS = {20537: ("Fire", 2), 20538: ("Holy", 2), 20539: ("Fire", 3), 20540: ("Poison", 4),   # Edda do
+                20541: ("Neutral", 2), 20542: ("Neutral", 2), 20562: ("Neutral", 1)}               # Biolaboratório
+# arena noturna de Geffen (MD_N_ARENA_*, Fei Kanabian, Alphonse, Fenrir): Neutro 1, menos os de Fantasma e Terra
+MOB_ELEMENTS.update({j: ("Neutral", 1) for j in range(20856, 20873)})
+MOB_ELEMENTS.update({20863: ("Ghost", 2), 20869: ("Ghost", 2), 20870: ("Ghost", 2), 20871: ("Earth", 2),
+                     20872: ("Ghost", 2)})
 # Status que trocam o elemento da arma (encantamentos, conversores e poções de ataque elemental)
 ENDOWS = {90: "Fire", 91: "Water", 92: "Wind", 93: "Earth", 97: "Undead", 146: "Dark", 148: "Ghost", 17: "Holy",
           6: "Poison", 897: "Neutral", 898: "Water", 899: "Earth", 900: "Fire", 901: "Wind", 902: "Poison",
@@ -314,6 +323,8 @@ def boss_element(c, key):
     mob = e.job if e is not None else 0
     if mob in BOSS_ELEMENTS:
         return BOSS_ELEMENTS[mob]
+    if mob in MOB_ELEMENTS:
+        return MOB_ELEMENTS[mob]
     m = MOB_DB.get(str(mob))
     return (m["e"], m["l"]) if m else None
 
@@ -347,7 +358,8 @@ def boss_fights(c, rng=None):
             continue
         dummy = meter.DUMMY_MIN <= e.job <= meter.DUMMY_MAX
         mvp = c.is_mvp(r["key"]) and not dummy
-        boss = bool(e.boss) and not dummy
+        # adversário anunciado pela arena (vida e Barreira de Aura) também é luta de chefe, mesmo com marca de comum
+        boss = (bool(e.boss) or r["key"] in getattr(c, "announced_hp", {})) and not dummy
         if not (mvp or boss or dummy) or (not mvp and r["total"] < top * 0.01):
             continue
         out.append(dict(r, rank=0 if mvp else (1 if boss else 2), mvp=mvp, dummy=dummy))

@@ -2,6 +2,7 @@
 """Nomes das missões, lidos do jogo instalado (System\\OngoingQuestInfoList_True.lub, ~0,3 s numa thread)."""
 
 import os
+import re
 import threading
 
 import i18n
@@ -63,3 +64,15 @@ def title(qid):
         pass
     name = (NAMES.titles or {}).get(qid)
     return name if name else _("Missão %d") % qid
+
+
+def row_title(row):
+    """Nome de uma linha de xp.quest_rows: o título da missão; numa entrega que só abre uma espera (o Lanche do
+    Diabo), o título da espera sem a etiqueta da frente ("[Espera] ") e o item entregue."""
+    if not row.get("handin"):
+        return title(row["quest"])
+    name = re.sub(r"^\s*\[[^\]]*\]\s*", "", title(row["quest"]))
+    if row.get("item"):
+        import meter
+        name = "%s (%s)" % (name, meter.item_name(row["item"]))
+    return name

@@ -285,6 +285,20 @@ def merge(lrn, got):
         lrn["unknown"] = dict(keep)
     for k, v in (got.get("names") or {}).items():
         lrn["names"].setdefault(k, v)
+    # o que a pessoa matou em cada mapa (a mistura de monstros do simulador): a gravação que o widget já tem fica
+    maps = lrn.setdefault("maps", {})
+    for m, e in (got.get("maps") or {}).items():
+        if not isinstance(e, dict):
+            continue
+        mine = maps.setdefault(m, dict(recs={}))
+        for rec, mobs in (e.get("recs") or {}).items():
+            if isinstance(mobs, dict):
+                mine.setdefault("recs", {}).setdefault(rec, mobs)
+        mine["last"] = max(str(mine.get("last") or ""), str(e.get("last") or ""))
+        if len(mine["recs"]) > xp.MAP_MIX_RECS:
+            mine["recs"] = dict(list(mine["recs"].items())[-xp.MAP_MIX_RECS:])
+    if len(maps) > xp.LEARN_MAPS:
+        lrn["maps"] = dict(sorted(maps.items(), key=lambda kv: str(kv[1].get("last") or ""))[-xp.LEARN_MAPS:])
     for key, keep in (("changes", 100), ("server", 50)):
         seen = {json.dumps(x, sort_keys=True) for x in lrn[key]}
         new = [x for x in got.get(key) or [] if isinstance(x, dict) and json.dumps(x, sort_keys=True) not in seen]

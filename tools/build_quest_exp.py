@@ -1,6 +1,7 @@
 """Gera data/quest_exp.json: a XP de base (sem bônus) que cada missão dá ao ser entregue, para a previsão de nível.
 
-  {"exp": {id da missão: XP}, "zero": [ids das missões de espera, que não dão XP]}
+  {"exp": {id da missão: XP}, "zero": [ids das missões de espera, que não dão XP],
+   "handin": {espera que nasce numa entrega sem missão: {"base": XP, "items": {item entregue: XP}}}}
 
 O replay mostra a entrega (a missão sai da lista), mas não quanto ela rendeu. As fontes, da mais forte para a
 mais fraca:
@@ -12,6 +13,7 @@ mais fraca:
   4. a missão do LATAM igual a outra (mesmo título, descrição e resumo) leva a XP dela: o servidor do LATAM entrega a
      caçada da Agente Lauren pela 8663, o rAthena pela 8665, e as duas são a mesma missão no jogo.
 Missões de espera (título "[Espera...", "Em espera..." ou CoolTimeQuest) dão 0: a entrega delas é só o fim da espera.
+As entregas que o LATAM mostrou sem XP (LATAM_NO_XP, como a primeira etapa do Mímico) vão para a mesma lista.
 O bônus de missão é outra conta (xp.quest_mult); a recompensa aprendida em cada PC corrige o que a tabela e a regra
 erram.
 
@@ -32,7 +34,21 @@ import lub  # noqa: E402
 
 # medido com a XP exata (capturas de 2026-11-11, nível 247, manual 100, Kafra, Njord e Milagre): o Jantar do Diabo
 # fecha com o valor oficial do iRO Wiki × 8 (2,5 × 1,6 × Milagre); o Mímico pagou o oficial × 4 (sem o Milagre?)
-LATAM_MEASURED = {5964: 698346800, 5970: 1745867}
+LATAM_MEASURED = {5964: 698346800, 5970: 1745867,
+                  # Refeição especial do Diabo (semanal, 5.000 abates): medida em 2026-11-18 (nível 249, só com o
+                  # Milagre, entre duas gravações seguidas): pagou ~10,9 bilhões, metade do total do iRO Wiki
+                  # (2.182.333.750 × 10); guardada sem o Milagre, que o programa conta à parte (× 2)
+                  5966: 5455834375}
+# entregas que só abrem uma espera (nenhuma missão sai da lista): o Lanche do Diabo da Torre do Relógio entrega 100
+# do item do dia e nasce a espera 5967; paga pelo item (iRO Wiki, Clock Tower: Unknown Basement, Devil's Snack);
+# sem saber o item, o valor mais comum
+HANDIN = {5967: dict(base=279337600, items={25505: 280442400,      # Coringa Dourado (Joker's Wild)
+                                            25506: 279337600,      # Vassoura Fofinha (Cute Broom)
+                                            25507: 279337600,      # Coral Colorido (Showy Coral Reef)
+                                            25509: 347798000})}    # Casca Arredondada Brilhante (Shiny Round Shell)
+# entregas que não dão XP sem ser de espera: a primeira etapa do Mímico de Estimação (achar o Mímico; quem paga é a
+# 5970) não teve nenhum ganho de XP na captura de 2026-11-11 (testemilagrebanquete, 43 min)
+LATAM_NO_XP = {5969}
 
 GETEXP = re.compile(r"\bgetexp2?\s*\(?\s*(\d+)\s*,\s*(\d+)\s*\)?\s*;")
 DONE = re.compile(r"\b(?:erasequest|completequest)\s*\(?\s*(\d+)\s*\)?\s*;")
@@ -134,10 +150,13 @@ def main():
                     copied += 1
     zero = sorted(q for q, info in pt.items() if q not in exp and (
         str(info.get("Title", "")).strip().lower().startswith(WAIT) or info.get("CoolTimeQuest")
-        or (en.get(q) or {}).get("CoolTimeQuest")))
+        or (en.get(q) or {}).get("CoolTimeQuest") or q in LATAM_NO_XP))
     dest = os.path.join(ROOT, "data", "quest_exp.json")
     with open(dest, "w", encoding="utf-8", newline="\n") as f:
-        json.dump(dict(exp={str(q): v for q, v in sorted(exp.items())}, zero=zero), f, separators=(",", ":"))
+        handin = {str(q): dict(base=v["base"], items={str(i): x for i, x in sorted(v["items"].items())})
+                  for q, v in sorted(HANDIN.items())}
+        json.dump(dict(exp={str(q): v for q, v in sorted(exp.items())}, zero=zero, handin=handin), f,
+                  separators=(",", ":"))
     print("%d missões com XP (%d do rAthena, %d dos relatórios, %d copiadas de missões iguais), %d de espera -> %s "
           "(%d bytes)" % (len(exp), from_rathena, len(from_reports), copied, len(zero), dest, os.path.getsize(dest)))
 

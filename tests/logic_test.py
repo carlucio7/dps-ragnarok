@@ -1281,6 +1281,36 @@ with tempfile.TemporaryDirectory() as tmp:
     rc.poll(max_bytes=1 << 30)
     check(xpmod.calibrate(rc.combat, cfg, meter.xp_after) is None and len(cfg["xp_corr"]["7100"]["samples"]) == 1,
           "XP: gravação de 30 s não entra na calibração")
+
+    # Zerar no meio da gravação apaga os abates de antes: a XP exata do trecho ficava comparada só com os abates
+    # depois do Zerar (numa gravação real, fator 3,31 em vez de 1,55, guardado como medida do mapa)
+    def zerado(n_events):
+        """a.rrf lido como o widget ao vivo (o arquivo crescendo), com um Zerar depois dos n primeiros eventos."""
+        zp = os.path.join(tempfile.mkdtemp(dir=tmp), "a.rrf")
+        full, _o = fr.build(ME, ev, date=(2026, 11, 5, 19, 35, 0), xp=(7100, 1000, 10 ** 9))
+        part, _o = fr.build(ME, ev[:n_events], date=(2026, 11, 5, 19, 35, 0), xp=(7100, 1000, 10 ** 9))
+        with open(zp, "wb") as fh:
+            fh.write(part)
+        rz = meter.ReplayFile(zp)
+        rz.poll(max_bytes=1 << 30)
+        xpmod.keep_level(rz.combat, {})
+        rz.combat.reset()
+        with open(zp, "ab") as fh:
+            fh.write(full[len(part):])
+        rz.poll(max_bytes=1 << 30)
+        rz.combat.path = os.path.join(tmp, "a.rrf")         # a gravação seguinte (b.rrf) está na pasta do teste
+        return rz.combat, full.startswith(part)
+    zc, prefix = zerado(3)                                  # Zerar depois do 1º abate
+    cz = {}
+    p_zero, p_full = xpmod.progress(zc, {}), xpmod.progress(rf.combat, {})
+    check(prefix and len(xpmod.kills(zc)[0]) == 2 and xpmod.exact_segments(zc, cz, meter.xp_after) == []
+          and xpmod.calibrate(zc, cz, meter.xp_after) is None and not cz.get("xp_corr")
+          and round(p_zero["xp"]) == round(p_full["xp"]) == 1102,
+          "XP: Zerar no meio apaga abates: o trecho não calibra e a posição no nível não volta para trás -> %s / %s"
+          % (round(p_zero["xp"]), round(p_full["xp"])))
+    z0, prefix = zerado(1)                                  # Zerar antes do 1º abate: nada apagado
+    check(prefix and z0.reset_t is None and xpmod.calibrate(z0, {}, meter.xp_after) == 3.0,
+          "XP: Zerar sem abate apagado não atrapalha a medida")
     rb = rrf.read_session(os.path.join(tmp, "b.rrf"))
     scan_first = meter.xp_scan(tmp)
     meter._XP_SCANS[os.path.normcase(tmp)].join(10)
@@ -1687,7 +1717,275 @@ xpmod.learn_quests(ca, cfg_a, [(0, 3000, 2 * 148560 * 1.5, "0"), (4000, 7000, 2 
 got = {k: (v["base"], v.get("with")) for k, v in cfg_a["xp_quests"].items()}
 check(got == {"3477": (222840, None), "4248": (1000, None)} and len(xpmod.quest_rows(ca, cfg_a, (0, 3000))) == 2,
       "missões: a mesma missão entregue duas vezes no trecho conta nas duas (renovada com Água Mineral) -> %s" % got)
+# Zerar depois de um nível que fechou com missão entregue: os abates de antes somem e a missão "aprendia" o nível
+# inteiro (1.10.0: um jogador via "já subiu" logo depois de cada entrega dela nas gravações seguintes)
+ez = []
+for i, aid in enumerate(range(52241, 52243)):                    # 2 Goblins: 68 dos 400 do nível
+    ez += [(i * 20000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 20000 + 300, fr.skill_damage(ME, aid, 5000)),
+           (i * 20000 + 400, fr.vanish(aid, 1))]
+ez += [(100000, fr.quest_done(4249)), (150000, fr.hp(241, rrf.SP_BASELEVEL))]
+ez += [(200000 + i * 5000 + d, p) for i, aid in enumerate((52249, 52250)) for d, p in (
+    (0, fr.spawn(aid, "mob", 1124, "Goblin")), (300, fr.skill_damage(ME, aid, 5000)), (400, fr.vanish(aid, 1)))]
+with tempfile.TemporaryDirectory() as tmpz:
+    zp = os.path.join(tmpz, "z.rrf")
+    full_z, _o = fr.build(ME, ez, xp=(7206, 0, 400))
+    part_z, _o = fr.build(ME, [e for e in ez if e[0] < 180000], xp=(7206, 0, 400))
+    with open(zp, "wb") as fh:
+        fh.write(part_z)
+    rz = meter.ReplayFile(zp)
+    rz.poll(max_bytes=1 << 30)
+    cfg_z = {"xp_mode": "auto"}
+    xpmod.keep_level(rz.combat, cfg_z)
+    rz.combat.reset()                                             # Zerar já no nível 241
+    with open(zp, "ab") as fh:
+        fh.write(full_z[len(part_z):])
+    rz.poll(max_bytes=1 << 30)
+    xpmod.calibrate(rz.combat, cfg_z, meter.xp_after)
+    cn = combat_of(full_z)                                        # a mesma gravação sem o Zerar
+    cn.path = zp
+    cfg_n = {"xp_mode": "auto"}
+    xpmod.calibrate(cn, cfg_n, meter.xp_after)
+    learned_n = ((cfg_n.get("xp_quests") or {}).get("4249") or {}).get("base")
+check(full_z.startswith(part_z) and "xp_quests" not in cfg_z and learned_n == 332,
+      "missões: Zerar depois de um nível fechado com missão não ensina a missão (os abates dele sumiram e ela ficava "
+      "valendo o nível inteiro: 'já subiu' a cada entrega) -> sem o Zerar ela vale %s" % learned_n)
+# a recompensa que é a XP do nível inteiro (o que a 1.10.0 aprendia depois do Zerar) não vale nem é aprendida
+need_240 = xpmod.table_need(4302, 240)
+cw2 = combat_of(fr.build(ME, [(100000, fr.quest_done(4249)), (150000, fr.hp(241, rrf.SP_BASELEVEL))],
+                         xp=(7207, 0, need_240))[0])
+cfg_w = {"xp_mode": "lista"}
+xpmod.learn_quests(cw2, cfg_w, [(0, 150000, need_240, "0")])
+bad = {"xp_quests": {"3477": {"base": 672904, "level": 94, "mult": 2.0}}}      # Mestre Ferreiro 94, duas entregas
+good = {"xp_quests": {"3477": {"base": 253420, "level": 92, "mult": 2.0}}}
+# ao vivo, na subida de nível, a missão do nível que fechou já é aprendida (sem esperar a gravação seguinte); cada
+# nível uma vez, e a calibração depois troca a anotação em vez de repetir
+eq = []
+for i, aid in enumerate(range(52251, 52253)):                    # 2 Goblins: 68 dos 400 do nível
+    eq += [(i * 20000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 20000 + 300, fr.skill_damage(ME, aid, 5000)),
+           (i * 20000 + 400, fr.vanish(aid, 1))]
+eq += [(100000, fr.quest_done(4250)), (150000, fr.hp(241, rrf.SP_BASELEVEL))]
+cq = combat_of(fr.build(ME, eq, xp=(7208, 0, 400))[0])
+cq.path = os.path.join("x", "q.rrf")
+cfg_l = {"xp_mode": "auto"}
+first_l, again_l = xpmod.learn_levels(cq, cfg_l), xpmod.learn_levels(cq, cfg_l)
+learned_l = dict(cfg_l.get("xp_quests") or {})
+xpmod.calibrate(cq, cfg_l, None)
+check(first_l and not again_l and learned_l.get("4250", {}).get("base") == 332 and cq.quests_learned_upto == 150000
+      and cfg_l["xp_quests"]["4250"]["base"] == 332 and [o["src"] for o in cfg_l["xp_learn"]["quests"]] == ["q.rrf#0"],
+      "missões: na subida de nível a missão do nível que fechou já é aprendida, uma vez só; a calibração da gravação "
+      "depois confere e troca a anotação -> %s" % learned_l)
+eb2 = []
+for i, aid in enumerate(range(52261, 52269)):                    # nível 240: 8 Goblins (272) e uma missão (128)
+    eb2 += [(i * 20000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 20000 + 300, fr.skill_damage(ME, aid, 5000)),
+            (i * 20000 + 400, fr.vanish(aid, 1))]
+eb2 += [(100000, fr.quest_done(4251)), (150000, fr.hp(241, rrf.SP_BASELEVEL))]
+cblind = combat_of(fr.build(ME, eb2, xp=(7212, 0, 400))[0])
+cblind.path = os.path.join("x", "cego.rrf")
+cfg_blind = {"xp_mode": "auto"}
+xpmod.learn_levels(cblind, cfg_blind)
+ec = []
+for i, aid in enumerate(range(52271, 52283)):                    # nível 240 sem missão: 12 Goblins = 408, a medida
+    ec += [(i * 10000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 10000 + 300, fr.skill_damage(ME, aid, 5000)),
+           (i * 10000 + 400, fr.vanish(aid, 1))]
+ec += [(150000, fr.hp(241, rrf.SP_BASELEVEL))]
+for i, aid in enumerate(range(52291, 52303)):                    # nível 241: 12 Goblins (408) e uma missão (192)
+    ec += [(200000 + i * 10000, fr.spawn(aid, "mob", 1124, "Goblin")),
+           (200000 + i * 10000 + 300, fr.skill_damage(ME, aid, 5000)), (200000 + i * 10000 + 400, fr.vanish(aid, 1))]
+ec += [(330000, fr.quest_done(4252)), (350000, fr.hp(242, rrf.SP_BASELEVEL))]
+cmeas = combat_of(fr.build(ME, ec, xp=(7213, 0, 408))[0])
+cmeas.path = os.path.join("x", "medido.rrf")
+cfg_meas = {"xp_mode": "auto", "xp_levels": {"4302": {"241": 600}}}
+xpmod.learn_levels(cmeas, cfg_meas)
+check("xp_quests" not in cfg_blind and (cfg_meas.get("xp_quests") or {}).get("4252", {}).get("base") == 192,
+      "missões: sem medida exata dos abates (evento desmarcado, todo nível com missão) a missão que pesa 32%% do nível "
+      "não é aprendida (o erro da lista iria para ela); com um nível sem missão medido antes, é -> %s / %s"
+      % (cfg_blind.get("xp_quests"), cfg_meas.get("xp_quests")))
+check("xp_quests" not in cfg_w and xpmod.quest_base(3477, bad) == 148560 and xpmod.quest_base(3477, good) == 253420,
+      "missões: recompensa aprendida que é a XP do nível inteiro (ou metade, com duas entregas) não vale e não é "
+      "aprendida: a tabela volta a valer até a próxima medida -> %s / %s" % (xpmod.quest_base(3477, bad),
+                                                                         cfg_w.get("xp_quests")))
 
+# o ritmo do "Até o próximo nível" conta só o tempo caçando: uma pausa de 5 min no meio da janela sai da conta; numa
+# caça lenta (um abate por minuto), o intervalo normal entre abates não é pausa
+ep = []
+for i in list(range(0, 25)) + list(range(54, 67)):                        # um abate a cada 10 s, pausa de 5 min
+    aid = 53000 + i
+    ep += [(i * 10000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 10000 + 300, fr.skill_damage(ME, aid, 5000)),
+           (i * 10000 + 400, fr.vanish(aid, 1))]
+cp = combat_of(fr.build(ME, ep, xp=(7209, 0, 10 ** 9))[0])
+rp = xpmod.recent_range(cp, {})
+pace_p = xpmod.recent_pace(cp, {})
+es = []
+for i in range(13):                                                       # um abate por minuto, 12 min
+    aid = 53100 + i
+    es += [(i * 60000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 60000 + 300, fr.skill_damage(ME, aid, 5000)),
+           (i * 60000 + 400, fr.vanish(aid, 1))]
+cs = combat_of(fr.build(ME, es, xp=(7210, 0, 10 ** 9))[0])
+rs = xpmod.recent_range(cs, {})
+check(rp == (60400, 660400) and xpmod.active_ms(cp, rp) == 330000 and abs(pace_p - 32 * 34 * 60000 / 330000.0) < 1e-6
+      and rs is not None and xpmod.active_ms(cs, rs) == rs[1] - rs[0],
+      "XP: o ritmo até o próximo nível conta só o tempo caçando (pausa de 5 min fora); numa caça lenta nada sai -> "
+      "%s/min" % (pace_p and round(pace_p, 1)))
+# resumo da sessão: as linhas escolhidas, com as contas do widget (subida de nível, abates, mortes, duração)
+import cards  # noqa: E402
+import session  # noqa: E402
+cs_ = combat_of(fr.build(ME, ep + [(670000, fr.hp(241, rrf.SP_BASELEVEL))], xp=(7211, 0, 10 ** 9))[0])
+lines_s = [t for t, _col in session.lines(cs_, {"session_fields": ["duration", "levels", "kills", "deaths", "bosses",
+                                                                    "favs"]})]
+check(lines_s[0].startswith("Gravação de 11:10") and "Subiu de nível: 240 → 241" in lines_s
+      and any(t.startswith("Abates: 38") for t in lines_s) and "Mortes: nenhuma" in lines_s
+      and not any(t.startswith(("Chefes", "Favoritos")) for t in lines_s)
+      and set(session.chosen({})) == set(session.DEFAULT) and len(session.sample_lines({})) == len(session.DEFAULT),
+      "resumo da sessão: só as informações escolhidas que têm o que dizer (sem chefe nem favorito, a linha some) -> %s"
+      % lines_s)
+check(cards.parse_secs("45") == 45 and cards.parse_secs("1:30") == 90 and cards.parse_secs("90 s") == 90
+      and cards.parse_secs("2,5") == 2 and cards.parse_secs("x") is None and cards.parse_secs("9999", 1, 600) == 600,
+      "cartões: segundos digitados (45, 1:30, 90 s) para o temporizador e o \"segundos antes\"")
+# destaques do resumo: o primeiro vira o título (Subiu de nível, com confete); o subtítulo diz onde caçou; os
+# desligados na aba Cartões não aparecem; instância pelo nome que o jogo dá a ela
+hl_s = session.highlights(cs_, {})
+sub_s = session.subtitle(cs_, {"session_fields": ["duration"]})
+hl_off = [h["key"] for h in session.highlights(cs_, {"session_hl_off": ["levelup"]})]
+check([h["key"] for h in hl_s][:1] == ["levelup"] and hl_s[0]["fx"] == "confetti" and hl_s[0]["chip"].endswith("240 → 241")
+      and " caçando em " in sub_s and "levelup" not in hl_off and session.place("0q83@ch_t") == "Constellation Tower"
+      and session.place("ve_fild07") == "ve_fild07" and session.subtitle(cs_, {"session_fields": ["xp"]}) == "",
+      "resumo da sessão: o destaque vira o título (Subiu de nível, com confete); o subtítulo diz onde caçou; a "
+      "instância aparece pelo nome do jogo -> %s / %s" % ([h["key"] for h in hl_s], sub_s))
+# recordes: a primeira gravação só marca; outra com um golpe maior bate o recorde; contada de novo, continua batendo
+# (compara com o de antes dela)
+ep_hit = []
+for i in range(0, 25):
+    aid = 53400 + i
+    ep_hit += [(i * 10000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 10000 + 300, fr.skill_damage(ME, aid, 9000)),
+               (i * 10000 + 400, fr.vanish(aid, 1))]
+cfg_rec = {}
+c_r1 = combat_of(fr.build(ME, ep, xp=(7212, 0, 10 ** 9))[0])
+c_r1.path = os.path.join("x", "r1.rrf")
+c_r2 = combat_of(fr.build(ME, ep_hit, xp=(7212, 0, 10 ** 9))[0])
+c_r2.path = os.path.join("x", "r2.rrf")
+rec1 = session.update_records(c_r1, cfg_rec)
+rec2 = session.update_records(c_r2, cfg_rec)
+rec2b = session.update_records(c_r2, cfg_rec)
+hl_r = session.highlights(c_r2, {}, records=rec2)
+check(rec1 == [] and [r[:3] for r in rec2] == [("hit", 9000.0, 5000.0)] and [r[:3] for r in rec2b] == [("hit", 9000.0, 5000.0)]
+      and hl_r and hl_r[0]["key"] == "record" and num(9000) in (hl_r[0]["sub"] or "")
+      and session.update_records(c_r1, cfg_rec) == [],
+      "resumo da sessão: recorde pessoal (maior golpe do personagem): a primeira gravação só marca; a seguinte com "
+      "golpe maior bate; a mesma de novo continua contando -> %s / %s" % (rec2, hl_r and hl_r[0]["sub"]))
+# "Chefe derrotado": a cena luta com os golpes de quem grava NO chefe (o Osíris do usuário: o maior 371.759, enquanto
+# o maior golpe da sessão, 36M, foi numa Ísis); antes vinham números de mentira (99999)
+ev_b = [(0, fr.spawn(53601, "mob", 1029, "Ísis")), (500, fr.skill_damage(ME, 53601, 36000000)),
+        (600, fr.vanish(53601, 1)), (1000, fr.spawn(53602, "mob", 1038, "Osíris", boss=True))]
+ev_b += [(2000 + i * 3000, fr.skill_damage(ME, 53602, d)) for i, d in enumerate((100000, 150000, 371759, 200000))]
+ev_b += [(14000, fr.vanish(53602, 1))]
+c_b = combat_of(fr.build(ME, ev_b, xp=(7213, 0, 10 ** 9))[0])
+hl_b = [h for h in session.highlights(c_b, {}) if h["key"] == "boss"]
+fb = hl_b[0]["fight"] if hl_b else {}
+check(hl_b and fb.get("mob") == 1038 and fb.get("hit") == 371759 and abs(fb.get("avg") - 821759 / 4.0) < 1e-6
+      and "boss" in session.SHORT_OK and "card" in session.SHORT_OK and "top_hit" not in session.SHORT_OK,
+      "resumo da sessão: \"Chefe derrotado\" luta com os golpes de quem grava no chefe (não com o maior da sessão, "
+      "numa Ísis); gravação de menos de 1 min só tem resumo com um acontecimento -> %s" % fb)
+# o fim da gravação na hora: o Windows diz quem está com o arquivo aberto (um processo segurando o arquivo aparece;
+# depois de fechado, ninguém), sem o programa abrir o arquivo
+with tempfile.TemporaryDirectory() as th_:
+    fp_ = os.path.join(th_, "g.rrf")
+    with open(fp_, "wb") as fh_:
+        fh_.write(b"x")
+    holder_ = subprocess.Popen([sys.executable, "-c", "import sys, time; f = open(sys.argv[1], 'ab'); "
+                                "print('ok', flush=True); time.sleep(30)", fp_], stdout=subprocess.PIPE)
+    holder_.stdout.readline()
+    held_ = meter.file_holders(fp_)
+    holder_.kill()
+    holder_.wait()
+    time.sleep(0.3)
+    free_ = meter.file_holders(fp_)
+check(bool(held_) and free_ == set(),
+      "fim da gravação: o Restart Manager vê o processo com o arquivo aberto e, fechado, ninguém -> %s / %s"
+      % (held_, free_))
+# sons da pasta da pessoa: WAV de 8 e 16 bits e de ponto flutuante viram 16 bits, cortados em 10 s; nada de fora da pasta
+import sounds as sndmod  # noqa: E402
+
+
+def _wav(path, tag, ch, rate, bits, frames):
+    if tag == 3:
+        body = struct.pack("<%df" % (frames * ch), *([0.25] * (frames * ch)))
+    elif bits == 8:
+        body = bytes([160] * (frames * ch))
+    else:
+        body = struct.pack("<%dh" % (frames * ch), *([8000] * (frames * ch)))
+    fmt_ = struct.pack("<HHIIHH", tag, ch, rate, rate * ch * bits // 8, ch * bits // 8, bits)
+    data = b"WAVE" + b"fmt " + struct.pack("<I", len(fmt_)) + fmt_ + b"data" + struct.pack("<I", len(body)) + body
+    with open(path, "wb") as fh:
+        fh.write(b"RIFF" + struct.pack("<I", len(data)) + data)
+
+
+with tempfile.TemporaryDirectory() as tsnd:
+    _wav(os.path.join(tsnd, "longo.wav"), 1, 2, 8000, 16, 8000 * 12)
+    _wav(os.path.join(tsnd, "oito.wav"), 1, 1, 8000, 8, 800)
+    _wav(os.path.join(tsnd, "float.wav"), 3, 1, 8000, 32, 800)
+    with open(os.path.join(tsnd, "texto.txt"), "w") as fh:
+        fh.write("x")
+    found_s = sndmod.custom_sounds(tsnd)
+    secs_s = {}
+    for k, _n in found_s:
+        w_ = sndmod.custom_wav(sndmod.custom_path(tsnd, k), 100)
+        chn, rate_ = struct.unpack_from("<HI", w_, 22)
+        secs_s[k] = round((len(w_) - 44) / float(2 * chn * rate_), 2)
+    check([k for k, _n in found_s] == ["file:float.wav", "file:longo.wav", "file:oito.wav"]
+          and secs_s == {"file:float.wav": 0.1, "file:longo.wav": 10.0, "file:oito.wav": 0.1}
+          and sndmod.custom_path(tsnd, "file:../longo.wav") is None and sndmod.valid("file:x.mp3")
+          and not sndmod.valid("nada") and sndmod.label("file:Meu Som.mp3") == "♪ Meu Som"
+          and cards.tracked({"trackers": [dict(kind="status", id=730, snd="file:oito.wav")]})[0]["snd"] == "file:oito.wav",
+          "sons da pasta: .wav e .mp3 da pasta (não das subpastas), WAV de 8/16/32 bits em 16 bits, cortado em 10 s; "
+          "o efeito acompanhado guarda o som da pasta -> %s" % secs_s)
+# simulador: "e se fosse no mapa X" — os abates da pessoa no mapa dão a mistura; no próprio mapa, a XP é a do recorte
+cfg_m = {"xp_mode": "lista"}
+lrn_m = xpmod._learn(cfg_m)
+cp.path = os.path.join("x", "m.rrf")
+xpmod.log_map_mix(lrn_m, cp, "m.rrf", "2026-11-19 01:00")
+here = xpmod.map_key(cp.session.map)
+sm_here = xpmod.sim_map(cp, cfg_m, None, here)
+mix_r, src_r = xpmod.map_mix(cfg_m, "gef_fild08")
+sm_far = xpmod.sim_map(cp, cfg_m, None, "gef_fild08")
+check(lrn_m["maps"][here]["recs"]["m.rrf"] == {"1124": 38} and sm_here["source"] == "seus"
+      and abs(sm_here["xp"] - sm_here["base_xp"]) < 1e-6 and src_r == "jogo" and 1156 in mix_r
+      and sm_far is not None and sm_far["kills"] == 38 and xpmod.sim_map(cp, cfg_m, None, "mapa_que_nao_existe") is None,
+      "simulador por mapa: no mapa em que caçou dá a mesma XP; outro mapa usa quantos nascem (/navi do jogo); mapa "
+      "desconhecido não simula -> %s / %s" % (sm_here and round(sm_here["xp"]), sm_far and round(sm_far["xp"])))
+# a lista do simulador: os mapas novos do LATAM (do /navi) e, no topo, os de nível mais perto do de quem gravou
+new_maps = {m: xpmod.map_mix({}, m)[1] for m in ("clock_01", "nif_dun01", "nif_dun02", "amicitia1", "amicitia2",
+                                                  "niflheim", "jor_ab02", "bl_ice", "abyss_04")}
+top250 = xpmod.sim_maps({}, 250)[:5]
+top99 = xpmod.sim_maps({}, 99)[:5]
+lv_g = xpmod.map_levels(mix_r)
+check(set(new_maps.values()) == {"jogo"} and xpmod.map_title("clock_01") == "Clock Tower Unknown Basement"
+      and all(abs(r[3][0] - 250) <= 6 for r in top250) and all(abs(r[3][0] - 99) <= 3 for r in top99)
+      and lv_g is not None and (lv_g[1], lv_g[2]) == (59, 79) and len(xpmod.sim_maps({})) > 400
+      and xpmod.map_mix({}, "lhz_dun_n")[1] == "rathena",
+      "simulador por mapa: Torre do Relógio, Niflheim, Amicitia, Biosfera, Jormungandr vêm do /navi do jogo; a lista "
+      "põe no topo os mapas de nível mais perto -> %s / %s" % ([r[0] for r in top250], [r[0] for r in top99]))
+# a Biosfera no LATAM é outra versão (nível diferente no /navi do jogo): o simulador avisa; num mapa comum, não
+sm_bl = xpmod.sim_map(cp, cfg_m, None, "bl_grass")
+sm_ok = xpmod.sim_map(cp, cfg_m, None, "jor_ab02")
+check(sm_bl is not None and len(sm_bl["latam_other"]) >= 5 and sm_bl["latam_share"] > 0.5 and not sm_bl["measured"]
+      and sm_ok is not None and sm_ok["latam_other"] == [] and xpmod.latam_level(21549) == 251,
+      "simulador por mapa: os monstros com outro nível no LATAM (Biosfera) são marcados; jor_ab02 não -> %s"
+      % (sm_bl and [(m, a, b) for m, a, b in sm_bl["latam_other"]][:3]))
+# a medida num mapa de outra versão (a Biosfera rende uns 15% da lista) vale só para ele: não vira o "normal" do
+# personagem (senão todo mapa sem medida sairia com a XP da Biosfera) nem entra na média geral
+cfg_f = {"xp_corr": {"777": {"samples": [[1.02, 9e9, "2026-11-18 20:00", "a.rrf#0", "jor_ab02", 1500],
+                                         [0.15, 4e9, "2026-11-18 22:00", "b.rrf#0", "bl_lava", 900]]}}}
+p_new = xpmod.predict(cfg_f, 777, "abyss_04")
+p_bio = xpmod.predict(cfg_f, 777, "bl_lava")
+p_other = xpmod.predict(cfg_f, 888, "bl_lava")          # outro personagem sem medida: a do mapa, pelos dele
+check([xpmod.foreign_map(m) for m in ("bl_grass", "bl_lava", "bl_ice", "bl_death", "clock_01", "jor_ab02", "")]
+      == [True, True, True, True, False, False, False]
+      and p_new is not None and p_new[1] == "personagem" and abs(p_new[0] - 1.02) < 1e-9
+      and p_bio is not None and p_bio[1] == "mapa" and abs(p_bio[0] - 0.15) < 1e-9
+      and p_other is not None and p_other[1] == "personagens" and abs(p_other[0] - 0.15 / 1.02) < 1e-6
+      and sm_bl["bio_share"] > 0.9 and sm_ok["bio_share"] == 0,
+      "XP: a medida na Biosfera (outra versão no LATAM) vale só para ela, não para o normal do personagem -> %s / %s / %s"
+      % (p_new, p_bio, p_other))
 ev = []
 for i, aid in enumerate((52301, 52302, 52303)):                           # 3 abates no 1º minuto de farm
     ev += [(60000 + i * 20000, fr.spawn(aid, "mob", 1124, "Goblin")), (60000 + i * 20000 + 300, fr.skill_damage(ME, aid, 5000)),
@@ -2443,6 +2741,13 @@ check([r["quest"] for r in rows_q if r["t"] == "q"] == [7893, 7895] and all(r.ge
       "relatório e ferramenta: recompensas medidas pelo programa no relatório; a ferramenta compara o que o jogo pagou "
       "com as duas regras, deixa de fora a entrega no instante de uma subida e grava só o que é confiável -> %s"
       % build_q)
+# medida da 1.10.0 depois de um Zerar: a missão "pagou" o nível inteiro (Mestre Ferreiro 92 = 1.934.170; 94 com duas
+# entregas, a recompensa arredondada) -> descartada; uma medida de verdade da mesma missão passa
+check(ler.whole_level(92, 967085 * 2.0, 2.0) and ler.whole_level(94, 672904 * 2.0, 2.0)
+      and ler.whole_level(93, 1157020 * 2.0, 2.0) and not ler.whole_level(92, 253420 * 2.0, 2.0)
+      and not ler.whole_level(None, 5.0, 1.0),
+      "ferramenta dos relatórios: a medida que é a XP do nível inteiro (abates apagados pelo Zerar da 1.10.0) fica de "
+      "fora da recompensa e do arquivo para o build")
 # a leitura da pasta junta as recompensas medidas (sem repetir) e as aprendidas valem para a previsão
 import learnfolder  # noqa: E402
 lm = xpmod._learn({})
@@ -3075,6 +3380,141 @@ check(abs(same["xp"] - est17["kill_xp"]) < 1e-6 and abs(est17["kill_xp"] - each 
       and abs(xpmod.simulate(cs, cfg17, None, {"njord": ("on", 60)})["xp"] - each * 6.4) < 1e-6,
       "simulador de XP: sem trocar nada é a própria estimativa (Njord só no trecho em que valeu); o evento de 100%% "
       "para 200%% rende +50%% -> %s contra %s" % (ev200["xp"], est17["kill_xp"]))
+
+# --- XP: o Lanche do Diabo (entrega que só abre a espera 5967), a Refeição especial e a 1ª etapa do Mímico ------
+import quests  # noqa: E402
+ev = [(0, fr.status(ME, 250, True, 1800000, 1800000, 100)),
+      (1000, fr.pickup(70, 25509, 100)),                       # 100 Cascas Arredondadas Brilhantes no slot 70
+      (5000, fr.item_del(70, 100)), (5000, fr.quest_add(5967)),  # entrega o lanche: sai da bolsa e nasce a espera
+      (5200, fr.item_del(71, 1)), (6000, fr.quest_add(5967)),    # outra entrega sem saber o item (slot vazio)
+      (9000, fr.quest_done(5967)), (9500, fr.stop(ME, 1, 1))]  # o fim da espera não é entrega
+cs = combat_of(fr.build(ME, ev, xp=(7110, 0, 10 ** 12))[0])
+rs = xpmod.quest_rows(cs, {})
+check([(r["quest"], r.get("handin"), r["item"], r["base"], r["mult"]) for r in rs]
+      == [(5967, True, 25509, 347798000.0, 2.0), (5967, True, None, 279337600.0, 2.0)]
+      and xpmod.quest_in(cs, 4000, 5500) and not xpmod.quest_in(cs, 6500, 9500)
+      and xpmod.estimate(cs, {})["quest_xp"] == (347798000 + 279337600) * 2.0,
+      "lanche do Diabo: a espera que nasce na entrega conta como entrega, pelo item que saiu da bolsa (sem o item, "
+      "o valor mais comum), com o bônus de missão; o fim da espera não -> %s"
+      % [(r["quest"], r["item"], r["base"], r["mult"]) for r in rs])
+_titles = quests.NAMES.titles
+quests.NAMES.titles = {5967: "[Espera] Lanche do Diabo"}
+_t1, _t2 = quests.row_title(rs[0]), quests.row_title(rs[1])
+quests.NAMES.titles = _titles
+check(_t1.startswith("Lanche do Diabo (") and _t2 == "Lanche do Diabo",
+      "lanche do Diabo: o nome na lista é o da espera sem a etiqueta, com o item entregue -> %r, %r" % (_t1, _t2))
+check(xpmod.quest_base(5966, {}) == 5455834375.0 and xpmod.quest_wait(5969) and not xpmod.quest_wait(5970),
+      "Torre do Relógio: Refeição especial pelo valor medido no LATAM; a 1ª etapa do Mímico não dá XP")
+
+# --- Amdarais: vida por dificuldade, pela fala do Oscar ou pela cura do chefe ------------------------------------
+AMD = 61500
+
+
+def _amd_fight(dead, said=None):
+    """11 golpes de 200M a cada 2 s no Amdarais (cada golpe volta 65% 1 s depois, antes do próximo)."""
+    ev = [(0, fr.spawn(AMD, "mob", 20573, "Phantom of Amdarais", boss=True))]
+    ev += [(1000 + 2000 * i, fr.skill_damage(ME, AMD, 200000000)) for i in range(11)]
+    if dead:
+        ev.append((21100, fr.vanish(AMD, 1)))
+    if said is not None:
+        ev.append((60000, fr.npc_say(43520, meter.LEVEL_SAY_KEY, said, "Miragem")))
+    ev.append((61000, fr.stop(ME, 1, 1)))
+    return combat_of(fr.build(ME, ev)[0])
+
+
+_ca, _cb, _cc = _amd_fight(True), _amd_fight(False), _amd_fight(True, said=4)
+_ha = an.boss_hp(_ca, AMD, 2200000000, True, 20000)
+_hb = an.boss_hp(_cb, AMD, 2200000000, False, 20000)
+_hc = an.boss_hp(_cc, AMD, 2200000000, True, 20000)
+_lost = [round(v / 1e6) for _t, v in an.heal_lost(_ca, AMD, an.BOSS_HEAL[20573])]
+check(_lost[:3] == [200, 270, 340] and _lost[-1] == 900 and _ha[:2] == (900000000, "Nível 3")
+      and _hb[:2] == (600000000, "Nível 1") and "no mínimo" in _hb[2]
+      and _hc[:2] == (1050000000, "Nível 4") and "fala do NPC" in _hc[2] and _cc.said_level == [(60000, 4)],
+      "Amdarais: vida pela fala do Oscar no fim; sem ela, pela cura (abate: o nível em que morre no último golpe; "
+      "vivo: no mínimo, com a cura alta) -> %s %s %s %s" % (_lost, _ha, _hb, _hc))
+_ta = tl.build(_ca, AMD)
+_hp_pts = [v for _t, v in _ta["hp"]]
+check(_ta["hp_max"] == 900000000 and _hp_pts[-1] == 0.0 and any(b > a for a, b in zip(_hp_pts, _hp_pts[1:]))
+      and min(_hp_pts[:-1]) > 0.0,
+      "Amdarais: a curva de HP da Linha do tempo sobe com a cura e só zera no abate -> %s"
+      % [round(v, 3) for v in _hp_pts])
+
+# --- marca de chefe: o servidor manda; sem marca, o mesmo monstro, o rAthena ou vida de chefe -----------------
+GUARD, GUARD0, SWORD, ATRIA, HIDE, ORC0, AMD0, ERZ0 = 70001, 70002, 70003, 70004, 70005, 70006, 70007, 70008
+_ev = [(0, fr.spawn(GUARD, "mob", 20542, "Guarda da Rekenber", boss=0)),      # comum de 1,47 mi de vida
+       (0, fr.spawn(SWORD, "mob", 20536, "Espadachim Anônima", boss=2)),
+       (0, fr.spawn(ATRIA, "mob", 2562, "Atria", boss=1)),
+       (0, fr.spawn(HIDE, "mob", 20562, "#bb5m1_1", boss=1)),
+       (1000, fr.skill_damage(ME, GUARD, 2000000)), (1100, fr.vanish(GUARD, 1)),
+       (2000, fr.skill_damage(ME, SWORD, 435241860)), (2100, fr.vanish(SWORD, 1)),
+       (3000, fr.stop(ME, 1, 1))]
+# já na tela no começo (sem marca): um Guarda (o outro Guarda tem marca 0), o Orc Herói (MVP no rAthena, 362 mil de
+# vida), o Amdarais (fora do rAthena, 2 bi) e a Erzsebet da Torre do Relógio (fora do rAthena, 37,7 mi)
+_cm = combat_of(fr.build(ME, _ev, entities=[(GUARD0, "mob", 20542, "Guarda da Rekenber"),
+                                            (ORC0, "mob", 1087, "Orc Herói"), (AMD0, "mob", 20573, "Amdarais"),
+                                            (ERZ0, "mob", 20176, "Erzsebet")])[0])
+_fights = [f["key"] for f in dd.boss_fights(_cm)]
+check(not _cm.is_mvp(GUARD) and _cm.is_mvp(SWORD) and not _cm.is_mvp(ATRIA) and not _cm.is_mvp(GUARD0)
+      and _cm.is_mvp(ORC0) and _cm.is_mvp(AMD0) and not _cm.is_mvp(ERZ0)
+      and _cm.entities[GUARD0].boss is None and _cm.job_marks[20542] == 0
+      and SWORD in _fights and GUARD not in _fights and not _cm.boss_like(GUARD),
+      "MVP pela marca do servidor: comum de muita vida (Edda, Torre do Relógio) não vira MVP; sem marca, vale a do "
+      "mesmo monstro, o rAthena e 50 mi de vida -> lutas %s" % _fights)
+_hs = an.boss_hp(_cm, SWORD, 435241860, True, 100)
+check(_hs[0] == 75500000 and "golpe que matou" in _hs[2] and _cm.name_of(HIDE) == "Objeto escondido",
+      "abate de um golpe só: a vida é a da base (confere com o golpe que matou), não o golpe inteiro; rótulo de "
+      "script sem nome no jogo vira objeto escondido -> %s %r" % (_hs, _cm.name_of(HIDE)))
+_ev2 = [(0, fr.spawn(SWORD, "mob", 20536, "Espadachim Anônima", boss=2)),
+        (1000, fr.skill_damage(ME, SWORD, 80000000)), (1500, fr.skill_damage(ME, SWORD, 10000000)),
+        (1600, fr.vanish(SWORD, 1)), (3000, fr.stop(ME, 1, 1))]
+_c2 = combat_of(fr.build(ME, _ev2)[0])
+_h2 = an.boss_hp(_c2, SWORD, 90000000, True, 600)
+check(_h2[:3] == (90000000, "", an._("dano até morrer")),
+      "a base que não confere com o abate (já tinha passado da vida antes do último golpe) não vale -> %s" % (_h2,))
+check(xpmod.MOB_EXP.get(20536) == [180, 5885540, 4780000] and xpmod.MOB_EXP.get(20562) == [170, 0, 0]
+      and all(meter.MOB_SIZE.get(j) == "M" for j in range(20536, 20544)) and dd.boss_element(_cm, SWORD) == ("Fire", 2)
+      and dd.boss_element(_cm, GUARD) == ("Neutral", 2),
+      "Edda do Biolaboratório: XP, tamanho e propriedade da Espadachim Anônima e dos monstros das salas (Divine Pride)")
+
+# --- arena noturna de Geffen: vida anunciada, saiu vivo no fim do tempo, curva com a vida do servidor ------------
+BRUTO, RECH, AJR = 71001, 71002, 71003
+_ev = [(0, fr.broadcast_list(meter.ARENA_HP_KEY, 124100000, 5)),
+       (8000, fr.spawn(RECH, "mob", 20866, "Rechenier", boss=0)),
+       (9000, fr.skill_damage(ME, RECH, 62734656)),
+       (9100, fr.spawn(RECH, "mob", 20866, "Rechenier", boss=0, hp=(2000000000, 61365344))),
+       (9200, fr.skill_damage(ME, RECH, 62734656)), (9300, fr.vanish(RECH, 1)),
+       (20000, fr.broadcast_list(meter.ARENA_HP_KEY, 800000000, 9)),
+       (28000, fr.spawn(BRUTO, "mob", 20859, "Bruto", boss=0)),
+       (29000, fr.skill_damage(ME, BRUTO, 300000000)),
+       (30000, fr.spawn(BRUTO, "mob", 20859, "Bruto", boss=0, hp=(2000000000, 500000000))),
+       (31000, fr.spawn(BRUTO, "mob", 20859, "Bruto", boss=0, hp=(2000000000, 700000000))),      # curou 200 mi
+       (32000, fr.skill_damage(ME, BRUTO, 100000000)),
+       (33000, fr.spawn(AJR, "mob", 2566, "", boss=0, raw_name="알퐁스 쥬니어#0".encode("cp949"))),
+       # fora da arena (sem anúncio) a vida mandada não muda nada: morre de dano que a gravação não mostra
+       (40000, fr.spawn(ERZ0, "mob", 20176, "Erzsebet", boss=0, hp=(37709580, 22163868))),
+       (41000, fr.skill_damage(ME, ERZ0, 1000000)), (42000, fr.vanish(ERZ0, 1)),
+       (88000, fr.vanish(BRUTO, 1)),                                                             # o tempo acabou
+       (90000, fr.stop(ME, 1, 1))]
+_car = combat_of(fr.build(ME, _ev)[0])
+_hb = an.boss_hp(_car, BRUTO, 400000000, False, 4000)
+_fk = [f["key"] for f in dd.boss_fights(_car)]
+check(RECH in _car.deaths and BRUTO not in _car.deaths and _car.left_alive.get(BRUTO) == (88000, 600000000)
+      and ERZ0 in _car.deaths and ERZ0 not in _car.left_alive
+      and _car.announced_hp == {RECH: (124100000, 5), BRUTO: (800000000, 9)}
+      and _hb[0] == 800000000 and "arena" in _hb[2] and RECH in _fk and BRUTO in _fk,
+      "arena noturna: a vida vem do anúncio da rodada, o adversário é luta de chefe e quem sumiu 'morto' com vida "
+      "sobrando (o tempo acabou) saiu vivo -> %s %s %s" % (_car.left_alive, _car.announced_hp, _hb))
+_tlb = tl.build(_car, BRUTO)["hp"]
+check(abs(_tlb[-1][1] - 0.75) < 1e-9 and min(v for _t, v in _tlb) > 0 and any(b > a for (_x, a), (_y, b) in
+                                                                               zip(_tlb, _tlb[1:])),
+      "arena noturna: a curva de HP segue a vida que o servidor manda (sobe com a cura e termina viva) -> %s"
+      % [(t, round(v, 3)) for t, v in _tlb])
+_arg2 = rrf.broadcast_arglist(fr.broadcast_list("", raw=b"\x1clWJyDQ\x1d\x1cH2JyDQ\x1c\x1dFei\x1c"))
+check(_car.name_of(AJR) == "Alfonso Jr." and rrf.decode_name("알퐁스".encode("cp949")) == "알퐁스"
+      and rrf.decode_name("AÇÃO".encode("cp1252")) == "AÇÃO" and _arg2 == [("lWJyDQ", ["", "Fei"])]
+      and rrf.broadcast_arglist(fr.broadcast_list("lGJyDQ", 4300000, 2)) == [("lGJyDQ", ["4300000", "2"])],
+      "nome em coreano (sem tradução) vira o da base; português em cp1252 continua; anúncio com vários argumentos "
+      "-> %r %r" % (_car.name_of(AJR), _arg2))
 
 # --- todo texto da interface tem tradução -------------------------------------
 import ast  # noqa: E402

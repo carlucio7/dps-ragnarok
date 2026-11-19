@@ -12,7 +12,7 @@ from tkinter import ttk
 
 import ui_parts
 import xp
-from analysis_ui import Table
+from analysis_ui import ScrollFrame, Table
 from fmt import dec, dur, full, num
 from i18n import _
 
@@ -30,12 +30,17 @@ ROWS = [
 REAL, ON, OFF = "Como foi", "O tempo todo", "Desligado"
 
 
+def _span(levels):
+    """"245–251" (ou "252" se for um nível só)."""
+    return ("%d" % levels[0]) if levels[0] == levels[-1] else "%d–%d" % (levels[0], levels[-1])
+
+
 class XpSim:
     def __init__(self, win, parent):
         self.win = win
         c = win.c
-        frame = tk.Frame(parent, bg=c["tile"])
-        self.frame = frame
+        self.frame = tk.Frame(parent, bg=c["tile"])
+        frame = ScrollFrame(self.frame, win, bg="tile").inner     # com a janela baixa, rola em vez de cortar
         top = tk.Frame(frame, bg=c["tile"])
         top.pack(fill="x", padx=8, pady=(8, 4))
         ttk.Button(top, text=_("Resetar simulador"), style="An.TButton", command=self.reset).pack(side="right",
@@ -46,6 +51,26 @@ class XpSim:
                          anchor="w", justify="left")
         note.pack(side="left", fill="x", expand=True)
         ui_parts.follow_wrap(top, note, int(190 * win.dpi), 200)
+        # e se fosse em outro mapa: os mesmos abates por minuto, cada um num monstro do mapa escolhido (no alto: é a
+        # pergunta que mais se faz; a tabela dos monstros do mapa fica no fim)
+        # numa caixa com borda na cor de destaque: a caixa de mapa e o resultado dela não se perdem no resto da aba
+        box = tk.Frame(frame, bg=c["panel"], highlightthickness=1, highlightbackground=c["accent"], padx=10, pady=7)
+        box.pack(fill="x", padx=8, pady=(4, 8))
+        mp = tk.Frame(box, bg=c["panel"])
+        mp.pack(fill="x")
+        win.label(mp, _("E se fosse em outro mapa?"), "head", "fg", "panel").pack(side="left")
+        self.map_var = tk.StringVar(win.top, "")
+        self.map_box = ttk.Combobox(mp, textvariable=self.map_var, width=50, height=16, style="Map.TCombobox",
+                                    font=win.f["text"], postcommand=self.map_open)   # a lista se refaz ao abrir
+        self.map_box.pack(side="left", padx=10)
+        self.map_box.bind("<<ComboboxSelected>>", lambda e: self.map_picked())
+        self.map_box.bind("<Return>", lambda e: self.map_picked())
+        self.map_box.bind("<KeyRelease>", self.map_filter)
+        # clicar na caixa seleciona o texto: o que se digitar troca o mapa escolhido em vez de se juntar a ele
+        self.map_box.bind("<FocusIn>", lambda e: self.map_box.select_range(0, "end"))
+        self.map_result = win.label(box, "", "text", "fg", "panel", anchor="w", justify="left")
+        self.map_result.pack(fill="x", pady=(6, 0))
+        ui_parts.follow_wrap(box, self.map_result, 20, 200)
         grid = tk.Frame(frame, bg=c["tile"])
         grid.pack(fill="x", padx=8, pady=(0, 6))
         for col, text in ((0, _("Bônus")), (1, _("Como foi neste recorte")), (2, _("No simulador")), (3, "%")):
@@ -83,6 +108,21 @@ class XpSim:
             ("what", _("O quê"), 290, "w", "text"), ("real", _("Como foi"), 130, "e", "text"),
             ("sim", _("Simulado"), 130, "e", "text"), ("diff", _("Diferença"), 85, "e", "text")], height=5)
         self.table.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self.map_title = win.label(frame, "", "head", "fg", "tile", anchor="w")
+        self.map_title.pack(fill="x", padx=8, pady=(4, 0))
+        self.map_table = Table(frame, win, [
+            ("name", _("Monstro"), 170, "w", "text"), ("lv", _("Nível"), 55, "e", "int"),
+            ("share_txt", _("Da mistura"), 90, "e", "text"), ("pen_txt", _("Penalidade"), 90, "e", "text"),
+            ("each_txt", _("XP por abate"), 120, "e", "text")], height=4)
+        self.map_table.pack(fill="both", expand=True, padx=8, pady=(2, 2))
+        self.map_note = win.label(frame, "", "small", "muted", "tile", anchor="w", justify="left")
+        self.map_note.pack(fill="x", padx=8, pady=(0, 8))
+        ui_parts.follow_wrap(frame, self.map_note, 20, 200)
+        self.maps = []                # [(texto da lista, mapa)]
+        self.maps_level = None        # o nível pelo qual a lista está ordenada
+        self.level = None             # o nível de quem gravou (no fim do recorte)
+        self.map_chosen = ""          # o texto do último mapa escolhido (aberta com ele, a lista mostra todos)
+        self.map_cache = (None, None)
         self.replay = None            # a gravação para a qual a tela foi montada (outra gravação: tudo "Como foi")
         self.real = {}
         self.loading = False
@@ -98,6 +138,154 @@ class XpSim:
     def changed(self):
         if not self.loading:
             self.win.refresh(force=True)
+
+    def map_list(self):
+        """Os mapas da caixa, primeiro os de monstros de nível mais perto do de quem gravou: "mapa · nv 65–86 · nome
+        no /navi" (e quantos você matou lá, se caçou nele com o programa aberto). Digitar filtra pelo texto todo:
+        acha pelo código ou pelo nome."""
+        out = []
+        for m, source, n, lv in xp.sim_maps(self.win.app.cfg, self.level):
+            text = m
+            if lv:
+                text += " · " + ((_("nv %d") % lv[1]) if lv[1] == lv[2] else (_("nv %d–%d") % (lv[1], lv[2])))
+            if source == "seus":
+                text += " · " + _("seus abates lá: %d") % n
+            title = xp.map_title(m)
+            if title:
+                text += " · " + title
+            out.append((text, m))
+        self.maps, self.maps_level = out, self.level
+        return [text for text, _m in out]
+
+    def map_filter(self, e=None):
+        """Digitar na caixa filtra a lista (parte do nome do mapa). Vazia ou com o mapa escolhido, a lista é toda."""
+        if e is not None and e.keysym in ("Return", "Up", "Down", "Escape", "Tab"):
+            return
+        if not self.maps:
+            self.map_list()
+        values = [text for text, _m in self.maps]
+        typed = self.map_var.get().strip()
+        if typed and typed != self.map_chosen:
+            low = typed.lower()
+            values = [v for v in values if low in v.lower()]
+        self.map_box.configure(values=values)
+
+    def map_open(self):
+        """Ao abrir a lista: refeita (os seus abates em cada mapa mudam) e filtrada só se a pessoa digitou um pedaço."""
+        self.map_list()
+        self.map_filter()
+
+    def map_picked(self):
+        self.map_chosen = self.map_var.get().strip()
+        self.map_changed()
+
+    def map_code(self):
+        """O mapa escolhido (o código, como no /navi), ou "" sem escolha."""
+        text = self.map_var.get().strip()
+        if not text:
+            return ""
+        hit = next((m for t, m in self.maps if t == text), None)
+        return hit or text.split()[0].lower()
+
+    def map_changed(self):
+        self.map_cache = (None, None)
+        if not self.loading:
+            self.win.refresh(force=True)
+
+    def refresh_map(self, c, amount, over=None):
+        """A linha "e se fosse em outro mapa" e a tabela dos monstros dele (com os bônus trocados no simulador)."""
+        win, cfg = self.win, self.win.app.cfg
+        self.level = xp.level_at(c, win.rng[1] if win.rng else c.now)
+        if not self.maps or self.maps_level != self.level:
+            self.map_list()
+            self.map_filter()
+        m = self.map_code()
+
+        def empty(text):
+            self.map_result.configure(text=text, fg=win.c["muted"])
+            self.map_title.configure(text="")
+            self.map_table.set_rows([], lambda r: 0)
+            self.map_note.configure(text="")
+        if not m:
+            empty(_("Escolha um mapa (ou digite parte do nome): o simulador mantém os seus abates por minuto e troca "
+                    "cada um por um monstro do mapa."))
+            return
+        key = (id(c), c.version, len(c.death_log), win.rng, m, repr(over), repr([cfg.get(k) for k in xp.EST_KEYS]))
+        if self.map_cache[0] == key:
+            r = self.map_cache[1]
+        else:
+            r = xp.sim_map(c, cfg, win.rng, m, over)
+            self.map_cache = (key, r)
+        if r is None:
+            empty(_("Ainda não sei os monstros de %s: o /navi do jogo não tem esse mapa e você ainda não caçou nele "
+                    "com o programa aberto.") % m)
+            return
+        title = xp.map_title(r["map"])
+        self.map_title.configure(text=(_("Monstros de %s (%s)") % (r["map"], title)) if title
+                                 else (_("Monstros de %s") % r["map"]))
+        span = (win.rng[1] - win.rng[0]) if win.rng else c.now
+        kpm = r["kills"] * 60000.0 / span if span > 0 else 0.0
+        d = (r["xp"] / r["base_xp"] - 1.0) if r["base_xp"] else None
+        text = _("Mantidas as mesmas quantidades de abates por minuto (%s por minuto), em %s a XP do recorte teria "
+                 "sido %s") % (dec("%.1f" % kpm), r["map"], amount(r["xp"]))
+        if d is not None:
+            text += _(" (%s do que foi)") % dec("%+.0f%%" % (100 * d))
+        if over:
+            text += _(", com os bônus trocados acima")
+        if r["per_hour"]:
+            text += ". " + _("Por hora: %s.") % amount(r["per_hour"])
+        color = win.c["fg"] if d is None or abs(d) < 0.005 else win.c["good" if d > 0 else "bad"]
+        bio = r.get("bio_share", 0) >= xp.FOREIGN_SHARE
+        lo, hi = xp.BIO_LATAM
+        if r.get("latam_share", 0) >= xp.FOREIGN_SHARE and not r.get("measured"):
+            # a XP da tabela é a de outra versão destes monstros: o número pode estar longe do LATAM
+            if bio:                                 # a Biosfera: medido no LATAM, uns 11 a 17% da tabela
+                text += " " + _("Atenção: esta conta usa a XP da Biosfera coreana, que não é a do LATAM. Numa gravação "
+                                "real no bl_lava, a XP foi só uns %s a %s disso") % (
+                    dec("%.0f%%" % (100 * lo)), dec("%.0f%%" % (100 * hi)))
+                text += (_(": por hora, algo entre %s e %s.") % (amount(r["per_hour"] * lo), amount(r["per_hour"] * hi))
+                         if r["per_hour"] else ".")
+            else:
+                text += " " + _("Atenção: no LATAM estes monstros são de outra versão, e a XP deles aqui pode estar bem "
+                                "longe da real.")
+            color = win.c["mid"]
+        self.map_result.configure(text=text, fg=color)
+        rows = [dict(key=x["mob"], name=x["name"], lv=x["lv"], share_txt=dec("%.0f%%" % (100 * x["share"])),
+                     pen_txt="%d%%" % x["pen"], each_txt=num(x["per_kill"])) for x in r["mobs"]]
+        self.map_table.set_rows(rows, lambda row: row["key"])
+        note = {"seus": _("Mistura do mapa: os seus abates lá."),
+                "rathena": _("Mistura do mapa: quantos nascem de cada monstro (rAthena).")}.get(
+            r["source"], _("Mistura do mapa: quantos nascem de cada monstro (a lista do /navi do jogo)."))
+        if r["unknown"] > 0.05:
+            note += " " + _("%s dos monstros dele não têm XP no programa (ficaram de fora).") % dec(
+                "%.0f%%" % (100 * r["unknown"]))
+        if bio and r.get("measured"):
+            note += " " + _("Biosfera: esta conta usa a XP medida no LATAM nas suas caçadas (a nossa tabela é a coreana, "
+                            "de outra versão, que rende bem mais).")
+        elif bio and r.get("latam_other"):
+            ours = sorted({a for _m, a, _b in r["latam_other"]})
+            theirs = sorted({b for _m, _a, b in r["latam_other"]})
+            note += " " + _("Por que a Biosfera é diferente: no LATAM ela é a versão de antes da reforma coreana de agosto "
+                            "de 2022 (%d monstros deste mapa têm outro nível lá: %s no jogo, %s na nossa tabela; e uns 3 "
+                            "milhões de HP, contra 21 a 31 milhões na coreana). A nossa tabela de XP é a de depois da "
+                            "reforma, que aumentou muito a XP. A faixa de %s a %s vem de uma gravação de 1 minuto no "
+                            "bl_lava (17 abates) e varia com o evento do servidor daquele dia, que o replay não mostra. "
+                            "Para medir de verdade: cace 10 minutos ou mais num mapa da Biosfera com o programa aberto e, "
+                            "ao parar, comece outra gravação logo em seguida (as duas juntas dão a XP exata). Daí em "
+                            "diante o simulador usa a sua medida, que vale só para aquele mapa: a previsão dos outros "
+                            "mapas não muda.") % (len(r["latam_other"]), _span(theirs), _span(ours),
+                                                  dec("%.0f%%" % (100 * lo)), dec("%.0f%%" % (100 * hi)))
+        elif r.get("latam_other"):
+            ours = sorted({a for _m, a, _b in r["latam_other"]})
+            theirs = sorted({b for _m, _a, b in r["latam_other"]})
+            note += " " + _("No LATAM, %d monstros deste mapa têm outro nível (%s no jogo, %s na nossa tabela de XP, que "
+                            "vem da versão coreana): lá eles são de outra versão, e a XP deles pode não bater. Uma caçada "
+                            "sua lá, com o programa aberto, faz o simulador usar a sua medida.") % (
+                len(r["latam_other"]), _span(theirs), _span(ours))
+        note += " " + _("Num mapa de monstros mais fortes os abates por minuto costumam cair: o simulador mantém os "
+                        "seus. A penalidade de nível e o spotlight são os de cada monstro; a correção, a medida no "
+                        "mapa (se houver).")
+        self.map_note.configure(text=note)
 
     def pct_changed(self, key):
         """Mexer no % de um bônus já é pedir para simular esse valor: ele passa para "O tempo todo"."""
@@ -183,9 +371,9 @@ class XpSim:
             if recent is None:
                 return "—"
             got = xp.simulate(c, cfg, recent, o)["xp"] or 0.0
-            rate = got * 60000.0 / (recent[1] - recent[0])
+            rate = got * 60000.0 / xp.active_ms(c, recent)      # o mesmo ritmo de caça do "Até o próximo nível"
             ms, _left = xp.time_to_level(c, cfg, rate) if rate > 0 else (None, None)
-            return xp.span_text(ms) if ms else ("—" if ms is None else _("já subiu"))
+            return xp.span_text(ms) if ms else ("—" if ms is None else _("a qualquer momento"))
 
         def whole_level(per_min):
             pr = xp.progress(c, cfg)
@@ -207,6 +395,7 @@ class XpSim:
                  sim=whole_level(sim["per_min"]), diff=""),
         ]
         self.table.set_rows(rows, lambda r: r["key"])
+        self.refresh_map(c, amount, over)
         if not base["xp"] or sim["xp"] is None:
             self.verdict.configure(text=_("Sem abates com XP conhecida neste recorte."), fg=win.c["muted"])
         elif not over:

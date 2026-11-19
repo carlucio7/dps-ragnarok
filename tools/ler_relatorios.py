@@ -559,6 +559,17 @@ def _bonus_names(on):
 QUEST_KEEP_SPREAD = 1.3       # recompensa vai para o arquivo se as medidas dela não variam mais que isso (maior÷menor)
 
 
+def whole_level(level, pay, mult):
+    """True se o que a medida diz que a missão pagou é a XP inteira do nível (ou a metade, um terço...): o programa
+    que mediu não contou os abates do trecho (a 1.10.0, depois de um Zerar). O relatório não diz a classe: vale a XP
+    do nível de qualquer tabela (xp.whole_level, a mesma conta que o programa usa para não aprender isso)."""
+    try:
+        level = int(level)
+    except (TypeError, ValueError):
+        return False
+    return xp.whole_level(level, pay, mult)
+
+
 def quest_mults(on):
     """(regra do programa, regra alternativa) do multiplicador de missão pelos bônus ativos na entrega, ou None sem eles
     anotados: (1 + manual + Kafra) × (1 + Njord) × (1 + Milagre), e (1 + evento + VIP + Cetro) + manual + Kafra."""
@@ -592,9 +603,11 @@ def quest_obs(rows, data):
     out, taken = [], set()
     for (pc, _id), q in data.quests.items():
         taken.add((pc, q["mid"]))
-        out.append(dict(quest=q["quest"], base=q["base"], pay=q["base"] * q["mult"] if q["mult"] else None,
+        pay = q["base"] * q["mult"] if q["mult"] else None
+        out.append(dict(quest=q["quest"], base=q["base"], pay=pay,
                         mult=q["mult"], rules=None, level=q["level"], job=None, pc=pc, date=q["date"],
-                        src="programa", partners=q["partners"], share=None, on=None))
+                        src="programa", partners=q["partners"], share=None, on=None,
+                        whole=whole_level(q["level"], pay, q["mult"])))
     for r in rows:
         qs = [q for q in (_quest_id(x) for x in r["quests"]) if q and not xp.quest_wait(q)]
         # uma missão só, entregue uma vez ou mais (a Água Mineral renova a espera: cada entrega rende inteira)
@@ -618,7 +631,7 @@ def quest_rewards(obs):
     em grupo só valem juntas e ficam de fora)."""
     by = {}
     for o in obs:
-        if o["base"] and not o["partners"]:
+        if o["base"] and not o["partners"] and not o.get("whole"):
             by.setdefault(o["quest"], []).append(o["base"])
     out = {}
     for q, vals in by.items():
@@ -631,7 +644,7 @@ def quest_rewards(obs):
 def quests_for_build(obs):
     """{missão: recompensa} para o tools/build_quest_exp.py: as que têm duas medidas ou mais que não variam mais que
     QUEST_KEEP_SPREAD, ou uma medida do próprio programa."""
-    progs = {o["quest"] for o in obs if o["src"] == "programa" and not o["partners"]}
+    progs = {o["quest"] for o in obs if o["src"] == "programa" and not o["partners"] and not o.get("whole")}
     return {str(q): int(round(v)) for q, (v, n, spread) in quest_rewards(obs).items()
             if (n >= 2 and spread <= QUEST_KEEP_SPREAD) or (n == 1 and q in progs)}
 
@@ -690,6 +703,9 @@ def section_quests(rows, data):
             if o["partners"]:
                 parts.append("junto com %s: o total dividido (só vale junto)" % ", ".join(map(str, o["partners"])))
             parts.append(o["src"])
+            if o.get("whole"):
+                parts.append("DESCARTADA: é a XP do nível inteiro (os abates do trecho não entraram na conta; a 1.10.0 "
+                             "fazia isso depois de um Zerar)")
             out.append(" · ".join(parts))
     rest = sorted(q for q in turned if q not in by_q)
     if rest:
@@ -707,7 +723,7 @@ def section_quest_rule(obs, table):
     lines, err = [], {"programa": [], "alternativa": []}
     for o in sorted(obs, key=lambda o: (o["quest"], o["level"])):
         t = table.get(o["quest"])
-        if not t or not o["pay"] or o["partners"]:
+        if not t or not o["pay"] or o["partners"] or o.get("whole"):
             continue
         paid = o["pay"] / t
         txt = "missão %s nível %d (%s): pagou %s" % (o["quest"], o["level"], o["src"], x2(paid))

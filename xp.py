@@ -21,6 +21,7 @@ import datetime
 import json
 import os
 import re
+import statistics
 import sys
 import threading
 import weakref
@@ -291,11 +292,12 @@ def level_segments(c, cfg):
     a sobra do abate que subiu passa para o nível novo sem aparecer (um Salgueiro dá mais que o nível 1 inteiro)."""
     out = []
     an = anchors(c)
+    cut = getattr(c, "reset_t", None)   # o Zerar apagou os abates de antes: trecho que começou antes dele não mede
     lumpy = False                       # o nível anterior tinha abates grandes: o começo deste não é exato
     for (t0, lv, x0), (t1, lv1, _x) in zip(an, an[1:]):
         nd = need(c, cfg, lv)
         was, lumpy = lumpy, bool(nd) and _lumpy(c, cfg, t0, t1, nd)
-        if lv1 == lv + 1 and nd and not lumpy and not was:
+        if lv1 == lv + 1 and nd and not lumpy and not was and (cut is None or t0 >= cut):
             # o que os abates renderam de fato: a XP do nível mais o que as mortes sem seguro tiraram no caminho
             out.append((t0, t1, nd - x0 + death_loss(c, cfg, t0, x0, lv, t1)[0]))
     return out
@@ -375,8 +377,9 @@ def quest_in(c, t0, t1):
     """True se quem grava concluiu ou entregou alguma missão no trecho: a XP da recompensa não vem de abate, então
     o trecho não serve para medir a XP dos abates (uma entrega de diária no Porão rendeu 3% do nível de uma vez).
     O fim de uma espera ("[Espera] ...") não conta: não dá XP. A missão que subiu o nível vem no mesmo instante da
-    subida (LEVELUP_TICK_MS): conta para os dois trechos em volta dela."""
-    return any(t0 <= t <= t1 + LEVELUP_TICK_MS and not quest_wait(q) for t, q in getattr(c, "quests_done", ()))
+    subida (LEVELUP_TICK_MS): conta para os dois trechos em volta dela. A entrega do lanche (handins) conta também."""
+    return (any(t0 <= t <= t1 + LEVELUP_TICK_MS and not quest_wait(q) for t, q in getattr(c, "quests_done", ()))
+            or bool(handins(c, (t0, t1 + LEVELUP_TICK_MS))))
 
 
 # A entrega que sobe o nível chega no mesmo instante da subida (mesmo milissegundo, antes do pacote do nível): a XP
@@ -399,7 +402,7 @@ def session_correction(c, cfg):
     """(real ÷ lista, XP real coberta) das subidas de nível desta gravação, ou None."""
     # os trechos já fecharam (terminam numa subida de nível): não mudam com o que chega depois
     sig = (id(c), len(getattr(c, "level_ups", ())), len(getattr(c, "quests_done", ())),
-           repr(sorted((cfg or {}).get("xp_bonuses", {}).items())))
+           len(getattr(c, "quests_added", ())), repr(sorted((cfg or {}).get("xp_bonuses", {}).items())))
     hit = _CACHE.get("sc")
     if hit and hit[0] == sig:
         return hit[1]
@@ -450,7 +453,10 @@ def _sample_kills(x):
 
 def _baseline(samples):
     """O normal do personagem, para mapa que ele nunca mediu: a média dos mapas que rendem menos (até 8% acima do
-    mais baixo). O Monster Spotlight só aumenta a XP, então os mapas sem evento ficam no grupo de baixo."""
+    mais baixo). O Monster Spotlight só aumenta a XP, então os mapas sem evento ficam no grupo de baixo. Os mapas de
+    outra versão no LATAM (foreign_map: a Biosfera rende uns 15% da lista) ficam de fora: puxariam o normal para
+    baixo e todo mapa ainda sem medida sairia com a XP deles."""
+    samples = [x for x in samples if not foreign_map(_sample_map(x))]
     by = {}
     for x in samples:
         if _sample_map(x):
@@ -504,13 +510,13 @@ def predict(cfg, gid, mapname):
 def stored_correction(c, cfg, mapname=None):
     """(correção, nº de medidas) ou None. Com `mapname`, as medidas feitas nesse mapa, se houver (cada mapa rende
     de um jeito: o Monster Spotlight dá mais só a alguns monstros de alguns mapas); senão, todas as do
-    personagem."""
+    personagem, menos as dos mapas de outra versão no LATAM (foreign_map), que só valem para eles."""
     samples = _fresh_samples(c, cfg)
     if mapname:
         here = [x for x in samples if _sample_map(x) == map_key(mapname)]
         if here:
             return _weighted(here)
-    return _weighted(samples)
+    return _weighted([x for x in samples if not foreign_map(_sample_map(x))])
 
 
 def map_corrections(c, cfg):
@@ -614,7 +620,7 @@ def _learn(cfg):
     monstros sem XP na base. Só neste PC; o relatório (xpreport) mostra sem nada pessoal."""
     lrn = cfg.setdefault("xp_learn", {})
     for k, v in (("measures", []), ("unknown", {}), ("server", []), ("changes", []), ("drops", {}), ("names", {}),
-                 ("quests", [])):
+                 ("quests", []), ("maps", {})):
         if not isinstance(lrn.get(k), type(v)):
             lrn[k] = v
     if not isinstance(lrn.get("secret"), str):
@@ -654,7 +660,8 @@ def _measure_log(c, cfg, t0, t1, gain, ratio, mapname, src, when):
     wins, sets = windows(c, cfg), settings(cfg, c)
     quest_at, edge = [], []
     ups = [t for t, _lv in getattr(c, "level_ups", ())]
-    for t, q in getattr(c, "quests_done", ()):
+    turned = list(getattr(c, "quests_done", ())) + [(t, q) for t, q, _i in handins(c)]
+    for t, q in sorted(turned):
         if t0 <= t <= t1 + LEVELUP_TICK_MS:
             on = {}
             for b in BONUSES:
@@ -707,6 +714,7 @@ def _learn_recording(c, cfg, name, when, logs):
     if len(lrn["unknown"]) > LEARN_UNKNOWN:
         keep = sorted(lrn["unknown"].items(), key=lambda kv: kv[1].get("last", ""))[-LEARN_UNKNOWN:]
         lrn["unknown"] = dict(keep)
+    log_map_mix(lrn, c, name, when)
     drops = drop_log(c)
     if drops:
         lrn["drops"][name] = dict(date=when[:10], mobs=drops)
@@ -829,8 +837,9 @@ def exact_segments(c, cfg, xp_after=None):
     s = c.session
     segs = [(t0, t1, gain, "%d" % i) for i, (t0, t1, gain) in enumerate(level_segments(c, cfg))]
     an = anchors(c)
+    cut = getattr(c, "reset_t", None)   # Zerar depois do último ponto exato: os abates do trecho não estão todos
     nxt = xp_after(c.path, s) if xp_after is not None and getattr(c, "path", None) else None
-    if an and nxt and nxt.get("exp") is not None:
+    if an and nxt and nxt.get("exp") is not None and (cut is None or an[-1][0] >= cut):
         start, other = _seconds(s.recorded_at), _seconds(nxt["when"])
         if start is not None and other is not None and other - (start + c.now / 1000.0) <= CALIBRATE_GAP_S:
             t0, lv, x0 = an[-1]                 # do último ponto exato até o começo da gravação seguinte
@@ -890,7 +899,8 @@ def detect_server(c, cfg, segs=None, xp_after=None):
     segs = exact_segments(c, cfg, xp_after) if segs is None else segs
     known = (cfg.get("xp_manual_last") or {}).get(str(c.session.gid))
     use = [(t0, t1, gain) for t0, t1, gain, _tag in segs
-           if not unsure(c, t0, t1) and _big(c, cfg, t0, t1, gain) and (known or not _manual_blind(c, t0, t1))]
+           if not unsure(c, t0, t1) and _big(c, cfg, t0, t1, gain) and (known or not _manual_blind(c, t0, t1))
+           and not _foreign_in(c, t0, t1)]          # a lista de outra versão diz nada do evento
     real = sum(g for _a, _b, g in use)
     if not real:
         return None
@@ -915,7 +925,8 @@ def detect_server(c, cfg, segs=None, xp_after=None):
         # XP acima da lista num mapa, mas as medidas recentes de outros mapas (de qualquer personagem) fecham com
         # ela: é coisa do mapa (o spotlight dá mais a alguns monstros), não do servidor; a correção do mapa cuida
         here = {map_key(_one_map(c, t0, t1) or "") for t0, t1, _g in use}
-        other = [x for x in recent if _sample_map(x) and _sample_map(x) not in here]
+        other = [x for x in recent if _sample_map(x) and _sample_map(x) not in here
+                 and not foreign_map(_sample_map(x))]
         w = _weighted([[x[0], _sample_kills(x)] for x in other])
         if w and abs(w[0] - 1.0) <= SERVER_FIT:
             return None
@@ -931,6 +942,23 @@ def detect_server(c, cfg, segs=None, xp_after=None):
     return best
 
 
+def learn_levels(c, cfg):
+    """Ao vivo, a cada subida de nível: aprende a recompensa das missões dos níveis que acabaram de fechar (a conta de
+    learn_quests), sem esperar a gravação seguinte começar. Com isso a missão que se repete a cada nível (as diárias
+    da Sociedade de Monstros, renovadas com Água Mineral) já entra certa no nível seguinte da mesma gravação. Cada
+    nível é visto uma vez; os rótulos são os mesmos da calibração (exact_segments), então a anotação no registro de
+    aprendizado é trocada, não repetida, quando a gravação seguinte começa. True se aprendeu alguma."""
+    if not QUEST_XP_ON or not gear_ready() or not getattr(c, "quests_done", None):
+        return False
+    upto = getattr(c, "quests_learned_upto", None)
+    segs = [(t0, t1, gain, "%d" % i) for i, (t0, t1, gain) in enumerate(level_segments(c, cfg))
+            if upto is None or t1 > upto]
+    if not segs:
+        return False
+    c.quests_learned_upto = segs[-1][1]
+    return learn_quests(c, cfg, segs)
+
+
 def learn_quests(c, cfg, segs):
     """Aprende a XP das missões num trecho com XP exata: real − abates − as missões já conhecidas do trecho, quando
     isso pesa pelo menos um quarto dele (abaixo disso o erro dos abates engole a conta). Uma missão a medir: a
@@ -942,7 +970,11 @@ def learn_quests(c, cfg, segs):
     cfg["xp_quests"], que vale mais que a tabela (é o que o jogo pagou no LATAM). True se aprendeu alguma."""
     if not QUEST_XP_ON:
         return False
-    corr = correction(c, cfg)[0] or 1.0
+    corr0 = correction(c, cfg)[0]
+    corr = corr0 or 1.0
+    # sem medida exata dos abates (evento do servidor desmarcado, nenhum nível sem missão...) a lista pode errar
+    # muito, e o erro iria todo para a missão: aí ela só é aprendida se pesar quase o trecho todo
+    share_min = QUEST_LEARN_MIN if corr0 else QUEST_LEARN_BLIND
     lcfg = dict(cfg or {}, xp_mode="lista")
     learned = False
     name = os.path.basename(getattr(c, "path", None) or "")
@@ -961,26 +993,33 @@ def learn_quests(c, cfg, segs):
         known = [q for q in qs if q not in pending]
         if pending:
             rest = gain - kill - sum(q["xp"] for q in known)
-            if rest < QUEST_LEARN_MIN * gain:
+            if rest < share_min * gain:
                 continue
             ids = sorted({q["quest"] for q in pending})
+            entries = []
             for q in pending:                     # a mesma missão entregue mais de uma vez conta em cada entrega
                 entry = dict(base=int(round(rest / len(pending) / q["mult"])), level=level_at(c, q["t"]),
                              mult=round(q["mult"], 3))
                 if len(ids) > 1:
                     entry["with"] = [i for i in ids if i != q["quest"]]
+                entries.append((q, entry))
+            if any(whole_level(e["level"], e["base"] * e["mult"], e["mult"]) for _q, e in entries):
+                continue                          # os abates do trecho não entraram: não é a recompensa
+            for q, entry in entries:
                 cfg.setdefault("xp_quests", {})[str(q["quest"])] = entry
                 _quest_log(cfg, "%s#%s" % (name, tag), q["quest"], entry, when, None)
             learned = True
-        elif known and len({q["quest"] for q in known}) == 1:
+        elif known and len({q["quest"] for q in known}) == 1 and not known[0].get("handin"):
             # a única missão do trecho, entregue uma vez ou mais (a Água Mineral renova a espera da Sociedade de
             # Monstros: a mesma missão várias vezes no dia, cada entrega com a recompensa inteira)
             q = known[0]
             rest = gain - kill
-            if rest < QUEST_LEARN_MIN * gain:
+            if rest < share_min * gain:
                 continue
             entry = dict(base=int(round(rest / sum(x["mult"] for x in known))), level=level_at(c, q["t"]),
                          mult=round(q["mult"], 3))
+            if whole_level(entry["level"], entry["base"] * entry["mult"], entry["mult"]):
+                continue                              # os abates do trecho não entraram: não é a recompensa
             _quest_log(cfg, "%s#%s" % (name, tag), q["quest"], entry, when, q["base"])
             if abs(entry["base"] / q["base"] - 1.0) <= QUEST_RELEARN_FIT:
                 continue                              # a recompensa conhecida confere
@@ -1396,6 +1435,7 @@ def factor(c, cfg):
 # "já subiu" (a regra anterior, com evento, VIP e Cetro, dava em Hugel mais XP que o trecho inteiro rendeu).
 QUEST_XP_ON = True
 QUEST_LEARN_MIN = 0.25               # só aprende a XP de uma missão que pese pelo menos isso do trecho exato
+QUEST_LEARN_BLIND = 0.67             # ...ou isto, quando os abates ainda não têm medida exata (a lista pode errar muito)
 QUEST_RELEARN_FIT = 0.15             # missão já conhecida só é reaprendida se o medido errar mais que isso
 # bônus anotados em cada entrega de missão no registro de aprendizado (o relatório junta e mostra quais valem)
 QUEST_LOG_KEYS = ("server", "vip", "scepter", "kafra", "manual", "njord", "miracle", "gear")
@@ -1404,19 +1444,41 @@ _QUEST_DATA = None
 
 
 def _quest_data():
-    """({missão: XP sem bônus}, {missões de espera}) de data/quest_exp.json, lido uma vez."""
+    """({missão: XP sem bônus}, {missões de espera}, {espera que nasce numa entrega: dict(base, items={item: XP})})
+    de data/quest_exp.json, lido uma vez."""
     global _QUEST_DATA
     if _QUEST_DATA is None:
-        exp, wait = {}, set()
+        exp, wait, handin = {}, set(), {}
         try:
             with open(os.path.join(_DATA, "quest_exp.json"), encoding="utf-8") as f:
                 d = json.load(f)
             exp = {int(k): int(v) for k, v in (d.get("exp") or {}).items()}
             wait = {int(q) for q in d.get("zero") or ()}
-        except (OSError, ValueError, TypeError, AttributeError):
+            for q, v in (d.get("handin") or {}).items():
+                handin[int(q)] = dict(base=int(v["base"]),
+                                      items={int(i): int(x) for i, x in (v.get("items") or {}).items()})
+        except (OSError, ValueError, TypeError, AttributeError, KeyError):
             pass
-        _QUEST_DATA = (exp, wait)
+        _QUEST_DATA = (exp, wait, handin)
     return _QUEST_DATA
+
+
+HANDIN_ITEM_MS = 200          # o item entregue sai da bolsa no mesmo instante em que a espera nasce
+
+
+def handins(c, rng=None):
+    """Entregas que não fecham missão nenhuma: o jogo só abre uma espera e paga na hora (o Lanche do Diabo da Torre
+    do Relógio: entregam-se 100 do item do dia e nasce "[Espera] Lanche do Diabo"). [(t, espera, item ou None)]; o
+    item é o que saiu da bolsa no mesmo instante, se for um dos que a tabela conhece."""
+    table = _quest_data()[2]
+    out = []
+    for t, q in getattr(c, "quests_added", ()):
+        if q in table and (rng is None or rng[0] <= t <= rng[1]):
+            items = table[q]["items"]
+            item = next((i for tt, i, _n in getattr(c, "bag_out", ()) if abs(tt - t) <= HANDIN_ITEM_MS and i in items),
+                        None)
+            out.append((t, q, item))
+    return out
 
 
 def quest_wait(qid):
@@ -1426,14 +1488,39 @@ def quest_wait(qid):
 
 def quest_base(qid, cfg):
     """Recompensa da missão sem bônus: a aprendida ao fechar um nível, senão a da tabela; None se não se sabe (ou
-    com QUEST_XP_ON desligado)."""
+    com QUEST_XP_ON desligado). A aprendida que é a XP do nível inteiro não vale (whole_level)."""
     if not QUEST_XP_ON:
         return None
     learned = ((cfg or {}).get("xp_quests") or {}).get(str(qid))
-    if isinstance(learned, dict) and isinstance(learned.get("base"), (int, float)) and learned["base"] > 0:
+    if (isinstance(learned, dict) and isinstance(learned.get("base"), (int, float)) and learned["base"] > 0
+            and not whole_level(learned.get("level"), learned["base"] * (learned.get("mult") or 1.0),
+                                learned.get("mult"))):
         return float(learned["base"])
     exp = _quest_data()[0].get(qid)
     return float(exp) if exp else None
+
+
+_LEVEL_NEEDS = {}
+
+
+def whole_level(level, pay, mult):
+    """True se `pay` (o que a missão teria pago numa entrega) é a XP inteira do nível `level` em alguma tabela, ou a
+    metade, um terço... (a mesma missão entregue mais de uma vez no trecho): a medida não contou os abates do trecho.
+    A 1.10.0 fazia isso depois de um Zerar no meio da gravação (os abates de antes sumiam): a missão ficava valendo o
+    nível todo e o "já subiu" aparecia logo depois de cada entrega dela. Uma medida de verdade não dá isso: o nível
+    que só missões fecharam termina na entrega que subiu o nível, e essa fica de fora (learn_quests)."""
+    if not isinstance(level, int) or not pay or level <= 0:
+        return False
+    needs = _LEVEL_NEEDS.get(level)
+    if needs is None:
+        needs = {t.get(level) for t in _base_exp().values()} | {table_need(min(FOURTH_JOBS), level)}
+        needs.discard(None)
+        needs = _LEVEL_NEEDS[level] = tuple(needs)
+    for k in range(1, 7):
+        tol = 0.5 * (mult or 1.0) * k + 2             # a recompensa fica guardada arredondada, sem o multiplicador
+        if any(abs(pay * k - n) <= tol for n in needs):
+            return True
+    return False
 
 
 QUEST_ROLES = {"manual": "p", "kafra": "p", "njord": "k", "miracle": "first"}   # os bônus que valem na missão
@@ -1453,10 +1540,12 @@ def quest_mult(t, wins, sets):
 
 def quest_rows(c, cfg, rng=None, wins=None, sets=None):
     """Missões entregues por quem grava no recorte: [dict(t, quest, base, mult, xp)] (xp None = recompensa que o
-    programa ainda não conhece). As de espera ficam de fora: a saída delas da lista não é uma entrega."""
+    programa ainda não conhece). As de espera ficam de fora: a saída delas da lista não é uma entrega. As entregas
+    sem missão (o lanche, ver handins) entram com handin=True e o item entregue (a recompensa depende dele)."""
     done = [(t, q) for t, q in getattr(c, "quests_done", ())
             if (rng is None or rng[0] <= t <= rng[1]) and not quest_wait(q)]
-    if not done:
+    hand = handins(c, rng)
+    if not done and not hand:
         return []
     wins = windows(c, cfg) if wins is None else wins
     sets = settings(cfg, c) if sets is None else sets
@@ -1468,6 +1557,14 @@ def quest_rows(c, cfg, rng=None, wins=None, sets=None):
             base = None                     # aprendida em grupo: só vale quando o grupo é entregue junto
         mult = quest_mult(t, wins, sets)
         out.append(dict(t=t, quest=q, base=base, mult=mult, xp=base * mult if base else None))
+    if hand:
+        table = _quest_data()[2]
+        for t, q, item in hand:
+            base = float(table[q]["items"].get(item, table[q]["base"])) if QUEST_XP_ON else None
+            mult = quest_mult(t, wins, sets)
+            out.append(dict(t=t, quest=q, base=base, mult=mult, xp=base * mult if base else None, item=item,
+                            handin=True))
+        out.sort(key=lambda r: r["t"])
     return out
 
 
@@ -1577,17 +1674,12 @@ def sim_real(c, cfg, rng=None):
     return out
 
 
-def simulate(c, cfg, rng, over):
-    """A XP dos abates do recorte trocando alguns bônus. `over`: {chave: ("on", %) para valer o tempo todo com esse
-    %, ou ("off",) para não valer}; o que não está em `over` vale como valeu na gravação (as mesmas janelas e
-    valores da estimativa). Mesma fórmula e mesma correção medida da estimativa: sem nada em `over` o resultado é
-    o da lista de bônus. Devolve dict(xp, base, factor, per_min, per_hour)."""
-    rows, _unknown = kills(c, rng)
-    _f, source, corr = factor(c, cfg)
-    kcorr = _kill_corrections(c, cfg, source, corr)
-    wins, sets, marks = dict(windows(c, cfg)), dict(settings(cfg, c)), marks_of(c)
+def _overridden(c, cfg, over):
+    """(janelas, ajustes) dos bônus com os trocados no simulador: `over` {chave: ("on", %) o recorte inteiro com
+    esse %, ou ("off",) desligado}; o resto como valeu na gravação."""
+    wins, sets = dict(windows(c, cfg)), dict(settings(cfg, c))
     for b in BONUSES:
-        o = over.get(b["key"]) if b["key"] in SIM_KEYS else None
+        o = (over or {}).get(b["key"]) if b["key"] in SIM_KEYS else None
         if not o:
             continue
         if o[0] == "off":
@@ -1598,6 +1690,19 @@ def simulate(c, cfg, rng, over):
         sets[b["key"]] = st
         if b["status"] is not None:               # ativo o recorte inteiro (o % vai na janela, quando o bônus o traz)
             wins[b["key"]] = [(-1, 10 ** 15, float(o[1]) if b.get("val") else 0)]
+    return wins, sets
+
+
+def simulate(c, cfg, rng, over):
+    """A XP dos abates do recorte trocando alguns bônus. `over`: {chave: ("on", %) para valer o tempo todo com esse
+    %, ou ("off",) para não valer}; o que não está em `over` vale como valeu na gravação (as mesmas janelas e
+    valores da estimativa). Mesma fórmula e mesma correção medida da estimativa: sem nada em `over` o resultado é
+    o da lista de bônus. Devolve dict(xp, base, factor, per_min, per_hour)."""
+    rows, _unknown = kills(c, rng)
+    _f, source, corr = factor(c, cfg)
+    kcorr = _kill_corrections(c, cfg, source, corr)
+    wins, sets = _overridden(c, cfg, over)
+    marks = marks_of(c)
     parts = _Parts(wins, sets)
     spots = event_spots(c)
     total = base = 0.0
@@ -1857,6 +1962,11 @@ def progress(c, cfg, t=None):
     último ponto exato (começo da gravação ou a última subida de nível) mais a XP estimada desde então."""
     t = c.now if t is None else t
     an = [a for a in anchors(c) if a[0] <= t]
+    up = len(an) > 1                    # o último ponto exato é uma subida de nível
+    kept = getattr(c, "reset_level", None)
+    if kept is not None and kept[0] <= t and (not an or an[-1][0] < kept[0]):
+        an.append(kept)                 # o Zerar apagou os abates de antes: parte de onde estava no nível (keep_level)
+        up = False
     if not an:
         return None
     ta, lv, x0 = an[-1]
@@ -1865,11 +1975,22 @@ def progress(c, cfg, t=None):
     if t > ta:
         est = estimate(c, cfg, (ta, t))
         # a entrega no instante da subida foi o que subiu: a XP dela é do nível que fechou, não deste
-        xpv += est["xp"] - sum(q["xp"] for q in est["quests"] if q["xp"] and _at_levelup(ta, q["t"], len(an) > 1))
+        xpv += est["xp"] - sum(q["xp"] for q in est["quests"] if q["xp"] and _at_levelup(ta, q["t"], up))
     lost, deaths = death_loss(c, cfg, ta, x0, lv, t)       # morte sem seguro: −5% do nível cada
     xpv = max(0.0, xpv - lost)
     return dict(level=lv, xp=xpv, need=nd, pct=(100.0 * xpv / nd) if nd else None, since=ta, lost=lost,
                 deaths=deaths)
+
+
+def keep_level(c, cfg):
+    """Antes do Zerar, que apaga os abates: guarda onde quem grava está no nível agora (progress usa isso como ponto
+    de partida, senão a posição no nível voltava para trás). As medidas com XP exata deixam de fora o trecho cortado
+    (level_segments, exact_segments)."""
+    if not c.death_log:
+        return
+    pr = progress(c, cfg)
+    if pr is not None:
+        c.reset_level = (c.now, pr["level"], pr["xp"])
 
 
 def death_note(c, cfg):
@@ -1943,12 +2064,33 @@ def recent_range(c, cfg):
 
 
 def recent_pace(c, cfg):
-    """XP por minuto no trecho recente (recent_range), ou None enquanto aquece."""
+    """XP por minuto de caça no trecho recente (recent_range), ou None enquanto aquece."""
     rng = recent_range(c, cfg)
     if rng is None:
         return None
-    rate = estimate(c, cfg, rng)["kill_xp"] * 60000.0 / (rng[1] - rng[0])     # ritmo só dos abates
+    rate = estimate(c, cfg, rng)["kill_xp"] * 60000.0 / active_ms(c, rng)     # ritmo só dos abates
     return rate if rate > 0 else None
+
+
+# O ritmo do "Até o próximo nível" conta só o tempo caçando: o intervalo entre abates que passa de 30 s (ou de 3× o
+# intervalo típico do trecho, numa caça lenta) é pausa e sai da conta (ir à cidade, trocar de mapa, esperar buff).
+# Medido nas gravações de leveling de dois jogadores (2026-11-19): com o tempo todo, a previsão saía longa demais
+# (mediana do erro 22% e 30%, os 20% piores acima de 49% e 101%); só com o tempo caçando, 20% e 27% (44% e 67%).
+IDLE_GAP_MS = 30000
+IDLE_TYPICAL = 3
+
+
+def active_ms(c, rng):
+    """Quanto do recorte foi caça: o recorte menos a parte de cada intervalo sem abate (contando as pontas) que passa
+    do limite de pausa. Nunca menos que 1 min (ou o recorte, se for menor): dois abates seguidos não viram um ritmo."""
+    t0, t1 = rng
+    times = sorted(r["t"] for r in kills(c, rng)[0])
+    inner = [b - a for a, b in zip(times, times[1:])]
+    limit = max(IDLE_GAP_MS, IDLE_TYPICAL * statistics.median(inner)) if inner else IDLE_GAP_MS
+    edges = [t0] + times + [t1]
+    idle = sum(g - limit for g in (b - a for a, b in zip(edges, edges[1:])) if g > limit)
+    span = t1 - t0
+    return max(span - idle, min(span, 60000))
 
 
 def time_to_level(c, cfg, per_min=None):
@@ -1975,3 +2117,243 @@ def span_text(ms):
         return _("%d h %02d min") % (hours, minutes)
     days, hours = divmod(hours, 24)
     return _("%d dias %d h") % (days, hours)
+
+
+# --- simulador: "e se eu caçasse no mapa X?" -----------------------------------------------------------------------
+#
+# A mistura de monstros de um mapa vem dos abates da própria pessoa nele (o registro de aprendizado guarda, por
+# gravação, quantos de cada monstro ela matou em cada mapa: é o que ela caça de verdade) ou, sem isso, de quantos
+# nascem de cada um (data/map_spawns.json: a lista do /navi do jogo, com os mapas novos do LATAM; o rAthena só nos
+# que o /navi não tem). A conta troca cada abate do recorte por um abate "médio" do mapa X, no mesmo instante (os
+# bônus de cada momento valem igual: Njord, Milagre, manual...), com a penalidade de nível de cada monstro de X, o
+# spotlight deles e a correção medida em X.
+
+MAP_MIX_MIN = 30              # abates num mapa para a mistura da pessoa valer no lugar da do /navi
+MAP_MIX_RECS = 20             # gravações guardadas por mapa no registro
+LEARN_MAPS = 300              # mapas guardados no registro
+MAP_MIX_PASS = 10             # menos abates que isto numa gravação: só passou pelo mapa (não entra)
+MAP_LEVEL_SHARE = 0.05        # a faixa de nível de um mapa: só os monstros com pelo menos isto da mistura
+_SPAWNS = None
+_SPAWN_SRC = {}               # mapa -> "jogo" (o /navi do cliente do LATAM) | "rathena" (os que o /navi não tem)
+_MAP_NAMES = {}               # mapa -> o nome dele no /navi
+_NAVI_LEVELS = {}             # monstro -> o nível dele no /navi do LATAM
+
+
+def spawn_table():
+    """{mapa: [(monstro, quantos nascem)]} de data/map_spawns.json, lido uma vez: os do /navi do jogo ("maps") e os
+    que só o rAthena tem ("rathena")."""
+    global _SPAWNS
+    if _SPAWNS is None:
+        _SPAWNS = {}
+        try:
+            with open(os.path.join(_DATA, "map_spawns.json"), encoding="utf-8") as f:
+                data = json.load(f)
+            for key, source in (("maps", "jogo"), ("rathena", "rathena")):
+                for m, mobs in (data.get(key) or {}).items():
+                    if m not in _SPAWNS:
+                        _SPAWNS[m] = [(int(mob), int(n)) for mob, n in mobs]
+                        _SPAWN_SRC[m] = source
+            _MAP_NAMES.update({str(m): str(n) for m, n in (data.get("names") or {}).items()})
+            _NAVI_LEVELS.update({int(m): int(v) for m, v in (data.get("levels") or {}).items()})
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+    return _SPAWNS
+
+
+def latam_level(mob):
+    """O nível do monstro no LATAM (o /navi do jogo), ou None."""
+    spawn_table()
+    return _NAVI_LEVELS.get(mob)
+
+
+def map_title(mapname):
+    """O nome do mapa no /navi do jogo ("" se não tiver)."""
+    spawn_table()
+    return _MAP_NAMES.get(map_key(mapname), "")
+
+
+def _huntable(mix):
+    """A parte da mistura que conta: monstros com XP conhecida, sem as plantas e os cogumelos (XP quase nada, ninguém
+    caça). {monstro: peso}"""
+    known = {m: w for m, w in mix.items() if MOB_EXP.get(m)}
+    top = max((MOB_EXP[m][1] for m in known), default=0)
+    return {m: w for m, w in known.items() if MOB_EXP[m][1] > 0 and MOB_EXP[m][1] >= 0.01 * top}
+
+
+FOREIGN_SHARE = 0.3       # parte da mistura com outro nível no LATAM a partir da qual o mapa é "de outra versão"
+_FOREIGN = {}
+# A Biosfera de Varmundt (bl_grass, bl_lava, bl_ice, bl_death; os monstros "[Eco]" 21548 a 21578): no LATAM ela é a
+# versão de antes da reforma coreana de 17/08/2022 (níveis 245 a 251 no /navi do jogo, uns 3M de HP); a nossa tabela
+# é a coreana de depois dela (níveis 252 a 255, 21 a 31M de HP, XP "muito maior que antes" pela nota da Gravity).
+# Medido no LATAM (RagnarokReplay_0004 → mtk farm, bl_lava, 24/10/2026, 17 abates sozinho em 63 s): a XP real foi
+# 11 a 17% da lista com os bônus (conforme o evento do servidor daquele dia, que o replay não mostra). Só para o
+# simulador explicar: a tabela não muda; uma caçada medida no mapa é que corrige (predict).
+BIO_MOBS = range(21548, 21579)
+BIO_LATAM = (0.11, 0.17)
+
+
+def latam_other(mix):
+    """Os monstros da mistura que contam (_huntable) com outro nível no LATAM (o /navi do jogo) que na nossa tabela de
+    XP, que é a coreana: ([(monstro, nível da tabela, nível no LATAM)], parte deles na mistura de 0 a 1)."""
+    known = _huntable(mix or {})
+    wsum = float(sum(known.values()))
+    other = [(m, MOB_EXP[m][0], latam_level(m)) for m in known
+             if latam_level(m) and latam_level(m) != MOB_EXP[m][0]]
+    return other, (sum(known[m] for m, _a, _b in other) / wsum if other and wsum else 0.0)
+
+
+def foreign_map(mapname):
+    """True se no LATAM o mapa é de outra versão que a da nossa tabela de XP: FOREIGN_SHARE ou mais da mistura dele
+    (a do /navi do jogo) tem outro nível lá — a Biosfera (BIO_MOBS), algumas Ilusões. A XP medida num mapa assim vale
+    só para ele: fica fora do "normal" do personagem (_baseline), da média geral e da comparação entre mapas que
+    separa o spotlight do evento do servidor; e um trecho nele não decide o evento do servidor."""
+    m = map_key(mapname or "")
+    got = _FOREIGN.get(m)
+    if got is None:
+        spawns = spawn_table().get(m) if m else None
+        got = _FOREIGN[m] = bool(spawns) and latam_other(dict(spawns))[1] >= FOREIGN_SHARE
+    return got
+
+
+def _foreign_in(c, t0, t1):
+    """True se o trecho passou por algum mapa de outra versão (foreign_map)."""
+    return any(foreign_map(m) for s, e, m in c.map_spans() if s < t1 and e > t0)
+
+
+def map_levels(mix):
+    """(nível médio, menor, maior) dos monstros que contam na mistura de um mapa (a média pelo peso de cada um; a
+    faixa sem os raros), ou None."""
+    hunt = _huntable(mix or {})
+    wsum = float(sum(hunt.values()))
+    if not wsum:
+        return None
+    avg = sum(MOB_EXP[m][0] * w for m, w in hunt.items()) / wsum
+    main = [MOB_EXP[m][0] for m, w in hunt.items() if w >= MAP_LEVEL_SHARE * wsum] or [MOB_EXP[m][0] for m in hunt]
+    return avg, min(main), max(main)
+
+
+def log_map_mix(lrn, c, name, when):
+    """Guarda no registro quantos de cada monstro quem grava matou em cada mapa nesta gravação (a mesma gravação lida
+    de novo troca a anotação)."""
+    spans = sorted(c.map_spans())
+    starts = [s for s, _e, _m in spans]
+    per = {}
+    for r in kills(c)[0]:
+        i = bisect.bisect_right(starts, r["t"]) - 1
+        m = map_key(spans[i][2]) if i >= 0 else map_key(c.session.map)
+        if m:
+            mobs = per.setdefault(m, {})
+            mobs[str(r["mob"])] = mobs.get(str(r["mob"]), 0) + 1
+    maps = lrn.setdefault("maps", {})
+    for m, mobs in per.items():
+        if sum(mobs.values()) < MAP_MIX_PASS:
+            continue
+        e = maps.setdefault(m, dict(recs={}))
+        e.setdefault("recs", {})[name] = mobs
+        e["last"] = when[:10]
+        if len(e["recs"]) > MAP_MIX_RECS:
+            e["recs"] = dict(list(e["recs"].items())[-MAP_MIX_RECS:])
+    if len(maps) > LEARN_MAPS:
+        lrn["maps"] = dict(sorted(maps.items(), key=lambda kv: str(kv[1].get("last") or ""))[-LEARN_MAPS:])
+
+
+def map_mix(cfg, mapname):
+    """(mistura {monstro: peso}, origem "seus" | "jogo" | "rathena") do mapa, ou (None, None) se não se sabe."""
+    m = map_key(mapname)
+    own = {}
+    entry = (((cfg or {}).get("xp_learn") or {}).get("maps") or {}).get(m) or {}
+    for mobs in (entry.get("recs") or {}).values():
+        for mob, n in (mobs or {}).items():
+            try:
+                own[int(mob)] = own.get(int(mob), 0) + int(n)
+            except (TypeError, ValueError):
+                continue
+    if sum(own.values()) >= MAP_MIX_MIN:
+        return own, "seus"
+    spawns = spawn_table().get(m)
+    if spawns:
+        return dict(spawns), _SPAWN_SRC.get(m, "jogo")
+    return None, None
+
+
+def sim_maps(cfg, level=None):
+    """Os mapas que dá para simular: [(mapa, origem, abates seus, (nível médio, menor, maior) ou None)]. Com `level`
+    (o de quem gravou), primeiro os de monstros de nível mais perto do dele; sem, primeiro os que a pessoa caçou."""
+    own = {}
+    for m, e in ((((cfg or {}).get("xp_learn") or {}).get("maps")) or {}).items():
+        n = sum(sum(v.values()) for v in (e.get("recs") or {}).values() if isinstance(v, dict))
+        if n >= MAP_MIX_MIN:
+            own[m] = n
+    out = []
+    for m in set(own) | set(spawn_table()):
+        mix, source = map_mix(cfg, m)
+        if mix:
+            out.append((m, source, own.get(m, 0), map_levels(mix)))
+    if level:
+        out.sort(key=lambda r: (r[3] is None, abs(r[3][0] - level) if r[3] else 0, -r[2], r[0]))
+    else:
+        out.sort(key=lambda r: (r[1] != "seus", -r[2], r[0]))
+    return out
+
+
+def sim_map(c, cfg, rng, mapname, over=None):
+    """A XP do recorte se cada abate dele (o mesmo número, nos mesmos instantes) fosse num monstro do mapa
+    `mapname`, na proporção da mistura do mapa; `over`: os bônus trocados no simulador (como em simulate).
+    dict(xp, base_xp (o recorte como foi, pela mesma conta), kills, per_kill, per_min, per_hour, source, corr,
+    mobs=[dict(mob, name, lv, share (da mistura), pen, per_kill)], unknown (parte da mistura sem XP conhecida)) ou
+    None (mapa sem mistura ou recorte sem abates)."""
+    mix, source = map_mix(cfg, mapname)
+    rows, _unk = kills(c, rng)
+    if not mix or not rows:
+        return None
+    total_w = float(sum(mix.values()))
+    unknown = 1.0 - sum(w for m, w in mix.items() if MOB_EXP.get(m)) / total_w if total_w else 1.0
+    known = _huntable(mix)        # plantas e cogumelos (XP quase nada) ninguém caça: ficam de fora da média
+    wsum = float(sum(known.values()))
+    if not wsum:
+        return None
+    f, source_f, corr = factor(c, cfg)
+    mode = cfg.get("xp_mode") if cfg.get("xp_mode") in MODES else "auto"
+    p = predict(cfg, c.session.gid, mapname) if mode in ("auto", "medido") and f is None else None
+    corr_x = p[0] if p else corr
+    wins = sets = marks = parts = spots = None
+    if f is None:
+        if over:
+            wins, sets = _overridden(c, cfg, over)
+            parts = _Parts(wins, sets)
+        else:
+            wins, sets = windows(c, cfg), settings(cfg, c)
+            parts = _parts(c, cfg, wins, sets)
+        marks, spots = marks_of(c), event_spots(c)
+    spot_x = spot_maps(cfg).get(map_key(mapname), 0.0)
+    total = 0.0
+    per_mob = {m: 0.0 for m in known}
+    for r in rows:
+        lv = level_at(c, r["t"])
+        share = r["share"]
+        if f is None:
+            a = dict(parts.at(r["t"]), spot=spot_x)       # o spotlight é o do mapa X, não o do mapa de verdade
+        for m, w in known.items():
+            data = MOB_EXP[m]
+            pen = penalty(data[0] - lv)
+            k = f if f is not None else factor_at(r["t"], wins, sets, m, marks, a, spots) * corr_x
+            v = (data[1] * pen // 100) * share * k
+            per_mob[m] += v
+            total += v * w / wsum
+    n = len(rows)
+    span = (rng[1] - rng[0]) if rng else c.now
+    per_min = total * 60000.0 / span if span and span > 60000 else None
+    base = estimate(c, cfg, rng)["kill_xp"]
+    level = level_at(c, rng[1] if rng else c.now)
+    from i18n import _
+    mobs = [dict(mob=m, name=meter_name(m) or _("Monstro %d") % m, lv=MOB_EXP[m][0], share=w / wsum,
+                 pen=penalty(MOB_EXP[m][0] - level), per_kill=per_mob[m] / n)
+            for m, w in sorted(known.items(), key=lambda kv: -kv[1])]
+    # monstros que no LATAM têm outro nível (o /navi do jogo) que o da nossa tabela de XP: lá eles são de outra versão
+    # (a Biosfera, algumas Ilusões), e a XP da tabela pode não bater com a do LATAM
+    other, share = latam_other(mix)
+    return dict(xp=total, base_xp=base, kills=n, per_kill=total / n, per_min=per_min,
+                per_hour=per_min * 60 if per_min is not None else None, source=source, corr=corr_x,
+                mobs=mobs, unknown=unknown, map=map_key(mapname), latam_other=other,
+                measured=bool(p and p[1] in ("mapa", "personagens")), latam_share=share,
+                bio_share=sum(w for m, w in known.items() if m in BIO_MOBS) / wsum)
