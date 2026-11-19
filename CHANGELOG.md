@@ -4,11 +4,9 @@ Português · [English](#english) · [Español](#español)
 
 ## 1.12.0
 
-Recalibrar não custa mais nada, e o resumo da sessão ganhou as cartas.
+Melhorias de calibração, detecção de buffs e novos cartões.
 
-- Carta de MVP: um destaque especial no resumo da sessão quando cai uma carta de MVP, com a carta de verdade.
-- Mão de cartas: com 6 cartas ou mais na sessão, o Coringa embaralha e distribui as suas cartas.
-- Item marcado virou um destaque à parte.
+- Novos cartões adicionados: Carta de MVP, Mão de cartas e Item marcado.
 - O Milagre e os buffs que já estavam ligados no começo da gravação mostram o tempo que falta de verdade.
 - Buff que acaba sem aviso do jogo deixa de aparecer como ativo.
 - Ao reiniciar a gravação, a previsão do nível continua com o ritmo de antes, sem esperar outros 10 minutos.
@@ -286,11 +284,9 @@ Primeira versão pública.
 
 ### 1.12.0
 
-Recalibrating costs nothing now, and the session summary got the cards.
+Calibration and buff detection improvements, and new cards.
 
-- MVP card: a special highlight in the session summary when an MVP card drops, with the real card.
-- Hand of cards: with 6 cards or more in the session, the Joker shuffles and deals your cards.
-- Marked item is now a highlight of its own.
+- New cards added: MVP card, Hand of cards and Marked item.
 - The Miracle and the buffs already on when the recording starts show the real time left.
 - A buff that ends without the game saying so no longer shows as active.
 - When you restart the recording, the level forecast keeps the previous pace, with no new 10-minute wait.
@@ -568,11 +564,9 @@ First public version.
 
 ### 1.12.0
 
-Recalibrar ya no cuesta nada, y el resumen de la sesión ganó las cartas.
+Mejoras de calibración, detección de buffs y nuevas tarjetas.
 
-- Carta de MVP: un destacado especial en el resumen de la sesión cuando cae una carta de MVP, con la carta de verdad.
-- Mano de cartas: con 6 cartas o más en la sesión, el Joker baraja y reparte tus cartas.
-- Ítem marcado ahora es un destacado aparte.
+- Nuevas tarjetas añadidas: Carta de MVP, Mano de cartas e Ítem marcado.
 - El Milagro y los buffs que ya estaban activos al empezar la grabación muestran el tiempo que falta de verdad.
 - Un buff que termina sin aviso del juego deja de aparecer como activo.
 - Al reiniciar la grabación, la previsión del nivel sigue con el ritmo de antes, sin esperar otros 10 minutos.
