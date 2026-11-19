@@ -107,9 +107,28 @@ BOSS_FALL_S = 3.4         # "Chefe derrotado": o golpe final, o chefe cai e vem 
 FIGHT_DUMMY = 1002        # o alvo quando o monstro da sessão não tem desenho: um Poring
 # o palco: nas cenas com personagens o texto sobe e eles ficam numa faixa no pé do cartão (não passam por cima das
 # linhas); acabada a animação, ela recolhe em STAGE_FOLD_S e as linhas voltam
-SCENE_FX = ("combo", "heavy", "asura", "boss_down", "chase", "jabs", "one_punch")
+SCENE_FX = ("combo", "heavy", "asura", "boss_down", "chase", "jabs", "one_punch", "deck", "mvp_card")
 STAGE_H = 50              # altura do palco (pixels, no zoom 1)
+STAGE_HS = {"mvp_card": 64, "deck": 58}   # a carta de MVP e o Coringa (uma carta gigante) pedem palco mais alto
 STAGE_FOLD_S = 0.5
+# "Mão de cartas": o Coringa do jogo embaralha (as metades do baralho se intercalam) e distribui as cartas da sessão
+# num leque, cada uma virando no ar até mostrar a ilustração dela (do data.grf; sem o jogo, cartas desenhadas)
+JOKER_MOB = 1131
+DECK_SHOW = 7             # cartas no leque (as que mais vieram primeiro); com mais, a última leva um "+N"
+DECK_CARD = (27, 36)      # tamanho das cartas do leque (zoom 1)
+DECK_SHUFFLE = (0.35, 2.0)   # o embaralhar...
+DECK_DEAL = (2.0, 4.4)       # ...e o distribuir (s do começo da animação)
+CARD_BACK = ("#5b1a2e", "#fbbf24", "#2a0a14")   # o verso das cartas: vinho, filete dourado, sombra
+# "Carta de MVP": por cima de tudo, o cartão escurece, um facho dourado desce e o MVP que deixou a carta cai nele; a
+# carta sobe girando e se revela (MVP_BIG) com um clarão e raios; depois desce para o palco (MVP_SMALL), onde fica com
+# os raios girando, o brilho holográfico passando por ela e fogos dos dois lados
+MVP_BIG = (66, 88)
+MVP_SMALL = (40, 53)
+MVP_FLIPS = (0.14, 0.32, 0.5, 0.68, 0.84, 1.0)   # larguras montadas da carta girando (fração da largura)
+MVP_SPIN = (1.0, 2.15)    # a carta gira subindo...
+MVP_REVEAL_S = 2.75       # ...a revelação cobre o cartão até aqui...
+MVP_LAND_S = 3.35         # ...e a carta desce para o palco até aqui
+MVP_GOLD = ("#fbbf24", "#fde68a", "#ffffff", "#f59e0b")
 CRIT_TINT, SHOT_TINT = (255, 228, 60), (255, 160, 48)   # números amarelos (crítico) e laranja (one shot)
 STAR_JOBS = {4047, 4048, 4239, 4241, 4243, 4244, 4302, 4316}   # a linha estelar: estrelinhas no lugar das esferas
 BIG_PART = (1.6, 2.5)     # peça maior que isto (altura, largura) vezes o corpo fica fora da cena (chapéu-aura etc.)
@@ -161,6 +180,7 @@ WIDTHS = [(260, _("estreita")), (300, _("normal")), (380, _("larga")), (480, _("
 GAP_CHOICES = [(5, _("5 segundos sem dano")), (10, _("10 segundos sem dano")), (15, _("15 segundos sem dano")),
                (30, _("30 segundos sem dano")), (60, _("1 minuto sem dano"))]
 XP_AGAIN_S = 15.0             # o jogo completa o cabeçalho da gravação ~9 s depois de ela começar
+XP_LINK_S = 60.0              # a gravação nova que fica pronta até 1 min depois continua o ritmo da anterior
 TARGET_CHOICES = [("all", _("Todos os monstros")), ("mvp", _("Só MVPs e bonecos de treino"))]
 HINTS = {
     "pin": _("Fixar sempre por cima das outras janelas"), "chart": _("Análise completa (abre outra janela)"),
@@ -232,6 +252,10 @@ DEFAULTS = {
     "session_card": True,   # quando a gravação para, o resumo da sessão com o que a pessoa escolheu (aba Cartões)
     "session_fields": list(session.DEFAULT),  # o que o resumo da sessão mostra (session.FIELDS), na ordem do cartão
     "session_anim": True,   # a animação do destaque do resumo da sessão (confete, moedinhas, as cenas de luta...)
+    # (até a 1.11.0 estes três ficavam fora daqui: eram gravados, mas não voltavam ao abrir o programa)
+    "session_hl_off": [],   # os destaques desligados na aba Cartões (session.hl_chosen)
+    "session_records": {},  # os recordes de cada personagem ("Recorde pessoal": session.update_records)
+    "ping_last_char": None,  # o último personagem visto (itens marcados "só neste personagem" sem gravação aberta)
     "alert_rec": True,      # lembrar quando o jogo está aberto e nenhum replay está sendo gravado
     "rec_sound": False,     # ...com um som curto (uma vez)
     "copy_hide_names": False,   # "copiar imagem" troca os nomes dos jogadores pela classe
@@ -494,6 +518,9 @@ def load_config():
         cfg["targets"] = "all"
     if not cfg["gap_s"]:
         cfg["gap_s"] = 15
+    for k, kind in (("session_hl_off", list), ("session_records", dict)):
+        v = cfg.get(k)                          # um objeto só desta configuração (não o do DEFAULTS), do tipo certo
+        cfg[k] = v if isinstance(v, kind) and v is not DEFAULTS[k] else kind()
     cfg["xp_learn"] = load_learn(saved)
     return cfg
 
@@ -587,6 +614,7 @@ class DpsApp:
         self.names_v = clientdata.NAMES.version
         self.xp_seen = None
         self.xp_again = None                # (gravação que ficou para trás, quando medir a XP dela de novo)
+        self.xp_link = None                 # (gravação que ficou para trás, até quando a nova pode continuar dela)
         self.xp_auto_at = 0.0                  # última conferência automática da XP (manual lembrado, evento)
         self.xp_lvl_seen = None                # (gravação, nº de subidas de nível) já conferido
         self.miracle_at = -1e9                 # quando o Milagre ativou (o widget brilha por uns segundos)
@@ -902,9 +930,18 @@ class DpsApp:
                 # a gravação nova acabou de começar e o começo dela (com a XP) ainda não dá para ler: mede de novo
                 # daqui a pouco, senão a XP exata "até a gravação seguinte" nunca era guardada ao vivo
                 self.xp_again = (prev, now + XP_AGAIN_S)
+                self.xp_link = (prev, now + XP_LINK_S)
+            if cur is not None and self.xp_link is not None:
+                # reiniciou a gravação (para calibrar): a nova segue o ritmo da anterior, sem outros 10 min de
+                # "calculando…" no "Até o próximo nível" (xp.carry_from confere o personagem e o intervalo)
+                self.xp_link_now(cur, self.xp_link[0])
         if self.xp_again is not None and now >= self.xp_again[1]:
             prev, self.xp_again = self.xp_again[0], None
             self.xp_calibrate(prev)
+            if self.xp_seen is not None:
+                self.xp_link_now(self.xp_seen, prev)       # de novo, com a medida nova
+        if self.xp_link is not None and now >= self.xp_link[1]:
+            self.xp_link = None                      # a gravação anterior não fica presa na memória
         if now >= self.learn_check_at:
             # a leitura das gravações que já estavam na pasta terminou? (um arquivo: olhar custa quase nada)
             self.learn_check_at = now + 10.0
@@ -992,6 +1029,14 @@ class DpsApp:
             return ""
         return _("Lendo as gravações que já estavam na pasta (só desta vez): %d de %d. Pode continuar jogando; o "
                  "relatório se completa sozinho.") % p
+
+    def xp_link_now(self, cur, prev):
+        """Liga a gravação nova à anterior (xp.carry_from): o ritmo dos últimos minutos de farm segue valendo."""
+        try:
+            if xp.carry_from(cur, prev, self.cfg):
+                self.dirty = True
+        except Exception:  # noqa: BLE001 - é um extra: não pode parar a leitura
+            self.log_error(*sys.exc_info())
 
     def xp_calibrate(self, c):
         """Fator de XP do personagem: XP exata até a próxima gravação ÷ XP estimada dos abates desta. No modo
@@ -1826,6 +1871,8 @@ class DpsApp:
                     frames["mobs"] = self.chase_frames()
                 if "rider" not in frames and sprites.LOADER.wardrobe is not None:
                     frames["rider"] = self.rider_frames()
+            elif hl["fx"] in ("deck", "mvp_card"):
+                self.card_scene(d.setdefault("chase", {}), hl["fx"], hl.get("deal") or {})
         except Exception:  # noqa: BLE001 - a cena é um extra: sem ela, os desenhos de reserva
             self.log_error(*sys.exc_info())
 
@@ -1949,7 +1996,8 @@ class DpsApp:
         # o palco das cenas com personagens: aberto durante a animação, depois recolhe
         stage = 0.0
         if main and main.get("fx") in SCENE_FX and self.cfg.get("session_anim", True) and k < SESSION_FX_S + STAGE_FOLD_S:
-            stage = STAGE_H * s * (1.0 if k < SESSION_FX_S else max(0.0, 1.0 - (k - SESSION_FX_S) / STAGE_FOLD_S))
+            stage = STAGE_HS.get(main.get("fx"), STAGE_H) * s * (1.0 if k < SESSION_FX_S else
+                                                                  max(0.0, 1.0 - (k - SESSION_FX_S) / STAGE_FOLD_S))
         if stage > 1:
             c.create_rectangle(x0 + 3 * s, y1 - stage, x1 - 3 * s, y1 - 5 * s, fill=mix(CARD_BG, col, 0.06), outline="")
             c.create_line(x0 + 10 * s, y1 - stage, x1 - 10 * s, y1 - stage, fill=mix(CARD_BG, col, 0.3))
@@ -1972,7 +2020,7 @@ class DpsApp:
         if anim:
             self.draw_session_fx(main["fx"], k, (x0, y0, x1, y1), col, y + 8 * s, (bx0 + 13 * s, y + 8 * s),
                                  main.get("tag"), d.setdefault("chase", {}), GLASS_BG if glass else CARD_BG,
-                                 main.get("fight"))
+                                 main.get("fight"), main.get("deal"))
         cid = c.create_text(x1 - pad, y0 + pad + 4 * s, anchor="e", text="✕", font=self.fonts["small"],
                             fill=CARD_DIM)
         count_w = c.bbox(cid)[2] - c.bbox(cid)[0]
@@ -2009,6 +2057,8 @@ class DpsApp:
         for text, fill in lines:
             self.center_text(cx, y + 5 * s, text, self.fonts["small"], fill or CARD_DIM, x0 + pad, x1 - pad)
             y += 14 * s
+        if anim and main.get("fx") == "mvp_card" and k < MVP_LAND_S:   # a carta de MVP se revela por cima
+            self.draw_mvp_reveal(k, (x0, y0, x1, y1), main.get("deal") or {}, d.setdefault("chase", {}), col)
         left = 1.0 - k / SESSION_CARD_S
         if left > 0.005:
             c.create_line(x0 + 10 * s, y1 - 3 * s, x0 + 10 * s + (x1 - x0 - 20 * s) * left, y1 - 3 * s, fill=col,
@@ -2125,6 +2175,72 @@ class DpsApp:
             if tw > 0.9:
                 c.create_text(x + 0.7 * w, y - 0.9 * w, text="✦", fill=mix(bg, "#ffffff", fade),
                               font=("Segoe UI Symbol", -int(7 * s)))
+
+    def card_photo(self, card, w, h):
+        """A ilustração da carta `card` (a carta inteira, como o jogo mostra) reduzida para w x h, como imagem do Tk;
+        guardada por zoom. None sem o jogo ou sem a ilustração (a cena desenha uma carta no lugar)."""
+        cache = getattr(self, "_card_photos", None)
+        if cache is None or cache[0] != round(self.s, 3):
+            cache = self._card_photos = (round(self.s, 3), {})
+        key = (card, w, h)
+        if key in cache[1]:
+            return cache[1][key]
+        book = sprites.MONSTERS.book
+        art = book.card_art(card) if book is not None and card else None
+        if not art:
+            return None                         # sem guardar: o jogo pode terminar de carregar depois
+        aw, ah, px = art
+        w, h = max(1, int(w)), max(1, int(h))
+        photo = tk.PhotoImage(master=self.root, data=sprites.png_b64(w, h, sprites.resize(aw, ah, px, w, h)),
+                              format="png")
+        cache[1][key] = photo
+        return photo
+
+    def mob_acts(self, mob, acts, box_w, box_h, direction):
+        """{ação: (quadros do Tk, ms por quadro)} de um monstro do jogo numa caixa de box_w x box_h (zoom 1); {} sem
+        o desenho."""
+        book = sprites.MONSTERS.book
+        if book is None or not mob or not book.has(mob):
+            return {}
+        import ui_parts
+        part = book.part(mob)
+        out = {}
+        for act in acts:
+            try:
+                made = ui_parts.mob_frames(self.root, part, act, direction, int(box_w * self.s), int(box_h * self.s),
+                                           {}) if part is not None else None
+            except Exception:  # noqa: BLE001 - sem o desenho: a cena segue sem ele
+                made = None
+            if made and made[0]:
+                out[act] = made
+        return out
+
+    def card_scene(self, frames, kind, deal):
+        """Monta os desenhos das cenas de carta em `frames` (o d["chase"] do resumo). "deck": "faces" (as cartas do
+        leque) e "joker" (o Coringa atirando, virado para o leque). "mvp_card": "big" ({fração da largura: a carta
+        girando}), "mid" e "small" (descendo e no palco) e "mob" (o MVP que deixou a carta, de frente, caindo). Só o
+        que falta; sem o jogo não monta nada (a cena usa as cartas desenhadas)."""
+        if sprites.MONSTERS.book is None:
+            return
+        s = self.s
+        cards = list(deal.get("cards") or [])
+        if kind == "deck":
+            if "faces" not in frames:
+                frames["faces"] = [self.card_photo(cid, DECK_CARD[0] * s, DECK_CARD[1] * s) for cid in cards[:DECK_SHOW]]
+            if "joker" not in frames:
+                frames["joker"] = self.mob_acts(JOKER_MOB, (sprites.MOB_ATTACK,), 54, 54, 7)
+            return
+        card = cards[0] if cards else None
+        if "big" not in frames and card:
+            bw, bh = MVP_BIG[0] * s, MVP_BIG[1] * s
+            frames["big"] = {f: self.card_photo(card, bw * f, bh) for f in MVP_FLIPS}
+            frames["mid"] = self.card_photo(card, (MVP_BIG[0] + MVP_SMALL[0]) / 2.0 * s,
+                                            (MVP_BIG[1] + MVP_SMALL[1]) / 2.0 * s)
+            frames["small"] = self.card_photo(card, MVP_SMALL[0] * s, MVP_SMALL[1] * s)
+        if "mob" not in frames:
+            # só a ação de morrer: o primeiro quadro é ele de pé (com a parada, as duas ações sairiam em escalas
+            # diferentes e o monstro "pularia" de tamanho)
+            frames["mob"] = self.mob_acts(deal.get("mob"), (sprites.MOB_DIE,), 58, 58, 0)
 
     def chase_frames(self):
         """{monstro: ([quadros andando para a direita], ms por quadro)} dos bichinhos da "Máquina de abates", do
@@ -2522,6 +2638,312 @@ class DpsApp:
         elif x0 + 14 * s < hx < x1 - 14 * s:
             self.draw_hero(hx, base, k, fade, bg)
 
+    def draw_card_back(self, cx, cy, w, h, f, bg, fade=1.0):
+        """O verso de uma carta do baralho com o meio em (cx, cy): vinho com filete e losango dourados; a largura vezes
+        |f| (a carta virando no ar: 0 = de lado)."""
+        c, s = self.canvas, self.s
+        hw = max(0.6 * s, w * abs(f) / 2.0)
+        wine, gold, shade = (mix(bg, col, fade) for col in CARD_BACK)
+        c.create_rectangle(cx - hw + s, cy - h / 2 + s, cx + hw + s, cy + h / 2 + s, fill=shade, outline="")
+        c.create_rectangle(cx - hw, cy - h / 2, cx + hw, cy + h / 2, fill=wine, outline=gold, width=max(1, int(s)))
+        if hw > 5 * s:                              # o filete de dentro e o losango (somem com a carta de lado)
+            c.create_rectangle(cx - hw + 2.5 * s, cy - h / 2 + 2.5 * s, cx + hw - 2.5 * s, cy + h / 2 - 2.5 * s,
+                               outline=mix(bg, CARD_BACK[1], 0.5 * fade))
+            m = min(hw * 0.5, w * 0.24)
+            c.create_polygon(cx, cy - h * 0.2, cx + m, cy, cx, cy + h * 0.2, cx - m, cy, fill=gold, outline="")
+
+    def draw_card_face(self, cx, cy, w, h, photo, bg, gold=False, fade=1.0):
+        """A frente de uma carta: a ilustração do jogo; sem ela, uma carta desenhada (moldura prateada ou dourada)."""
+        if photo is not None:
+            self.canvas.create_image(cx, cy, image=photo)
+            return
+        c, s = self.canvas, self.s
+        frame = mix(bg, "#fbbf24" if gold else "#d1d5db", fade)
+        c.create_rectangle(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, fill=mix(bg, "#fef3c7", fade), outline=frame,
+                           width=max(1, int(2 * s)))
+        c.create_rectangle(cx - w / 2 + 3 * s, cy - h / 2 + 6 * s, cx + w / 2 - 3 * s, cy + h / 2 - 4 * s,
+                           fill=mix(bg, "#a7f3d0" if not gold else "#fde68a", fade), outline="")
+        c.create_oval(cx - w * 0.22, cy - h * 0.12, cx + w * 0.22, cy + h * 0.2, fill=mix(bg, "#f472b6", fade),
+                      outline="")
+
+    def draw_shine(self, left, top, right, bottom, x, slant, color, width):
+        """Um risco de luz na diagonal passando por cima de uma carta, cortado nas bordas dela: de (x, top) a
+        (x - slant, bottom)."""
+        if x - slant > right or x < left:
+            return
+        a = (x, top) if x <= right else (right, top + (x - right) / slant * (bottom - top))
+        b = (x - slant, bottom) if x - slant >= left else (left, top + (x - left) / slant * (bottom - top))
+        if a[1] < b[1]:
+            self.canvas.create_line(a[0], a[1], b[0], b[1], fill=color, width=max(1, int(width)))
+
+    def draw_deck(self, k, box, fade, deal, frames, bg, col):
+        """"Mão de cartas": o Coringa (do jogo) embaralha (as metades se separam e as cartas caem intercaladas no
+        meio), depois atira as cartas da sessão uma a uma; cada uma vira no ar e pousa num leque mostrando a ilustração
+        dela. No fim, um brilho passa pelo leque e o total aparece em cima do baralho."""
+        c, s = self.canvas, self.s
+        x0, y0, x1, y1 = box
+        if "faces" not in frames or "joker" not in frames:
+            self.card_scene(frames, "deck", deal)          # o jogo terminou de carregar depois do resumo
+        cards = list(deal.get("cards") or [])
+        faces = frames.get("faces") or []
+        n = max(1, min(len(cards), DECK_SHOW))
+        total = deal.get("n") or len(cards)
+        cw, ch = DECK_CARD[0] * s, DECK_CARD[1] * s
+        base = y1 - 7 * s                                   # o chão do palco
+        cy = base - ch / 2 - 2 * s
+        # o Coringa à esquerda: atira enquanto embaralha e distribui
+        jx = x0 + 33 * s
+        joker = (frames.get("joker") or {}).get(sprites.MOB_ATTACK)
+        if joker:
+            photos, delay = joker
+            busy = DECK_SHUFFLE[0] <= k < DECK_DEAL[1]
+            i = int((k - DECK_SHUFFLE[0]) * 1000 / delay) % len(photos) if busy else 0
+            c.create_image(jx, base + 2 * s, anchor="s", image=photos[i])
+        # o baralho, à direita do Coringa
+        dx, dy = x0 + 74 * s, cy + 3 * s
+        bw, bh = 20 * s, 27 * s
+        fly = 0.42
+        step = (DECK_DEAL[1] - DECK_DEAL[0] - fly) / max(1, n - 1)
+        launched = sum(1 for i in range(n) if k >= DECK_DEAL[0] + i * step)
+        grow = min(1.0, k / DECK_SHUFFLE[0]) if k < DECK_SHUFFLE[0] else 1.0
+        if DECK_SHUFFLE[0] <= k < DECK_SHUFFLE[1]:          # embaralhando: duas vezes
+            p = (k - DECK_SHUFFLE[0]) / (DECK_SHUFFLE[1] - DECK_SHUFFLE[0]) * 2.0
+            cyc = p % 1.0
+            split = math.sin(min(1.0, cyc / 0.22) * math.pi / 2) if cyc < 0.82 else max(0.0, 1 - (cyc - 0.82) / 0.18)
+            off = 12 * s * split
+            for j in range(3):                              # as duas metades, um pouco erguidas
+                self.draw_card_back(dx - off - j * 0.6 * s, dy - 3 * s * split - j * s, bw, bh, 1.0, bg, fade)
+                self.draw_card_back(dx + off + j * 0.6 * s, dy - 3 * s * split - j * s, bw, bh, 1.0, bg, fade)
+            if 0.22 <= cyc < 0.82:                          # as cartas caindo intercaladas no meio
+                q = (cyc - 0.22) / 0.6
+                for j in range(10):
+                    u = (q - j * 0.085) / 0.16
+                    if 0 <= u <= 1:
+                        side = -1 if j % 2 == 0 else 1
+                        x = dx + side * off * (1 - u)
+                        y = dy - 3 * s * split - math.sin(u * math.pi) * 9 * s + 3 * s * u
+                        self.draw_card_back(x, y, bw, bh, 0.95, bg, fade)
+        else:                                               # o monte, mais baixo a cada carta atirada
+            for j in range(max(2, 5 - launched)):
+                self.draw_card_back(dx + j * 0.5 * s, dy - j * 1.2 * s, bw * grow, bh * grow, 1.0, bg, fade)
+        # o leque: centrado na área à direita do baralho, com as do meio um pouco mais altas
+        fx0, fx1 = x0 + 108 * s, x1 - 20 * s
+        gap = min(cw + 5 * s, (fx1 - fx0) / max(1, n - 1)) if n > 1 else 0
+        start = (fx0 + fx1) / 2 - gap * (n - 1) / 2
+        landed_all = DECK_DEAL[0] + (n - 1) * step + fly
+        for i in range(n):
+            sx = start + gap * i
+            sy = cy - 4 * s * math.sin(math.pi * i / max(1, n - 1)) if n > 1 else cy
+            tl = DECK_DEAL[0] + i * step
+            if k < tl:
+                continue
+            u = (k - tl) / fly
+            if u < 1:                                       # no ar: vira uma volta e meia
+                x = dx + (sx - dx) * u
+                y = dy + (sy - dy) * u - math.sin(u * math.pi) * 24 * s
+                self.draw_card_back(x, y, cw * (0.75 + 0.25 * u), ch * (0.75 + 0.25 * u), math.cos(u * math.pi * 3),
+                                    bg, fade)
+                continue
+            self.draw_card_face(sx, sy, cw, ch, faces[i] if i < len(faces) else None, bg, fade=fade)
+            land = k - tl - fly
+            if land < 0.3:                                  # pousou: um brilho em volta
+                g = land / 0.3 * 7 * s
+                c.create_rectangle(sx - cw / 2 - g, sy - ch / 2 - g, sx + cw / 2 + g, sy + ch / 2 + g,
+                                   outline=mix(bg, "#ffffff", (1 - land / 0.3) * fade), width=max(1, int(1.5 * s)))
+            if i == n - 1 and total > n:                    # as que não couberam
+                tx, ty = sx + cw / 2 - 1 * s, sy + ch / 2 - 1 * s
+                c.create_polygon(round_rect_pts(tx - 15 * s, ty - 10 * s, tx + 3 * s, ty + 2 * s, 4 * s), smooth=True,
+                                 fill=mix(bg, col, fade), outline="")
+                c.create_text(tx - 6 * s, ty - 4 * s, text="+%d" % (total - n), fill=mix(bg, CARD_BG, fade),
+                              font=(self.fonts["small"].actual("family"), -int(9 * s), "bold"))
+        if k > landed_all:                                  # tudo distribuído: o brilho passa e o total aparece
+            t = k - landed_all
+            if t < 0.9:
+                lx = start - cw + (gap * (n - 1) + 2 * cw) * (t / 0.9)
+                for i in range(n):
+                    sx = start + gap * i
+                    sy = cy - 4 * s * math.sin(math.pi * i / max(1, n - 1)) if n > 1 else cy
+                    self.draw_shine(sx - cw / 2, sy - ch / 2, sx + cw / 2, sy + ch / 2, lx, 10 * s,
+                                    mix(bg, "#ffffff", 0.85 * fade), 2.5 * s)
+            pop = min(1.0, t / 0.2) * (1 + 0.25 * math.sin(min(t, 0.6) * 15) * max(0.0, 0.6 - t))
+            if pop > 0.05:
+                c.create_text(dx, dy - bh / 2 - 9 * s, text="×%d" % total, fill=mix(bg, col, fade),
+                              font=(self.fonts["small"].actual("family"), -max(6, int(13 * s * pop)), "bold"))
+            twinkle = random.Random(int(k * 8))
+            for _i in range(6):                             # estrelinhas em cima do leque
+                tx = twinkle.uniform(start - cw / 2, start + gap * (n - 1) + cw / 2)
+                ty = twinkle.uniform(cy - ch / 2 - 12 * s, cy - ch / 2 - 2 * s)
+                c.create_text(tx, ty, text="✦", fill=mix(bg, twinkle.choice((col, "#ffffff", "#fde68a")),
+                                                          fade * twinkle.uniform(0.4, 1.0)),
+                              font=("Segoe UI Symbol", -int(twinkle.uniform(6, 10) * s)))
+
+    def mvp_spots(self, box):
+        """Onde fica a carta de MVP: (centro na revelação, centro no palco, chão do MVP)."""
+        s = self.s
+        x0, y0, x1, y1 = box
+        cx = (x0 + x1) / 2
+        stage = STAGE_HS["mvp_card"] * s
+        return (cx, y0 + (y1 - y0) * 0.4), (cx, y1 - stage / 2 - 2 * s), y1 - 10 * s
+
+    def mvp_face(self, frames, f, w, h, cx, cy, bg, fade=1.0):
+        """A carta de MVP de frente com a largura vezes f (a montada mais perto); a desenhada, sem o jogo."""
+        big = frames.get("big") or {}
+        pick = min(MVP_FLIPS, key=lambda v: abs(v - f))
+        photo = big.get(pick)
+        if photo is not None:
+            self.canvas.create_image(cx, cy, image=photo)
+        else:
+            self.draw_card_face(cx, cy, w * max(0.1, f), h, None, bg, gold=True, fade=fade)
+
+    def draw_rays(self, cx, cy, r, k, n, bg, alpha, spin=0.6):
+        """Raios dourados girando atrás de algo em (cx, cy)."""
+        c = self.canvas
+        for rr, ww, aa in ((r, 0.42, 0.5), (r * 0.6, 0.26, 1.0)):     # o raio longo e fraco, e o curto e forte
+            for j in range(n):
+                a = k * spin + j * 2 * math.pi / n
+                w = math.pi / n * ww
+                c.create_polygon(cx, cy, cx + math.cos(a - w) * rr, cy + math.sin(a - w) * rr, cx + math.cos(a + w) * rr,
+                                 cy + math.sin(a + w) * rr, fill=mix(bg, MVP_GOLD[0], alpha * aa * (1.0 if j % 2 else 0.6)),
+                                 outline="")
+
+    def draw_mvp_reveal(self, k, box, deal, frames, col):
+        """"Carta de MVP", por cima do texto: o cartão escurece, um facho dourado desce e o MVP que deixou a carta (do
+        jogo, de frente) cai nele, soltando faíscas; a carta sobe girando, se revela com um clarão e raios, com o nome
+        embaixo; depois desce para o palco enquanto o escuro escorre e o texto aparece."""
+        c, s = self.canvas, self.s
+        x0, y0, x1, y1 = box
+        if "big" not in frames or "mob" not in frames:
+            self.card_scene(frames, "mvp_card", deal)
+        (cx, ry), (sx, sy), floor = self.mvp_spots(box)
+        dark = "#07080c"
+        bw, bh = MVP_BIG[0] * s, MVP_BIG[1] * s
+        land = min(1.0, max(0.0, (k - MVP_REVEAL_S) / (MVP_LAND_S - MVP_REVEAL_S)))
+        ease = land * land * (3 - 2 * land)
+        top = y0 + 2 * s + (y1 - y0) * ease                # o escuro escorre para baixo na descida
+        if top < y1 - 4 * s:
+            c.create_polygon(round_rect_pts(x0 + 2 * s, top, x1 - 2 * s, y1 - 2 * s, 8 * s), smooth=True, fill=dark,
+                             outline="")
+            beam = min(1.0, max(0.0, (k - 0.1) / 0.5)) * (1 - ease)
+            if beam > 0:                                    # o facho: camadas do largo e fraco ao fino e forte
+                bot = top + (floor - top) * min(1.0, max(0.0, (k - 0.1) / 0.5))
+                pulse = 1 + 0.08 * math.sin(k * 7)
+                for wd, a in ((30, 0.10), (19, 0.18), (10, 0.32), (4, 0.62)):
+                    wt, wb = wd * 0.45 * s * pulse, wd * s * pulse
+                    c.create_polygon(cx - wt, top, cx + wt, top, cx + wb, bot, cx - wb, bot,
+                                     fill=mix(dark, MVP_GOLD[0], a * beam), outline="")
+            mob = (frames.get("mob") or {}).get(sprites.MOB_DIE)
+            if mob and 0.2 <= k < 1.75 and top < floor - 20 * s:   # o MVP de pé na luz, depois caindo
+                photos, delay = mob
+                i = 0 if k < 0.8 else min(len(photos) - 1, int((k - 0.8) * 1000 / delay))
+                c.create_image(cx, floor, anchor="s", image=photos[i])
+            sparks = random.Random(11)
+            for j in range(34):                             # faíscas douradas subindo de onde ele caiu
+                t = k - 0.8 - sparks.uniform(0.0, 1.4)
+                life = sparks.uniform(0.7, 1.3)
+                if 0 <= t < life:
+                    x = cx + sparks.uniform(-26, 26) * s + math.sin(t * 5 + j) * 3 * s
+                    y = floor - 8 * s - sparks.uniform(40, 90) * s * t
+                    if y > top + 3 * s:
+                        r = sparks.uniform(0.8, 1.8) * s
+                        c.create_oval(x - r, y - r, x + r, y + r, fill=mix(dark, sparks.choice(MVP_GOLD),
+                                                                            (1 - t / life) * (1 - ease)), outline="")
+        if k < MVP_SPIN[0]:
+            return
+        if k < MVP_SPIN[1]:                                 # sobe girando: duas voltas, cada vez mais devagar
+            u = (k - MVP_SPIN[0]) / (MVP_SPIN[1] - MVP_SPIN[0])
+            spin = 4 * math.pi * (1 - (1 - u) ** 3)
+            rise = 1 - (1 - min(1.0, u / 0.7)) ** 2
+            px, py = cx, (floor - 30 * s) + (ry - (floor - 30 * s)) * rise
+            f = math.cos(spin)
+            if u < 0.5:                                     # pequena e rápida: só o verso aparece
+                sc = 0.45 + 0.55 * u / 0.5
+                self.draw_card_back(px, py, bw * sc, bh * sc, f, dark)
+            elif f >= 0:
+                self.mvp_face(frames, f, bw, bh, px, py, dark)
+            else:
+                self.draw_card_back(px, py, bw, bh, f, dark)
+            return
+        t = k - MVP_SPIN[1]
+        if k < MVP_REVEAL_S:                                # revelada: raios atrás, clarão, brilhos e o nome
+            self.draw_rays(cx, ry, 78 * s, k, 16, dark, 0.34)
+            if t < 0.5:                                     # o clarão: um halo claro atrás da carta e riscos de luz
+                g = t / 0.5
+                e = (5 + 16 * g) * s
+                c.create_polygon(round_rect_pts(cx - bw / 2 - e, ry - bh / 2 - e, cx + bw / 2 + e, ry + bh / 2 + e,
+                                                10 * s), smooth=True, fill=mix(dark, "#fff3c4", 0.9 * (1 - g)),
+                                 outline="")
+                for j in range(8):
+                    a = j * math.pi / 4 + math.pi / 8
+                    r0, r1 = bh * 0.5, bh * (0.62 + 0.55 * g)
+                    c.create_line(cx + math.cos(a) * r0, ry + math.sin(a) * r0, cx + math.cos(a) * r1,
+                                  ry + math.sin(a) * r1, fill=mix(dark, "#ffffff", 1 - g), width=max(1, int(2 * s)))
+            self.mvp_face(frames, 1.0, bw, bh, cx, ry, dark)
+            twinkle = random.Random(int(k * 9))
+            for _i in range(10):
+                a, r = twinkle.uniform(0, 2 * math.pi), twinkle.uniform(0.62, 0.95) * bh
+                c.create_text(cx + math.cos(a) * r * 0.9, ry + math.sin(a) * r * 0.62, text="✦",
+                              fill=mix(dark, twinkle.choice(MVP_GOLD), twinkle.uniform(0.5, 1.0)),
+                              font=("Segoe UI Symbol", -int(twinkle.uniform(7, 12) * s)))
+            name = deal.get("name")
+            if name and t > 0.05:
+                font = (self.fonts["small"].actual("family"), -int(11 * s), "bold")
+                a = min(1.0, (t - 0.05) / 0.15)
+                c.create_text(cx + s, ry + bh / 2 + 11 * s, text=name, fill=mix(dark, "#000000", a), font=font)
+                c.create_text(cx, ry + bh / 2 + 10 * s, text=name, fill=mix(dark, MVP_GOLD[1], a), font=font)
+            return
+        # descendo para o palco, encolhendo (as três montadas: grande, meio, pequena)
+        px, py = cx + (sx - cx) * ease, ry + (sy - ry) * ease
+        if ease < 0.35:
+            self.mvp_face(frames, 1.0, bw, bh, px, py, dark)
+        else:
+            photo = frames.get("mid") if ease < 0.7 else frames.get("small")
+            size = (MVP_BIG[0] + MVP_SMALL[0]) / 2.0 if ease < 0.7 else MVP_SMALL[0]
+            hsize = (MVP_BIG[1] + MVP_SMALL[1]) / 2.0 if ease < 0.7 else MVP_SMALL[1]
+            self.draw_card_face(px, py, size * s, hsize * s, photo, CARD_BG, gold=True)
+
+    def draw_mvp_stage(self, k, box, fade, deal, frames, bg):
+        """"Carta de MVP", no palco: a carta pousada com os raios dourados girando atrás, um brilho holográfico
+        passando por ela de tempos em tempos, estrelinhas em volta e fogos dos dois lados."""
+        c, s = self.canvas, self.s
+        x0, y0, x1, y1 = box
+        if "small" not in frames:
+            self.card_scene(frames, "mvp_card", deal)
+        _r, (sx, sy), _f = self.mvp_spots(box)
+        w, h = MVP_SMALL[0] * s, MVP_SMALL[1] * s
+        t = k - MVP_LAND_S
+        self.draw_rays(sx, sy, 40 * s, k, 10, bg, 0.30 * fade, 0.8)
+        self.draw_card_face(sx, sy, w, h, frames.get("small"), bg, gold=True, fade=fade)
+        p = (t % 1.3) / 0.55                                # o brilho holográfico: um risco claro e um colorido
+        if p < 1:
+            lx = sx - w / 2 - 6 * s + (w + 22 * s) * p
+            self.draw_shine(sx - w / 2, sy - h / 2, sx + w / 2, sy + h / 2, lx, 12 * s, mix(bg, "#ffffff", 0.9 * fade),
+                            2.5 * s)
+            self.draw_shine(sx - w / 2, sy - h / 2, sx + w / 2, sy + h / 2, lx - 5 * s, 12 * s,
+                            mix(bg, "#a5f3fc", 0.6 * fade), 1.5 * s)
+        twinkle = random.Random(int(k * 8))
+        for _i in range(8):
+            a, r = twinkle.uniform(0, 2 * math.pi), twinkle.uniform(0.75, 1.15)
+            c.create_text(sx + math.cos(a) * w * r, sy + math.sin(a) * h * 0.55 * r, text="✦",
+                          fill=mix(bg, twinkle.choice(MVP_GOLD), fade * twinkle.uniform(0.4, 1.0)),
+                          font=("Segoe UI Symbol", -int(twinkle.uniform(6, 10) * s)))
+        stage_top = y1 - STAGE_HS["mvp_card"] * s
+        for tb, fx, fy in ((0.25, x0 + 52 * s, stage_top + 16 * s), (0.95, x1 - 52 * s, stage_top + 12 * s),
+                           (1.65, x0 + 88 * s, stage_top + 10 * s), (2.1, x1 - 86 * s, stage_top + 18 * s)):
+            u = t - tb                                      # fogos: uma explosão de faíscas que cai
+            if not 0 <= u < 0.9:
+                continue
+            spark = random.Random(int(tb * 100))
+            for j in range(18):
+                a = j * 2 * math.pi / 18 + spark.uniform(-0.1, 0.1)
+                r = 24 * s * (1 - (1 - min(1.0, u / 0.6)) ** 2) * spark.uniform(0.75, 1.1)
+                x = fx + math.cos(a) * r
+                y = fy + math.sin(a) * r + 14 * s * u * u
+                if x0 + 4 * s < x < x1 - 4 * s and stage_top < y < y1 - 4 * s:
+                    tail = 3 * s * (1 - u)
+                    c.create_line(x - math.cos(a) * tail, y - math.sin(a) * tail, x, y,
+                                  fill=mix(bg, spark.choice(MVP_GOLD + ("#fb923c",)), fade * (1 - u / 0.9)),
+                                  width=max(1, int(1.6 * s)))
+
     def draw_poring(self, x, y, color, hop, fade, bg):
         """Um bichinho de geleia (o Poring e a família dele) de pé em (x, y): a gota, o brilho, olhos e a boquinha
         aberta de susto. hop: 0 no chão (achatado) a 1 no alto."""
@@ -2608,7 +3030,8 @@ class DpsApp:
             c.create_text(x + w / 2, cy, text=h["chip"], font=font, fill=mix("#ffffff", h["color"], 0.35))
             x += w + gap
 
-    def draw_session_fx(self, kind, k, box, col, title_y, origin, tag=None, chase=None, bg=CARD_BG, fight=None):
+    def draw_session_fx(self, kind, k, box, col, title_y, origin, tag=None, chase=None, bg=CARD_BG, fight=None,
+                        deal=None):
         """A animação do destaque principal nos primeiros SESSION_FX_S do resumo (atrás do texto): confete (do alto e
         dos cantos), moedinhas que se empilham (ganhou muito) ou que caem do emblema (gastou muito), estrelas piscando
         (Milagre), brilhos em volta do título, ondas saindo do emblema, chuva ou a moldura pulsando. As peças saem
@@ -2804,6 +3227,11 @@ class DpsApp:
                                      title_y, origin, tag, chase, bg)
             elif kind == "boss_down" and k > BOSS_FALL_S:       # o chefe caiu: confete
                 self.draw_session_fx("confetti", k - BOSS_FALL_S, box, col, title_y, origin, tag, chase, bg)
+        elif kind == "deck":                        # o Coringa embaralha e distribui as cartas da sessão
+            self.draw_deck(k, box, fade, deal or {}, chase if chase is not None else {}, bg, col)
+        elif kind == "mvp_card":                    # a carta de MVP no palco (a revelação vem por cima do texto)
+            if k >= MVP_LAND_S:
+                self.draw_mvp_stage(k, box, fade, deal or {}, chase if chase is not None else {}, bg)
         elif kind == "chase":                       # Porings, Drops, Poporings e Marins fugindo de um cavaleiro
             self.draw_chase(k, box, fade, chase if chase is not None else {}, bg)
         elif kind == "diamonds":                    # o "Intocável": diamantes brilhando no vidro
@@ -3656,6 +4084,8 @@ class DpsApp:
             rows.append(dict(label=_("XP por hora"),
                              value=dec("%.2f%%" % est["per_hour_pct"]) if pct else num(est["per_hour"]),
                              right=(_("%s/h") % num(est["per_hour"])) if pct else "", frac=1.0, me=True, pin="xp_hour"))
+        # a gravação que continua a anterior (reiniciou para calibrar) já tem o ritmo dela: a previsão aparece logo
+        if est["per_min"] is not None or xp.carry(cb) is not None:
             eta, left = xp.time_to_level(cb, self.cfg)      # pelo ritmo dos últimos minutos de farm
             missing = xp.quests_uncounted(cb, self.cfg)     # missões entregues cuja XP não entra na conta
             if eta is not None:

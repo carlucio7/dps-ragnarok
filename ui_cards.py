@@ -969,7 +969,7 @@ class CardsTab:
         self.set_session([k for k in session.KEYS if k in want])
 
     def toggle_highlight(self, key):
-        off = set(self.cfg().get("session_hl_off") or [])
+        off = {k for k in session.HL_KEYS if k not in session.hl_chosen(self.cfg())}   # o antigo "card" já convertido
         off ^= {key}
         self.set_highlights([k for k in session.HL_KEYS if k not in off])
 

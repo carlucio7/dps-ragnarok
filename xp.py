@@ -40,7 +40,11 @@ except (OSError, ValueError):
 PENALTY_UP = ((16, 40), (15, 115), (14, 120), (13, 125), (12, 130), (11, 135), (10, 140), (9, 135), (8, 130),
               (7, 125), (6, 120), (5, 115), (4, 110), (3, 105))
 PENALTY_DOWN = ((-31, 10), (-26, 35), (-21, 60), (-16, 85), (-11, 90), (-6, 95))
-CALIBRATE_GAP_S = 60          # a próxima gravação começou até 1 min depois do fim desta
+# a próxima gravação começou até 3 min depois do fim desta. Parar e começar outra no jogo leva de 1,5 a 3 min (nome do
+# arquivo, o resumo na tela...): com 1 min, nenhum reinício de calibração do usuário em 2026-11-18 media. Nos
+# intervalos medidos, os abates fora da gravação somaram no máximo ~25 s de farm (até ~4% num trecho de 10 min).
+CALIBRATE_GAP_S = 180
+KILL_MAP_SHARE = 0.95         # a medida é do mapa que deu 95% da XP dos abates (o caminho pela cidade não conta)
 CALIBRATE_MIN_KILLS = 3
 CALIBRATE_MIN_MS = 10 * 60000  # trecho curto não calibra (30 s de gravação davam um fator 20% errado)...
 CALIBRATE_MIN_FRAC = 0.01     # ...a não ser que já tenha rendido 1% do nível (o que vier primeiro)
@@ -474,11 +478,16 @@ def _baseline(samples):
     return w[0] if w else None
 
 
+MEASURED = ("mapa", "personagens", "registro")   # de onde vem a correção quando o mapa já tem medida exata
+
+
 def predict(cfg, gid, mapname):
     """A correção de um personagem num mapa: (correção, de onde, nº de medidas) ou None. De onde:
     "mapa" — as medidas dele nesse mapa;
     "personagens" — o mapa medido por outros personagens: quanto ele rende a mais para eles (sobre o normal de cada
                     um), vezes o normal deste (1 se ele ainda não tem medida nenhuma);
+    "registro" — o mapa medido em gravações anteriores que a configuração não guarda (a leitura da pasta, ou medidas
+                 apagadas ao mudar os bônus): da mesma forma, quanto ele rendeu a mais sobre o normal da época;
     "personagem" — mapa que ninguém mediu: o normal dele."""
     allc = _all_samples(cfg)
     mine = allc.get(str(gid), [])
@@ -489,22 +498,50 @@ def predict(cfg, gid, mapname):
             return w[0], "mapa", w[1]
     base_me = _baseline(mine) if mine else None
     if m:
-        eff = weight = 0.0
-        n = 0
-        for g, xs in allc.items():
-            on = [x for x in xs if _sample_map(x) == m] if g != str(gid) else []
-            b = _baseline(xs) if on else None
-            w = _weighted(on) if on else None
-            if b and w:
-                k = sum(_sample_kills(x) for x in on)       # entre personagens pesa pelos abates, não pela XP
-                eff += w[0] / b * k
-                weight += k
-                n += len(on)
-        if weight:
-            return (base_me or 1.0) * eff / weight, "personagens", n
+        for source, groups, skip in (("personagens", allc, str(gid)), ("registro", _log_samples(cfg), None)):
+            eff = weight = 0.0
+            n = 0
+            for g, xs in groups.items():
+                on = [x for x in xs if _sample_map(x) == m] if g != skip else []
+                b = _baseline(xs) if on else None
+                w = _weighted(on) if on else None
+                if b and w:
+                    k = sum(_sample_kills(x) for x in on)       # entre personagens pesa pelos abates, não pela XP
+                    eff += w[0] / b * k
+                    weight += k
+                    n += len(on)
+            if weight:
+                return (base_me or 1.0) * eff / weight, source, n
     if base_me:
         return base_me, "personagem", len(mine)
     return None
+
+
+def _log_samples(cfg):
+    """As medidas do registro de aprendizado no formato das guardadas ({personagem: [[razão, XP, quando, origem, mapa,
+    abates]]}): sem as de trecho com entrega de missão e só as de até 30 dias antes da mais nova. O registro guarda
+    tudo o que foi medido, também o que a configuração não tem: a leitura das gravações que já estavam na pasta e as
+    medidas apagadas ao mudar os bônus. Como cada uma vale sobre o normal do personagem na época (predict), uma lista
+    que mudou depois não atrapalha. Guardadas enquanto o registro não muda."""
+    lrn = (cfg or {}).get("xp_learn")
+    if not isinstance(lrn, dict) or not isinstance(lrn.get("measures"), list) or not lrn["measures"]:
+        return {}
+    key = (id(lrn), lrn.get("rev"), len(lrn["measures"]))
+    hit = _CACHE.get("log")
+    if hit and hit[0] == key:
+        return hit[1]
+    raw = [x for x in lrn["measures"] if isinstance(x, dict) and x.get("ratio") and x.get("map") and x.get("char")
+           and not x.get("quests") and (x.get("gain") or 0) > 0]
+    newest = max((_when(x.get("date")) for x in raw if _when(x.get("date")) is not None), default=None)
+    out = {}
+    for x in raw:
+        w = _when(x.get("date"))
+        if newest is not None and w is not None and newest - w > CALIBRATE_FRESH_S:
+            continue
+        out.setdefault(str(x["char"]), []).append([float(x["ratio"]), float(x["gain"]), x.get("date"), x.get("src"),
+                                                   map_key(x["map"]), int(x.get("kills") or 0)])
+    _CACHE["log"] = (key, out)
+    return out
 
 
 def stored_correction(c, cfg, mapname=None):
@@ -582,7 +619,7 @@ def correction(c, cfg):
 
 
 def correction_kind(c, cfg):
-    """De onde vem a correção agora: "nivel", "mapa", "personagens", "personagem" ou None."""
+    """De onde vem a correção agora: "nivel", "mapa", "personagens", "registro", "personagem" ou None."""
     if session_correction(c, cfg):
         return "nivel"
     p = predict(cfg, c.session.gid, c.map or c.session.map)
@@ -590,9 +627,12 @@ def correction_kind(c, cfg):
 
 
 def calibration_hint(c, cfg):
-    """Mapa ainda sem medida (nem deste personagem nem de outro), 10 min de farm nele e nenhuma subida de nível na
-    gravação: a tela da XP sugere parar e gravar de novo (duas gravações seguidas dão a XP exata, e a previsão passa a
-    valer para o mapa). Devolve o mapa ou None. Não aparece em replay que já acabou de gravar."""
+    """Mapa ainda sem medida (nem deste personagem, nem de outro, nem no registro de gravações anteriores), 10 min de
+    farm nele e nenhuma subida de nível na gravação: a tela da XP sugere parar e gravar de novo (duas gravações
+    seguidas dão a XP exata, e a previsão passa a valer para o mapa). Só quando gravar de novo mede mesmo este mapa: o
+    trecho desde o começo da gravação não tem entrega de missão, monstro sem XP nem Zerar, e a XP dos abates dele é
+    deste mapa (senão a pessoa reiniciava e o aviso voltava). Devolve o mapa ou None. Não aparece em replay que já
+    acabou de gravar."""
     mode = cfg.get("xp_mode") if cfg.get("xp_mode") in MODES else "auto"
     if mode not in ("auto", "medido") or getattr(c, "finished", False) or not c.session.gid:
         return None
@@ -600,13 +640,18 @@ def calibration_hint(c, cfg):
         return None
     here = map_key(c.map or c.session.map)
     p = predict(cfg, c.session.gid, here)
-    if not here or (p and p[1] in ("mapa", "personagens")):
+    if not here or (p and p[1] in MEASURED):
         return None
     spans = [s for s, _e, m in c.map_spans() if map_key(m) == here]
     rows = [r for r in kills(c, (spans[-1] if spans else 0, c.now))[0] if r["xp"]]
     if len(rows) < CALIBRATE_MIN_KILLS or c.now - rows[0]["t"] < CALIBRATE_MIN_MS:
         return None
-    return here
+    an = anchors(c)
+    t0 = an[-1][0] if an else 0                      # o trecho que a gravação seguinte vai medir (exact_segments)
+    cut = getattr(c, "reset_t", None)
+    if (cut is not None and cut > t0) or kills(c, (t0, c.now))[1] or unsure(c, t0, c.now):
+        return None
+    return here if _kill_map(c, t0, c.now) == here else None
 
 
 def meter_name(mob):
@@ -813,7 +858,7 @@ def calibrate(c, cfg, xp_after):
         est = _list_xp(c, cfg, (t0, t1))
         if not est:
             continue
-        m = map_key(_one_map(c, t0, t1) or "")
+        m = _kill_map(c, t0, t1) or ""
         src = "%s#%s" % (name, tag)
         ratio = round(gain / est, 4)
         logs.append(_measure_log(c, cfg, t0, t1, gain, ratio, m, src, when))
@@ -872,6 +917,25 @@ def _one_map(c, t0, t1):
     return names.pop() if len(names) == 1 else None
 
 
+def _kill_map(c, t0, t1):
+    """O mapa do trecho pelos abates: o que deu pelo menos 95% da XP crua dos abates (map_key). A gravação que começa
+    na cidade ou na entrada da torre e segue para o mapa de farm é medida do mapa de farm (antes ficava sem mapa, e o
+    aviso de calibrar voltava). Sem abates com XP, o mapa único do trecho; None se a XP se divide entre mapas."""
+    rows = [r for r in kills(c, (t0, t1))[0] if r["xp"]]
+    if not rows:
+        one = _one_map(c, t0, t1)
+        return map_key(one) if one else None
+    spans = sorted(c.map_spans())
+    starts = [s for s, _e, _m in spans]
+    by = {}
+    for r in rows:
+        i = bisect.bisect_right(starts, r["t"]) - 1
+        m = map_key(spans[i][2]) if i >= 0 else map_key(c.session.map)
+        by[m] = by.get(m, 0.0) + r["xp"]
+    m, v = max(by.items(), key=lambda kv: kv[1])
+    return m if m and v >= KILL_MAP_SHARE * sum(by.values()) else None
+
+
 def detect_spot(c, cfg, segs=None, xp_after=None):
     """As marcas automáticas de spotlight por mapa (das versões anteriores) saem: agora cada mapa aprende quanto
     rende a mais com a XP exata (stored_correction por mapa) e a lista do evento conta monstro a monstro. As medidas
@@ -924,7 +988,7 @@ def detect_server(c, cfg, segs=None, xp_after=None):
     if fits[now] > 1.0:
         # XP acima da lista num mapa, mas as medidas recentes de outros mapas (de qualquer personagem) fecham com
         # ela: é coisa do mapa (o spotlight dá mais a alguns monstros), não do servidor; a correção do mapa cuida
-        here = {map_key(_one_map(c, t0, t1) or "") for t0, t1, _g in use}
+        here = {_kill_map(c, t0, t1) or "" for t0, t1, _g in use}
         other = [x for x in recent if _sample_map(x) and _sample_map(x) not in here
                  and not foreign_map(_sample_map(x))]
         w = _weighted([[x[0], _sample_kills(x)] for x in other])
@@ -1590,7 +1654,9 @@ def estimate(c, cfg, rng=None):
     Guardada enquanto a gravação e a configuração não mudam: a aba XP pedia a mesma conta ~10 vezes por desenho.
     As linhas dos abates são as mesmas em toda conta, então a guardada regrava nelas os totais dela."""
     store = _moment(c)["est"]
-    key = (tuple(rng) if rng is not None else None, repr([(cfg or {}).get(k) for k in EST_KEYS]), QUEST_XP_ON)
+    # o registro de aprendizado entra pela versão dele (predict usa as medidas de lá: "registro")
+    key = (tuple(rng) if rng is not None else None, repr([(cfg or {}).get(k) for k in EST_KEYS]), QUEST_XP_ON,
+           ((cfg or {}).get("xp_learn") or {}).get("rev"))
     hit = store.get(key)
     if hit is not None:
         res, totals = hit
@@ -2043,33 +2109,99 @@ def no_known_xp(c):
 
 
 def warming_up(c, cfg):
-    """True enquanto a previsão ainda não vale: menos de 10 min de farm e menos de 1% do nível ganho."""
+    """True enquanto a previsão ainda não vale: menos de 10 min de farm e menos de 1% do nível ganho. Gravação que
+    continua a anterior (carry_from) conta o farm do fim dela: reiniciar para calibrar não volta ao "calculando…"."""
+    k = carry(c)
+    if k is not None and k["warm"]:
+        return False
     start = farm_start(c)
-    if start is None:
+    if start is None and not (k and k["rows"]):
         return True
-    if c.now - start >= WARMUP_MS:
+    farm = (c.now - start) if start is not None else 0
+    if farm + (k["farm_ms"] if k else 0) >= WARMUP_MS:
         return False
     nd = need(c, cfg, c.session.base_level) if c.session.base_level else None
-    return not (nd and estimate(c, cfg, (0, c.now))["kill_xp"] >= WARMUP_FRAC * nd)
+    got = (estimate(c, cfg, (0, c.now))["kill_xp"] if start is not None else 0.0) + (k["farm_xp"] if k else 0.0)
+    return not (nd and got >= WARMUP_FRAC * nd)
+
+
+def recent_parts(c, cfg):
+    """O trecho que dá o ritmo recente: os últimos 10 min de farm (contando do começo do farm, não da gravação).
+    (recorte desta gravação ou None, XP dos abates do fim da gravação anterior que completam os 10 min, tempo de
+    caça deles), ou None enquanto aquece (warming_up). Sem gravação anterior ligada (carry_from): (recorte, 0, 0)."""
+    if warming_up(c, cfg):
+        return None
+    start = farm_start(c)
+    own = min(PACE_MS, c.now - start) if start is not None else 0
+    rng = (c.now - own, c.now) if own > 0 else None
+    k = carry(c)
+    rest = PACE_MS - own
+    rows = [(t, x) for t, x in k["rows"] if t >= -rest] if k is not None and rest > 0 else []
+    if not rows:
+        return (rng, 0.0, 0.0) if rng else None
+    return rng, sum(x for _t, x in rows), _active_of(sorted(t for t, _x in rows), -rest, 0)
 
 
 def recent_range(c, cfg):
-    """O trecho que dá o ritmo recente: os últimos 10 min de farm (contando do começo do farm, não da gravação),
-    ou None enquanto aquece (warming_up)."""
-    start = farm_start(c)
-    if start is None or warming_up(c, cfg):
-        return None
-    span = min(PACE_MS, c.now - start)
-    return (c.now - span, c.now) if span > 0 else None
+    """O recorte desta gravação no ritmo recente (recent_parts), ou None."""
+    parts = recent_parts(c, cfg)
+    return parts[0] if parts else None
 
 
 def recent_pace(c, cfg):
-    """XP por minuto de caça no trecho recente (recent_range), ou None enquanto aquece."""
-    rng = recent_range(c, cfg)
-    if rng is None:
+    """XP por minuto de caça no trecho recente (recent_parts), ou None enquanto aquece."""
+    parts = recent_parts(c, cfg)
+    if parts is None:
         return None
-    rate = estimate(c, cfg, rng)["kill_xp"] * 60000.0 / active_ms(c, rng)     # ritmo só dos abates
+    rng, more, more_ms = parts
+    got = estimate(c, cfg, rng)["kill_xp"] if rng else 0.0      # ritmo só dos abates
+    ms = (active_ms(c, rng) if rng else 0.0) + more_ms
+    rate = (got + more) * 60000.0 / ms if ms > 0 else 0.0
     return rate if rate > 0 else None
+
+
+# Reiniciar a gravação (para calibrar) não zera o ritmo do "Até o próximo nível": a gravação que começa até 1 min
+# depois do fim da anterior, do mesmo personagem, guarda os abates dos últimos 10 min de farm dela (só o tempo e a
+# XP de cada um: a gravação anterior não fica presa na memória). O widget liga as duas quando passa de uma para a
+# outra, e de novo quando mede a XP da anterior (a correção pode ter mudado com a medida).
+CARRY_GAP_S = CALIBRATE_GAP_S
+
+
+def carry(c):
+    """O fim da gravação anterior que esta continua (carry_from): dict(rows [(ms antes do fim dela, XP)], farm_ms,
+    farm_xp, warm (ela já tinha passado do aquecimento), gap (s entre as duas)), ou None."""
+    return getattr(c, "carry", None)
+
+
+def carry_from(c, prev, cfg):
+    """Liga a gravação `c` à `prev` se `c` começou até 1 min depois do fim de `prev` (mesmo personagem). True se
+    ligou. Abre uma gravação velha no meio (ou de outro personagem) e nada muda."""
+    if c is None or prev is None or c is prev:
+        return False
+    s, p = c.session, prev.session
+    if not s.gid or s.gid != p.gid:
+        return False
+    start, before = _seconds(s.recorded_at), _seconds(p.recorded_at)
+    if start is None or before is None or start <= before:
+        return False
+    gap = start - (before + prev.now / 1000.0)
+    if gap > CARRY_GAP_S:
+        return False
+    fs = farm_start(prev)
+    rows, farm_ms, farm_xp = [], 0.0, 0.0
+    if fs is not None:
+        est = estimate(prev, cfg, (fs, prev.now))
+        farm_ms, farm_xp = float(prev.now - fs), est["kill_xp"]
+        rows = sorted((r["t"] - prev.now, r.get("total") or 0.0) for r in est["rows"] if r["t"] >= prev.now - PACE_MS)
+    old = carry(prev)
+    if old is not None and farm_ms < PACE_MS:
+        # a anterior também continuava outra (reiniciou duas vezes seguidas): os abates de lá completam os 10 min
+        # (o intervalo entre as gravações fica de fora do tempo de caça pela regra das pausas)
+        rows = [(t - prev.now, x) for t, x in old["rows"] if t - prev.now >= -PACE_MS] + rows
+        farm_ms += old["farm_ms"]
+        farm_xp += old["farm_xp"]
+    c.carry = dict(rows=rows, farm_ms=farm_ms, farm_xp=farm_xp, warm=not warming_up(prev, cfg), gap=gap)
+    return True
 
 
 # O ritmo do "Até o próximo nível" conta só o tempo caçando: o intervalo entre abates que passa de 30 s (ou de 3× o
@@ -2084,7 +2216,11 @@ def active_ms(c, rng):
     """Quanto do recorte foi caça: o recorte menos a parte de cada intervalo sem abate (contando as pontas) que passa
     do limite de pausa. Nunca menos que 1 min (ou o recorte, se for menor): dois abates seguidos não viram um ritmo."""
     t0, t1 = rng
-    times = sorted(r["t"] for r in kills(c, rng)[0])
+    return _active_of(sorted(r["t"] for r in kills(c, rng)[0]), t0, t1)
+
+
+def _active_of(times, t0, t1):
+    """active_ms de uma lista ordenada de tempos de abate no recorte (t0, t1)."""
     inner = [b - a for a, b in zip(times, times[1:])]
     limit = max(IDLE_GAP_MS, IDLE_TYPICAL * statistics.median(inner)) if inner else IDLE_GAP_MS
     edges = [t0] + times + [t1]
@@ -2355,5 +2491,5 @@ def sim_map(c, cfg, rng, mapname, over=None):
     return dict(xp=total, base_xp=base, kills=n, per_kill=total / n, per_min=per_min,
                 per_hour=per_min * 60 if per_min is not None else None, source=source, corr=corr_x,
                 mobs=mobs, unknown=unknown, map=map_key(mapname), latam_other=other,
-                measured=bool(p and p[1] in ("mapa", "personagens")), latam_share=share,
+                measured=bool(p and p[1] in MEASURED), latam_share=share,
                 bio_share=sum(w for m, w in known.items() if m in BIO_MOBS) / wsum)

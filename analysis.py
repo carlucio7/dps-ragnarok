@@ -1436,10 +1436,11 @@ def buff_uptime(c, aid, rng):
         if first is not None and s <= first <= e:
             r["at_start"] = True
     for (a, efst), (s, tot, left) in c.status_on.items():
-        if a == aid and efst in agg:
+        # ativo: ligado e dentro do tempo que o jogo mandou (passado dele sem o "acabou", acabou: meter.active_end)
+        if a == aid and efst in agg and c.status_active((a, efst)):
             agg[efst]["active"] = True
             if left and left < 9999 * 1000:
-                agg[efst]["left"] = max(0, left - (c.now - s))
+                agg[efst]["left"] = max(0, left - (c.now - c.status_seen.get((a, efst), s)))
     merged = {}
     for r in agg.values():
         m = merged.get(r["name"])

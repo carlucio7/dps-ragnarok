@@ -709,12 +709,17 @@ CT_EFST_LIST = 18
 
 def statuses_at_start(header, buf):
     """Buffs que já estavam no personagem quando a gravação começou:
-    [(efst, duração total ms, restante ms)]. Registros de 28 bytes no container 18."""
+    [(efst, duração total ms, restante ms)]. Registros de 28 bytes no container 18.
+    O restante no fim do registro é o que o servidor mandou da última vez (ao ligar ou ao entrar no mapa): fica
+    velho, e no Milagre é sempre 1 hora (o servidor nunca reenvia). O que falta na hora em que a gravação começa
+    vem logo depois do efeito (o cliente desconta o tempo que passou); 999999 com 9999 no fim é "sem tempo"."""
     out = []
     for _cid, d in header.container_chunks(buf, CT_EFST_LIST):
         if len(d) >= 28:
-            efst = struct.unpack_from("<I", d)[0]
+            efst, now_left = struct.unpack_from("<Ii", d)
             total, left = struct.unpack_from("<ii", d, 20)
+            if 0 < now_left <= left:
+                left = now_left
             out.append((efst, max(0, total), max(0, left)))
     return out
 

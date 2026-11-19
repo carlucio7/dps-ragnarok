@@ -2,6 +2,20 @@
 
 Português · [English](#english) · [Español](#español)
 
+## 1.12.0
+
+Recalibrar não custa mais nada, e o resumo da sessão ganhou as cartas.
+
+- Carta de MVP: um destaque especial no resumo da sessão quando cai uma carta de MVP, com a carta de verdade.
+- Mão de cartas: com 6 cartas ou mais na sessão, o Coringa embaralha e distribui as suas cartas.
+- Item marcado virou um destaque à parte.
+- O Milagre e os buffs que já estavam ligados no começo da gravação mostram o tempo que falta de verdade.
+- Buff que acaba sem aviso do jogo deixa de aparecer como ativo.
+- Ao reiniciar a gravação, a previsão do nível continua com o ritmo de antes, sem esperar outros 10 minutos.
+- A calibração da XP funciona mesmo quando a gravação começa na cidade e quando a nova gravação começa até 3 minutos depois.
+- O aviso de calibrar só aparece quando gravar de novo realmente mede, e não volta nos mapas que você já mediu.
+- Os seus recordes pessoais e os destaques que você desligou não se perdem mais ao fechar o programa.
+
 ## 1.11.0
 
 Resumo da sessão com destaques animados, prévia ao vivo dos cartões e sons seus.
@@ -270,6 +284,20 @@ Primeira versão pública.
 
 ## English
 
+### 1.12.0
+
+Recalibrating costs nothing now, and the session summary got the cards.
+
+- MVP card: a special highlight in the session summary when an MVP card drops, with the real card.
+- Hand of cards: with 6 cards or more in the session, the Joker shuffles and deals your cards.
+- Marked item is now a highlight of its own.
+- The Miracle and the buffs already on when the recording starts show the real time left.
+- A buff that ends without the game saying so no longer shows as active.
+- When you restart the recording, the level forecast keeps the previous pace, with no new 10-minute wait.
+- XP calibration works even when the recording starts in town and when the new recording starts up to 3 minutes later.
+- The calibrate notice only shows when recording again really measures, and doesn't come back on maps you already measured.
+- Your personal bests and the highlights you turned off are no longer lost when you close the program.
+
 ### 1.11.0
 
 Session summary with animated highlights, live card preview and your own sounds.
@@ -537,6 +565,20 @@ First public version.
 ---
 
 ## Español
+
+### 1.12.0
+
+Recalibrar ya no cuesta nada, y el resumen de la sesión ganó las cartas.
+
+- Carta de MVP: un destacado especial en el resumen de la sesión cuando cae una carta de MVP, con la carta de verdad.
+- Mano de cartas: con 6 cartas o más en la sesión, el Joker baraja y reparte tus cartas.
+- Ítem marcado ahora es un destacado aparte.
+- El Milagro y los buffs que ya estaban activos al empezar la grabación muestran el tiempo que falta de verdad.
+- Un buff que termina sin aviso del juego deja de aparecer como activo.
+- Al reiniciar la grabación, la previsión del nivel sigue con el ritmo de antes, sin esperar otros 10 minutos.
+- La calibración de la XP funciona aunque la grabación empiece en la ciudad y cuando la nueva grabación empieza hasta 3 minutos después.
+- El aviso de calibrar solo aparece cuando grabar de nuevo realmente mide, y no vuelve en los mapas que ya mediste.
+- Tus récords personales y los destacados que apagaste ya no se pierden al cerrar el programa.
 
 ### 1.11.0
 

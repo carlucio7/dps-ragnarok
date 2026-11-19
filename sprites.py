@@ -1304,6 +1304,8 @@ LOADER = Loader()
 ITEM_ART = "data\\texture\\유저인터페이스\\collection\\"   # ilustrações grandes dos itens (fundo branco)
 TRAP_ART = "트랩.bmp"                                       # o item Armadilha: uma armadilha de urso
 ITEM_ICON = "data\\texture\\유저인터페이스\\item\\"         # ícones pequenos (24 × 24) dos itens
+CARD_ART = "data\\texture\\유저인터페이스\\cardbmp\\"      # as ilustrações das cartas (300 × 400, a carta inteira)
+CARD_TABLE = "data\\num2cardillustnametable.txt"          # carta -> nome do arquivo da ilustração ("4147#바포메트카드#")
 MOB_IDLE, MOB_WALK, MOB_ATTACK, MOB_HURT, MOB_DIE = 0, 1, 2, 3, 4   # ações dos .act dos monstros
 ANIM_FRAMES = 16              # a animação de um monstro usa no máximo estes quadros (pula os do meio)
 
@@ -1394,7 +1396,8 @@ class Bestiary:
     Só lê o que for pedido, e guarda."""
 
     def __init__(self, grf_path):
-        self.grf = Grf(grf_path, prefixes=(MONSTER, LUA, ITEM_ART, ITEM_ICON, EFFECT_SPR))
+        self.grf = Grf(grf_path, prefixes=(MONSTER, LUA, ITEM_ART, ITEM_ICON, EFFECT_SPR, CARD_ART, CARD_TABLE))
+        self._cards = None            # carta -> nome da ilustração (lido na primeira carta pedida)
 
         def table(name, glob):
             data = self.grf.read(LUA + name)
@@ -1461,6 +1464,30 @@ class Bestiary:
                 try:
                     img = crop(*clear_background(*bmp_rgba(data)))
                 except Exception:  # noqa: BLE001 - imagem estranha: fica sem desenho
+                    img = None
+            self.cache[key] = img
+        return self.cache[key]
+
+    def card_art(self, card):
+        """A ilustração de uma carta, como o jogo mostra ao clicar nela: a carta inteira, com a moldura e o nome (as de
+        MVP douradas, com o selo MVP). (w, h, pixels) ou None. O nome do arquivo vem da tabela num2cardillustnametable."""
+        key = ("card", card)
+        if key not in self.cache:
+            if self._cards is None:
+                names = {}
+                data = self.grf.read(CARD_TABLE)
+                for line in (data.decode("cp949", "replace").splitlines() if data else ()):
+                    part = line.split("#")
+                    if len(part) >= 2 and part[0].strip().isdigit() and part[1].strip():
+                        names[int(part[0])] = part[1].strip()
+                self._cards = names
+            name = self._cards.get(card)
+            raw = self.grf.read(CARD_ART + name + ".bmp") if name else None
+            img = None
+            if raw:
+                try:
+                    img = bmp_rgba(raw)
+                except Exception:  # noqa: BLE001 - imagem estranha: fica sem a ilustração
                     img = None
             self.cache[key] = img
         return self.cache[key]

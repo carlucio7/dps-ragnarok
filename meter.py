@@ -34,6 +34,11 @@ MARK_EARLY_MS = 3000
 MIRACLE_EFST = 160
 MIRACLE_MIN_MS = 3000000
 MIRACLE_SAME_PROC_MS = 5000           # dois "ligou" em menos de 5 s são o mesmo proc
+# O jogo avisa o fim de um buff quando ele acaba, também antes da hora (em 80 gravações, 13.482 avisos assim);
+# 31 de ~32.600 passaram do tempo sem o aviso (Magnificat, Proteção Lunar...): passado STATUS_GRACE_MS do fim
+# pelo tempo que o jogo mandou, ele acaba ali (antes ficava "ativo" até o fim da gravação)
+STATUS_GRACE_MS = 5000
+NO_TIMER_MS = (9999, 999999)         # "falta 9999 ms" / "999999": o jogo não diz quanto falta
 LOOT_KILL_MS = 2000           # o item cai até isso depois de o monstro morrer
 LOOT_MATCH_MS = 1500          # sumiu do chão e entrou na bolsa de quem grava com essa diferença: foi ele que pegou          # a unidade marcadora aparece até isso antes do monstro da fase (Betelgeuse: ~0,9 s)
 DUMMY_MIN, DUMMY_MAX = 21060, 21099   # bonecos de treino
@@ -606,6 +611,7 @@ class Combat:
         self._last_seen = {}
         self.status_on = {}           # (aid, efst) -> [início, duração total, restante] dos ativos
         self.status_seen = {}         # (aid, efst) -> quando chegou o último "ligou" (o restante conta a partir dali)
+        self.status_due = {}          # (aid, efst) -> quando acaba pelo tempo do último "ligou" que trouxe tempo
         self.status_log = []          # (aid, efst, início, fim) dos que já acabaram
         self.hp_log = collections.defaultdict(list)   # aid -> [(t, hp, hp máx.)]
         self.alerts = collections.deque(maxlen=50)    # (nº, t, tipo, texto) para o widget mostrar
@@ -1427,9 +1433,23 @@ class Combat:
         if first:
             self.status_first[key] = (t, bool(on))
         cur = self.status_on.get(key)
+        due = self.status_due.get(key)
+        if cur is not None and due is not None and t > due + STATUS_GRACE_MS:
+            # passou do tempo sem o "acabou": acabou na hora (o que chegou agora é outro, ou o fim atrasado)
+            del self.status_on[key]
+            self.status_due.pop(key, None)
+            self.status_log.append((aid, efst, cur[0], max(cur[0], due)))
+            cur = None
+            if not on:
+                return
         if on:
             self._died_with.pop(key, None)
             self.status_seen[key] = t
+            dur = left or total
+            if dur and dur not in NO_TIMER_MS:
+                self.status_due[key] = t + dur
+            elif cur is None:
+                self.status_due.pop(key, None)
             if total and total > self.status_total.get(efst, 0):
                 self.status_total[efst] = total
             if cur is None:
@@ -1454,6 +1474,7 @@ class Combat:
                 self.status_log.append((aid, efst, 0, t))
             return
         del self.status_on[key]
+        self.status_due.pop(key, None)
         self.status_log.append((aid, efst, cur[0], t))
         if aid == self.me and self.active() and status_alert(efst, cur[1]) and t - cur[0] >= 2000:
             # um buff importante acabou no meio da luta
@@ -1544,6 +1565,7 @@ class Combat:
     def end_statuses(self, aid, t):
         for key in [k for k in self.status_on if k[0] == aid]:
             start = self.status_on.pop(key)[0]
+            self.status_due.pop(key, None)
             self.status_log.append((aid, key[1], start, max(start, t)))
             self._died_with[key] = start
 
@@ -1553,8 +1575,21 @@ class Combat:
     def statuses(self, aid=None):
         """Intervalos (aid, efst, início, fim); os ainda ativos terminam em `now`."""
         out = [s for s in self.status_log if aid is None or s[0] == aid]
-        out += [(a, e, v[0], self.now) for (a, e), v in self.status_on.items() if aid is None or a == aid]
+        out += [(a, e, v[0], self.active_end((a, e), v[0])) for (a, e), v in self.status_on.items()
+                if aid is None or a == aid]
         return out
+
+    def active_end(self, key, start):
+        """Até quando um status ativo vale: agora; ou, passado STATUS_GRACE_MS do fim pelo tempo que o jogo mandou sem
+        o "acabou" chegar, aquele fim."""
+        due = self.status_due.get(key)
+        if due is not None and self.now > due + STATUS_GRACE_MS:
+            return max(start, due)
+        return self.now
+
+    def status_active(self, key):
+        """Se o status (aid, efst) está ativo agora (ligado e, se o jogo mandou o tempo, ainda dentro dele)."""
+        return key in self.status_on and self.active_end(key, 0) >= self.now
 
     def on_hp(self, t, aid, hp, max_hp):
         log = self.hp_log[aid]

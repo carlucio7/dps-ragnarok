@@ -16,10 +16,11 @@ def container(chunks, keys):
 
 
 def header(aid, player="Tester", map_name="prt_fild08", date=DATE, entities=(), option=0, look=None, sex=None,
-           xp=None):
+           xp=None, buffs=()):
     """Cabecalho + containers. O fluxo (tipo 1) comeca logo depois.
     look: {"hair": 22, "top": 1677, ...} (visual de quem grava, como em rrf.LOOK_CHUNKS); sex: 1/0.
-    xp: (id do personagem, XP de base no início, XP do nível) -> chunks 1011, 1015 e 1018."""
+    xp: (id do personagem, XP de base no início, XP do nível) -> chunks 1011, 1015 e 1018.
+    buffs: [(efst, restante agora, duração total, restante do último aviso do servidor)] -> container 18."""
     keys = rrf.Keys(*date)
     # cada container abre com o marcador do cliente (id proprio, tamanho 0)
     replay_data = [(950, b""), (951, b""), (960, b""), (961, b""), (970, player.encode("utf-8") + b"\0"),
@@ -35,8 +36,12 @@ def header(aid, player="Tester", map_name="prt_fild08", date=DATE, entities=(), 
     init = [(10000, b"")] + [(210, spawn0857(*e)) for e in entities] + [(10001, b"")]
     # mesma ordem do cliente: ReplayData por ultimo, logo antes do fluxo
     blobs = [(rrf.CT_SESSION, container(session, keys)),
-             (rrf.CT_INITIAL_ENTITIES, container(init, keys)),
-             (rrf.CT_REPLAY_DATA, container(replay_data, keys))]
+             (rrf.CT_INITIAL_ENTITIES, container(init, keys))]
+    if buffs:
+        efst = [(19000, b"")] + [(19011, struct.pack("<Ii3iii", ef, now, 0, 0, 0, total, left))
+                                 for ef, now, total, left in buffs] + [(19001, b"")]
+        blobs.append((rrf.CT_EFST_LIST, container(efst, keys)))
+    blobs.append((rrf.CT_REPLAY_DATA, container(replay_data, keys)))
     head = bytearray(b"<< Ragnarok Replay File Version 0.05 >>\r\n".ljust(0x64, b"\0"))
     head += bytes([5]) + b"GAR" + struct.pack("<hBBBBBB", date[0], date[1], date[2], 0, *date[3:])
     table_len = rrf.FIRST_CONTAINER - rrf.TABLE_OFFSET

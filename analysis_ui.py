@@ -2099,7 +2099,7 @@ class AnalysisWindow:
         hint = xp.calibration_hint(c, cfg)
         if hint:
             self.xp_hint.configure(text=_("⟳ %s ainda não tem medida de XP exata. Para a previsão valer neste mapa: "
-                                          "pare a gravação no jogo e comece outra em até 1 minuto (as duas seguidas "
+                                          "pare a gravação no jogo e comece outra em até 3 minutos (as duas seguidas "
                                           "dão a XP exata).") % hint)
             if not self.xp_hint_shown:
                 self.xp_hint.pack(fill="x", padx=12, pady=(6, 0), before=self.xp_anchor)
@@ -2149,7 +2149,8 @@ class AnalysisWindow:
             how = _("lista × %s, da subida de nível desta gravação") % dec("%.3f" % est["correction"])
         elif kind == "medido":                  # cada mapa usa as medidas dele; senão as de outros personagens nele
             how = {"mapa": _("lista × %s, de %d medidas neste mapa"),
-                   "personagens": _("lista × %s, deste mapa medido por outros personagens (%d medidas)")}.get(
+                   "personagens": _("lista × %s, deste mapa medido por outros personagens (%d medidas)"),
+                   "registro": _("lista × %s, deste mapa medido em gravações anteriores (%d medidas)")}.get(
                 xp.correction_kind(c, cfg), _("lista × %s, de %d medidas de outros mapas")) % (
                 dec("%.3f" % est["correction"]), info)
         elif kind == "fixo":
@@ -2247,7 +2248,8 @@ class AnalysisWindow:
             text = _("lista × %s (subida de nível nesta gravação)") % dec("%.3f" % corr)
         elif corr:
             text = {"mapa": _("lista × %s (%d medidas neste mapa)"),
-                    "personagens": _("lista × %s (este mapa medido por outros personagens: %d medidas)")}.get(
+                    "personagens": _("lista × %s (este mapa medido por outros personagens: %d medidas)"),
+                    "registro": _("lista × %s (este mapa medido em gravações anteriores: %d medidas)")}.get(
                 xp.correction_kind(c, cfg), _("lista × %s (%d medidas de outros mapas; este mapa ainda sem medida)")) % (
                 dec("%.3f" % corr), how)
         else:

@@ -365,13 +365,17 @@ class XpSim:
                 return "—"
             return dec("%+.1f%%" % ((b - a) * 100.0 / a))
 
-        recent = xp.recent_range(c, cfg)        # o mesmo trecho do "Até o próximo nível" lá de cima
+        parts = xp.recent_parts(c, cfg)        # o mesmo trecho do "Até o próximo nível" lá de cima
+        # a parte que vem do fim da gravação anterior (reiniciou para calibrar) muda na mesma proporção do recorte
+        scale = (sim["xp"] / base["xp"]) if over and base["xp"] and sim["xp"] is not None else 1.0
 
         def eta(o):
-            if recent is None:
+            if parts is None:
                 return "—"
-            got = xp.simulate(c, cfg, recent, o)["xp"] or 0.0
-            rate = got * 60000.0 / xp.active_ms(c, recent)      # o mesmo ritmo de caça do "Até o próximo nível"
+            recent, more, more_ms = parts
+            got = (xp.simulate(c, cfg, recent, o)["xp"] or 0.0) if recent else 0.0
+            ms = (xp.active_ms(c, recent) if recent else 0.0) + more_ms
+            rate = (got + more * (scale if o else 1.0)) * 60000.0 / ms if ms > 0 else 0.0   # o mesmo ritmo de caça
             ms, _left = xp.time_to_level(c, cfg, rate) if rate > 0 else (None, None)
             return xp.span_text(ms) if ms else ("—" if ms is None else _("a qualquer momento"))
 

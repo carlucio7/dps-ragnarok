@@ -38,7 +38,7 @@ FIELDS = [
 KEYS = [k for k, _n in FIELDS]
 DEFAULT = ["duration", "xp", "levels", "kills", "deaths", "favs", "bosses"]
 MIN_MS = 60000                # gravação de menos de 1 min só tem resumo se teve um destes acontecimentos:
-SHORT_OK = ("card", "one_shot", "levelup", "boss")
+SHORT_OK = ("mvp_card", "cards", "marked", "one_shot", "levelup", "boss")
 SESSION_END_S = 15.0          # o arquivo parado há isso: a gravação acabou (o mesmo tempo do "Gravando" do rodapé)
 GREEN, RED, WHITE, DIM, GOLD = "#4ade80", "#f87171", "#ffffff", "#a3a8b5", "#fbbf24"
 PURPLE, TEAL, BLUE, PINK = "#c084fc", "#2dd4bf", "#60a5fa", "#f472b6"
@@ -46,11 +46,14 @@ PURPLE, TEAL, BLUE, PINK = "#c084fc", "#2dd4bf", "#60a5fa", "#f472b6"
 # Destaques: o que a sessão teve de especial. O primeiro vira o título do cartão, com o emblema e uma animação curta
 # dele (confete, moedinhas, estrelas, brilho, chuva); os outros viram selos embaixo. Cada um pode ser desligado na aba
 # Cartões. Os limites saíram de 78 gravações de 10 min ou mais daqui: destaque é o que não acontece toda vez.
+# A ordem da lista é a prioridade: com vários na mesma sessão, o primeiro da lista é o título.
 # (chave, nome na aba Cartões, quando aparece)
 HIGHLIGHTS = [
-    ("card", "Sorte grande", "Caiu uma carta (ou um item favorito) e você pegou"),
+    ("mvp_card", "Carta de MVP", "Caiu uma carta de MVP e você pegou"),
     ("one_shot", "One shot", "Derrubou um chefe com um golpe só"),
+    ("cards", "Mão de cartas", "Pegou %d cartas ou mais na gravação"),
     ("levelup", "Subiu de nível", "Subiu um ou mais níveis na gravação"),
+    ("marked", "Item marcado", "Caiu um item favorito ou marcado nos avisos, e você pegou"),
     ("record", "Recorde pessoal", "Bateu um recorde seu: o maior golpe do personagem, ou a XP por hora ou os abates "
                                   "por minuto num mapa"),
     ("untouchable", "Intocável", "Levou %d%% da vida em 10 s sem morrer, ou %d vezes a vida numa gravação sem "
@@ -67,6 +70,7 @@ HIGHLIGHTS = [
     ("tough", "Sessão difícil", "%d mortes ou mais: um incentivo para a próxima"),
 ]
 HL_KEYS = [k for k, _n, _w in HIGHLIGHTS]
+HL_CARDS = 6                  # cartas pegas para "Mão de cartas" (o usuário: "mais de 5 na sessão")
 HL_MIRACLES = 2               # Milagres para "Escravo do Milagre" (2 das 78 gravações)
 HL_CLOSE_PCT = 85             # "Quase lá": passou disto do nível
 HL_KILLS = 1000               # abates para "Máquina de abates"
@@ -79,20 +83,23 @@ HL_TOUGH = 5                  # mortes para o incentivo da "Sessão difícil"
 HL_TANK_BURST = 500           # % da vida máxima levado em HL_TANK_WINDOW_S, sem morrer nem logo depois
 HL_TANK_WINDOW_S = 10
 HL_TANK_LIVES = 120           # vezes a vida máxima, numa gravação sem nenhuma morte
-HL_ARGS = {"miracle": HL_MIRACLES, "close": HL_CLOSE_PCT, "kills": HL_KILLS, "picked": HL_PICKED, "used": HL_USED,
+HL_ARGS = {"cards": HL_CARDS, "miracle": HL_MIRACLES, "close": HL_CLOSE_PCT, "kills": HL_KILLS, "picked": HL_PICKED,
+           "used": HL_USED,
            "long": HL_LONG_H, "tough": HL_TOUGH, "untouchable": (HL_TANK_BURST, HL_TANK_LIVES)}
 RECORD_MIN = 10               # recordes de XP por hora e abates por minuto: com pelo menos isto de caça no mapa (min)
 RECORD_KILLS = 50             # ...e pelo menos estes abates lá
 MAIN_SHARE = 0.8              # o mapa da caça: com pelo menos isto dos abates (senão, só "e mais N mapas")
 SALMON, ICE = "#ff8f7a", "#a5f3fc"   # golpes e dano; o "Intocável"
 # o símbolo de cada destaque: no círculo à esquerda do título e no começo do selo
-EMBLEMS = {"card": "✦", "one_shot": "✊", "levelup": "▲", "record": "✪", "untouchable": "◆", "top_damage": "♛",
+EMBLEMS = {"mvp_card": "♔", "cards": "♠", "marked": "✦", "one_shot": "✊", "levelup": "▲", "record": "✪",
+           "untouchable": "◆", "top_damage": "♛",
            "miracle": "★", "boss": "♚", "close": "➚", "top_hit": "✸", "kills": "⚔", "picked": "⛁", "used": "⚗",
            "long": "⌛", "tough": "☁"}
 # os títulos de cada destaque: um deles, sempre o mesmo para a mesma gravação
 TITLES = {
-    "card": ("Sorte grande!", "Que sorte!", "Olha a carta!"),
-    "fav": ("Caiu um favorito!", "Sorte grande!"),
+    "mvp_card": ("Carta de MVP!", "Lendária!", "A carta do chefe!"),
+    "cards": ("Mão de cartas!", "Baralho cheio!", "Coleção de cartas!"),
+    "marked": ("Olha o drop!", "Sorte grande!", "Caiu o que você queria!"),
     "one_shot": ("ONE SHOT!", "Um golpe só!"),
     "levelup": ("Subiu de nível!", "Mais um nível!", "Level up!"),
     "levelups": ("Subiu %d níveis!", "%d níveis de uma vez!"),
@@ -113,11 +120,15 @@ TITLES = {
 # a animação de cada um. Golpes e dano: a luva de boxe dando vários socos ("jabs") ou, num one shot, um soco só, muito
 # forte ("one_punch"); "chase": Porings, Drops, Poporings e Marins fugindo de um jogador; "diamonds": o cartão
 # translúcido do "Intocável"; moedinhas: ganhou (pegou muito) caem e se empilham, gastou (usou muito) caem do emblema
-FX = {"card": "lucky", "one_shot": "asura", "levelup": "confetti", "record": "confetti", "untouchable": "diamonds",
-      "top_damage": "combo", "miracle": "stars", "boss": "boss_down", "close": "glow", "top_hit": "heavy",
-      "kills": "chase", "picked": "coins_stack", "used": "coins_down", "long": "glow", "tough": "rain"}
+# "deck" (Mão de cartas): o Coringa do jogo embaralha e distribui as cartas da sessão (as ilustrações delas) num leque;
+# "mvp_card" (Carta de MVP): o cartão escurece, o MVP que deixou a carta cai num facho de luz, a carta sobe girando e
+# se revela por cima de tudo, depois desce para o palco com raios dourados, brilho holográfico e fogos
+FX = {"mvp_card": "mvp_card", "cards": "deck", "marked": "lucky", "one_shot": "asura", "levelup": "confetti",
+      "record": "confetti", "untouchable": "diamonds", "top_damage": "combo", "miracle": "stars", "boss": "boss_down",
+      "close": "glow", "top_hit": "heavy", "kills": "chase", "picked": "coins_stack", "used": "coins_down",
+      "long": "glow", "tough": "rain"}
 FX_KINDS = ("confetti", "coins_stack", "coins_down", "stars", "sparkle", "glow", "lucky", "flash", "rain", "jabs",
-            "one_punch", "chase", "diamonds", "combo", "heavy", "asura", "boss_down")
+            "one_punch", "chase", "diamonds", "combo", "heavy", "asura", "boss_down", "deck", "mvp_card")
 # os cartões de dano são cenas de luta com os desenhos do jogo: "combo" (Maior DPS: uma sequência rápida de golpes, um
 # monte de números), "heavy" (Maior golpe: um golpe carregado só, um número grande, o monstro cambaleia) e "asura" (one
 # shot: carrega, avança, o monstro cai e a tela racha). "boss_down" (Chefe derrotado): a luta com o chefe da sessão,
@@ -276,7 +287,7 @@ def subtitle(c, cfg):
 def card(c, cfg, favs=(), marked=(), records=None):
     """Tudo o que o cartão mostra: dict(lines, hl (os destaques), sub (a duração e o mapa)). `records`: os recordes
     batidos nesta gravação (update_records; só o widget, no fim da gravação, guarda recordes)."""
-    return dict(lines=lines(c, cfg, favs, marked, skip=("duration",)), hl=highlights(c, cfg, favs, records),
+    return dict(lines=lines(c, cfg, favs, marked, skip=("duration",)), hl=highlights(c, cfg, favs, records, marked),
                 sub=subtitle(c, cfg))
 
 
@@ -328,6 +339,8 @@ def hl_chosen(cfg):
     """Os destaques ligados (todos, se a pessoa não mexeu)."""
     off = cfg.get("session_hl_off")
     off = set(off) if isinstance(off, list) else set()
+    if "card" in off:                       # o antigo "Sorte grande" (carta ou favorito) virou dois
+        off |= {"cards", "marked"}
     return [k for k in HL_KEYS if k not in off]
 
 
@@ -353,12 +366,20 @@ def _title(seed, key, n=None):
     return text % n if n is not None else text
 
 
-def _hl(key, title, chip, color, sub=None, bar=None, fx=None, tag=None, fight=None):
+def _hl(key, title, chip, color, sub=None, bar=None, fx=None, tag=None, fight=None, deal=None):
     """Um destaque. tag: o número que flutua ao lado do emblema na animação ("+1.412" itens pegos, "−268" usados).
-    glass: o cartão fica translúcido (o "Intocável"). fight: a cena de luta dos cartões de dano (fight_of)."""
+    glass: o cartão fica translúcido (o "Intocável"). fight: a cena de luta dos cartões de dano (fight_of). deal: as
+    cartas das cenas de carta (deal_of)."""
     return dict(key=key, title=title, chip=EMBLEMS.get(key, "✦") + " " + chip, color=color, emblem=EMBLEMS.get(key),
                 fx=FX.get(key) if fx is None else fx, sub=sub, bar=bar, tag=tag, glass=key == "untouchable",
-                fight=fight)
+                fight=fight, deal=deal)
+
+
+def deal_of(cards, n, mob=None, name=None):
+    """As cartas de uma cena de carta: dict(cards (ids, as que mais vieram primeiro), n (quantas ao todo), mob (o
+    monstro que deixou cair a carta de MVP, para ele aparecer caindo; None sem saber), name (o nome da carta de MVP,
+    embaixo dela na revelação))."""
+    return dict(cards=list(cards), n=n, mob=mob, name=name)
 
 
 def one_shots(c):
@@ -494,11 +515,11 @@ def update_records(c, cfg):
     return found
 
 
-def highlights(c, cfg, favs=(), records=None):
+def highlights(c, cfg, favs=(), records=None, marked=()):
     """Os destaques da gravação `c`, do mais importante para o menos: [dict(key, title, chip, color, emblem, fx, sub,
     bar)]. title: o título do cartão quando é o primeiro; chip: o texto curto do selo; fx: a animação; sub: a frase
-    dele; bar: o % do nível (a barra do "Quase lá"). `records`: os recordes batidos (update_records). Só os ligados na
-    aba Cartões."""
+    dele; bar: o % do nível (a barra do "Quase lá"). `records`: os recordes batidos (update_records). `favs` e
+    `marked`: os itens favoritos e os marcados nos avisos (o "Item marcado"). Só os ligados na aba Cartões."""
     import analysis as an
     import itemkind
     import stats
@@ -507,17 +528,31 @@ def highlights(c, cfg, favs=(), records=None):
     want = set(hl_chosen(cfg))
     seed = _seed(c)
     got = {}
-    drops = c.drop_summary() if want & {"card", "picked"} else []
-    if "card" in want:
-        fav = set(favs)
-        mine = [r for r in drops if r["mine"]]
-        lucky = [r for r in mine if itemkind.kind(r["item"], r["name"]) in ("card", "mvpcard")]
-        favs_got = [r for r in mine if r["item"] in fav and r not in lucky]
-        if lucky or favs_got:
-            rows = lucky + favs_got
-            more = (" +%d" % (sum(r["mine"] for r in rows) - 1)) if sum(r["mine"] for r in rows) > 1 else ""
-            got["card"] = _hl("card", _title(seed, "card" if lucky else "fav"), rows[0]["name"] + more, GOLD,
-                              sub=_("Caiu e você pegou: %s") % _names([(r["name"], r["mine"]) for r in rows], 2))
+    drops = c.drop_summary() if want & {"mvp_card", "cards", "marked", "picked"} else []
+    mine = [r for r in drops if r["mine"]]
+    kinds = {r["item"]: itemkind.kind(r["item"], r["name"]) for r in mine}
+    mvp_cards = [r for r in mine if kinds[r["item"]] == "mvpcard"]
+    cards = sorted((r for r in mine if kinds[r["item"]] in ("card", "mvpcard")), key=lambda r: -r["mine"])
+    if "mvp_card" in want and mvp_cards:
+        first = mvp_cards[0]
+        n = sum(r["mine"] for r in mvp_cards)
+        # quem deixou a carta cair (o MVP), para a cena: o monstro do drop que você pegou
+        mob = next((d["mob_ent"].job for d in c.drops if d["item"] == first["item"] and d["mine"]
+                    and d.get("mob_ent") is not None), None)
+        got["mvp_card"] = _hl("mvp_card", _title(seed, "mvp_card"), first["name"] + ((" +%d" % (n - 1)) if n > 1 else ""),
+                              GOLD, sub=_("Caiu e você pegou: %s") % _names([(r["name"], r["mine"]) for r in mvp_cards], 2),
+                              deal=deal_of([r["item"] for r in mvp_cards], n, mob, first["name"]))
+    n_cards = sum(r["mine"] for r in cards)
+    if "cards" in want and n_cards >= HL_CARDS:
+        got["cards"] = _hl("cards", _title(seed, "cards"), _("%d cartas") % n_cards, PURPLE,
+                           sub=_("Mais vieram: %s") % _names([(r["name"], r["mine"]) for r in cards], 2),
+                           deal=deal_of([r["item"] for r in cards for _i in range(min(r["mine"], 3))], n_cards))
+    wanted = set(favs) | set(marked)
+    marked_got = [r for r in mine if r["item"] in wanted]
+    if "marked" in want and marked_got:
+        n = sum(r["mine"] for r in marked_got)
+        got["marked"] = _hl("marked", _title(seed, "marked"), marked_got[0]["name"] + ((" +%d" % (n - 1)) if n > 1 else ""),
+                            TEAL, sub=_("Caiu e você pegou: %s") % _names([(r["name"], r["mine"]) for r in marked_got], 2))
     shots = one_shots(c) if want & {"one_shot", "top_hit", "record"} else []
     boss_shots = sorted((x for x in shots if x[2]), key=lambda x: -x[0])
     if "one_shot" in want and boss_shots:
@@ -649,9 +684,12 @@ def highlights(c, cfg, favs=(), records=None):
 # a prévia de cada destaque na aba Cartões: a cena (monstro, maior golpe, golpe médio) dos que têm luta
 SAMPLE_SCENES = {"one_shot": (1087, 86341920, 0), "top_damage": (1583, 11500000, 1250000),
                  "boss": (1312, 10200000, 900000), "top_hit": (1039, 86341920, 0)}
-COLORS = {"card": GOLD, "one_shot": SALMON, "levelup": GREEN, "record": GOLD, "untouchable": ICE, "top_damage": SALMON,
-          "miracle": PURPLE, "boss": GOLD, "close": TEAL, "top_hit": SALMON, "kills": BLUE, "picked": GOLD,
-          "used": GOLD, "long": BLUE, "tough": BLUE}
+COLORS = {"mvp_card": GOLD, "cards": PURPLE, "marked": TEAL, "one_shot": SALMON, "levelup": GREEN, "record": GOLD,
+          "untouchable": ICE, "top_damage": SALMON, "miracle": PURPLE, "boss": GOLD, "close": TEAL, "top_hit": SALMON,
+          "kills": BLUE, "picked": GOLD, "used": GOLD, "long": BLUE, "tough": BLUE}
+# as cartas das prévias: a do Bafomé (que ele mesmo deixa cair) e uma mão de 9 cartas de monstros comuns
+SAMPLE_DEALS = {"mvp_card": ([4147], 1, 1039),
+                "cards": ([4001, 4001, 4002, 4004, 4006, 4011, 4033, 4045, 4065], 9, None)}
 
 
 def _sample_texts(key):
@@ -660,8 +698,14 @@ def _sample_texts(key):
     import meter
     orc = meter.monster_name(SAMPLE_SCENES["one_shot"][0]) or "Orc Hero"
     turtle = meter.monster_name(SAMPLE_SCENES["boss"][0]) or "General Tartaruga"
+    import meter as _m
+    baph = _m.item_name(4147) or "Carta Bafomé"
     return {
-        "card": (_("Sorte grande!"), "Carta Sieglouse", _("Caiu e você pegou: %s") % "Carta Sieglouse ×1"),
+        "mvp_card": (_("Carta de MVP!"), baph, _("Caiu e você pegou: %s") % (baph + " ×1")),
+        "cards": (_("Mão de cartas!"), _("%d cartas") % 9,
+                  _("Mais vieram: %s") % ("%s ×2, %s ×1, +5" % (_m.item_name(4001) or "Carta Poring",
+                                                                 _m.item_name(4002) or "Carta Fabre"))),
+        "marked": (_("Olha o drop!"), "Oridecon +2", _("Caiu e você pegou: %s") % "Oridecon ×3"),
         "one_shot": (_("ONE SHOT!"), _("%s com um golpe") % orc,
                      _("%s caiu com um golpe só: %s") % (orc, "86,3M")),
         "levelup": (_("Subiu de nível!"), "96 → 97", _("Do nível %d ao %d em %s") % (96, 97, "1:12:40")),
@@ -694,7 +738,9 @@ def sample_card_for(cfg, key, look=None):
     scene = SAMPLE_SCENES.get(key)
     tag = {"picked": "+2.728", "used": "−268"}.get(key)
     fight = dict(look=look, mob=scene[0], hit=scene[1], avg=scene[2] or None) if scene else None
-    main = _hl(key, title, chip, COLORS[key], sub=sub, tag=tag, fight=fight, bar=92.6 if key == "close" else None)
+    deal = deal_of(*SAMPLE_DEALS[key], name=chip if key == "mvp_card" else None) if key in SAMPLE_DEALS else None
+    main = _hl(key, title, chip, COLORS[key], sub=sub, tag=tag, fight=fight, bar=92.6 if key == "close" else None,
+               deal=deal)
     card = sample_card(cfg)
     card["hl"] = [main] + [h for h in card["hl"] if h["key"] != key][:2]
     return card

@@ -1882,7 +1882,7 @@ c_b = combat_of(fr.build(ME, ev_b, xp=(7213, 0, 10 ** 9))[0])
 hl_b = [h for h in session.highlights(c_b, {}) if h["key"] == "boss"]
 fb = hl_b[0]["fight"] if hl_b else {}
 check(hl_b and fb.get("mob") == 1038 and fb.get("hit") == 371759 and abs(fb.get("avg") - 821759 / 4.0) < 1e-6
-      and "boss" in session.SHORT_OK and "card" in session.SHORT_OK and "top_hit" not in session.SHORT_OK,
+      and "boss" in session.SHORT_OK and "mvp_card" in session.SHORT_OK and "top_hit" not in session.SHORT_OK,
       "resumo da sessão: \"Chefe derrotado\" luta com os golpes de quem grava no chefe (não com o maior da sessão, "
       "numa Ísis); gravação de menos de 1 min só tem resumo com um acontecimento -> %s" % fb)
 # o fim da gravação na hora: o Windows diz quem está com o arquivo aberto (um processo segurando o arquivo aparece;
@@ -3021,6 +3021,184 @@ c = combat_of(fr.build(ME, [(5000, fr.status(ME, meter.MIRACLE_EFST, True, 36000
                             (3700000, fr.skill_damage(ME, 77, 1))])[0])
 check(c.miracle_left() == 3000000 + 3600000 - 3700000,
       "Milagre: proc aos 50 min renova a hora (não trava no fim da primeira) -> %s" % c.miracle_left())
+
+
+# reiniciou a gravação com o Milagre ligado: o que falta de verdade vem logo depois do efeito no registro do início;
+# o restante do fim do registro é o do último aviso do servidor (no Milagre, sempre a hora cheia do proc)
+def combat_start(data):
+    h = rrf.Header(data)
+    c = meter.Combat(rrf.Session(h, data), 10000)
+    c.start_statuses(rrf.statuses_at_start(h, data))     # como o ReplayFile, antes do fluxo
+    r = rrf.StreamReader(h.keys, rrf.WANTED)
+    c.feed(r.feed(data[h.stream_offset:]), r.last_time)
+    c.finished = True
+    return c
+
+
+data = fr.build(ME, [(5000, fr.skill_damage(ME, 77, 1))],
+                buffs=[(meter.MIRACLE_EFST, 611387, 3600000, 3600000), (39, 1395727, 1800000, 1414082),
+                       (802, 999999, 9999, 9999), (895, -18355, 0, 0)])[0]
+got = rrf.statuses_at_start(rrf.Header(data), data)
+c = combat_start(data)
+check(got == [(meter.MIRACLE_EFST, 3600000, 611387), (39, 1800000, 1395727), (802, 9999, 9999), (895, 0, 0)]
+      and c.status_on[(ME, 39)][2] == 1395727,
+      "buffs do início: vale o que faltava quando a gravação começou (o sem tempo fica como estava) -> %s" % got)
+check(c.miracle_left() == 611387 - 5000 and c.miracle_windows() == [(0, 5000)]
+      and not any(a[2] == "miracle" for a in c.alerts),
+      "Milagre já ligado no início: conta o que falta de verdade, não 1 hora (e sem aviso de novo) -> %s"
+      % c.miracle_left())
+c = combat_start(fr.build(ME, [(700000, fr.skill_damage(ME, 77, 1))],
+                          buffs=[(meter.MIRACLE_EFST, 611387, 3600000, 3600000)])[0])
+check(c.miracle_left() is None and c.miracle_windows() == [(0, 611387)],
+      "Milagre já ligado no início: acaba na hora certa -> %s" % c.miracle_windows())
+# buff que passou do tempo que o jogo mandou sem o "acabou" chegar (31 em ~32.600 nas gravações do usuário, como um
+# Magnificat): acaba na hora; o aviso do jogo continua valendo quando chega (antes do tempo: perdeu o buff)
+c = combat_of(fr.build(ME, [(1000, fr.status(ME, 20, True, 90000, 90000, 1)),           # Magnificat de 90 s
+                            (2000, fr.status(ME, 10, True, 240000, 240000, 10)),          # Bênção de 240 s...
+                            (30000, fr.status(ME, 10, False)),                             # ...perdida aos 30 s
+                            (93000, fr.skill_damage(ME, 77, 1))])[0])
+mag_93 = [s for s in c.statuses(ME) if s[1] == 20]
+active_93 = c.status_active((ME, 20))
+c = combat_of(fr.build(ME, [(1000, fr.status(ME, 20, True, 90000, 90000, 1)), (2000, fr.status(ME, 10, True, 240000, 240000, 10)),
+                            (30000, fr.status(ME, 10, False)), (200000, fr.status(ME, 20, True, 90000, 90000, 1)),
+                            (250000, fr.skill_damage(ME, 77, 1))])[0])
+mag = sorted(s[2:] for s in c.statuses(ME) if s[1] == 20)
+bless = [s[2:] for s in c.statuses(ME) if s[1] == 10]
+check(mag_93 == [(ME, 20, 1000, 93000)] and active_93 and mag == [(1000, 91000), (200000, 250000)]
+      and bless == [(2000, 30000)] and c.status_active((ME, 20)),
+      "buffs: o aviso do jogo encerra antes da hora; sem o aviso, passado o tempo (+5 s) acaba na hora certa, e ligar "
+      "de novo abre outro trecho -> %s %s" % (mag, bless))
+
+# reiniciou para calibrar: a gravação nova (até 3 min depois, mesmo personagem) segue o ritmo do fim da anterior,
+# sem outros 10 min de "calculando…" no "Até o próximo nível"
+ea = []
+for i in range(73):                                                     # um abate a cada 10 s por 12 min
+    aid = 54000 + i
+    ea += [(i * 10000, fr.spawn(aid, "mob", 1124, "Goblin")), (i * 10000 + 300, fr.skill_damage(ME, aid, 5000)),
+           (i * 10000 + 400, fr.vanish(aid, 1))]
+c_a = combat_of(fr.build(ME, ea, date=(2026, 11, 19, 20, 0, 0), xp=(7311, 1000, 10 ** 9))[0])
+
+
+def restarted(date, gid=7311, n=1):
+    ev = []
+    for i in range(n):                                                  # o 1º abate 1 min depois de começar
+        aid = 54100 + i
+        ev += [(60000 + i * 10000, fr.spawn(aid, "mob", 1124, "Goblin")),
+               (60300 + i * 10000, fr.skill_damage(ME, aid, 5000)), (60400 + i * 10000, fr.vanish(aid, 1))]
+    return combat_of(fr.build(ME, ev, date=date, xp=(gid, 1000 + 73 * 34, 10 ** 9))[0])
+
+
+c_b = restarted((2026, 11, 19, 20, 12, 30))                              # 30 s depois do fim da anterior
+before = (xpmod.warming_up(c_b, {}), xpmod.time_to_level(c_b, {}))
+linked = xpmod.carry_from(c_b, c_a, {})
+pace_a, pace_b = xpmod.recent_pace(c_a, {}), xpmod.recent_pace(c_b, {})
+check(before == (True, (None, None)) and linked and not xpmod.warming_up(c_b, {})
+      and xpmod.time_to_level(c_b, {})[0] and pace_a and abs(pace_b - pace_a) < 1e-6,
+      "XP: reiniciar a gravação não volta ao \"calculando…\": a nova segue o ritmo do fim da anterior -> %s %s/min"
+      % (before, pace_b and round(pace_b, 1)))
+far, other, old = (restarted((2026, 11, 19, 20, 16, 0)), restarted((2026, 11, 19, 20, 12, 30), gid=7312),
+                   restarted((2026, 11, 19, 19, 0, 0)))
+check(not xpmod.carry_from(far, c_a, {}) and not xpmod.carry_from(other, c_a, {})
+      and not xpmod.carry_from(old, c_a, {}) and xpmod.warming_up(far, {}) and xpmod.carry(other) is None,
+      "XP: só continua a gravação do mesmo personagem que acabou até 3 min antes (nem outra, nem uma velha aberta)")
+c_c = restarted((2026, 11, 19, 20, 14, 0))                              # reiniciou de novo, 30 s depois da 2ª
+pace_c = xpmod.recent_pace(c_c, {}) if xpmod.carry_from(c_c, c_b, {}) else None
+c_d = restarted((2026, 11, 19, 20, 12, 30), n=61)                       # 10 min de farm só dela: não usa a anterior
+xpmod.carry_from(c_d, c_a, {})
+check(pace_c and abs(pace_c - pace_a) / pace_a < 0.1 and xpmod.recent_parts(c_d, {})[1:] == (0.0, 0.0),
+      "XP: reiniciar duas vezes seguidas mantém o ritmo; com 10 min de farm na nova, a anterior sai da conta -> %s"
+      % (pace_c and round(pace_c, 1)))
+
+# o aviso de calibrar voltava depois de reiniciar (relato de um jogador no clock_01, 2026-11-19): a gravação começava
+# na cidade e a medida ficava sem mapa; o jogo leva 1,5 a 3 min para parar e começar outra (o limite era 1 min); e o
+# aviso aparecia quando gravar de novo nem mediria (missão entregue, monstro sem XP no trecho)
+def farm_clock(extra=()):
+    ev = [(1000, fr.spawn(55000, "mob", 1124, "Goblin")), (1300, fr.skill_damage(ME, 55000, 5000)),
+          (1400, fr.vanish(55000, 1)), (60000, fr.map_move("clock_01", 100, 100))]     # 1 abate na cidade, 33 na torre
+    for i in range(33):
+        aid = 55001 + i
+        ev += [(70000 + i * 20000, fr.spawn(aid, "mob", 1124, "Goblin")),
+               (70300 + i * 20000, fr.skill_damage(ME, aid, 5000)), (70400 + i * 20000, fr.vanish(aid, 1))]
+    return sorted(ev + list(extra), key=lambda e: e[0])
+
+
+ck = combat_of(fr.build(ME, farm_clock(), map_name="aldebaran", xp=(7500, 100, 10 ** 9))[0])
+ck.finished = False
+cq_ = combat_of(fr.build(ME, farm_clock([(500000, fr.quest_done(3477))]), map_name="aldebaran",
+                         xp=(7500, 100, 10 ** 9))[0])
+cu_ = combat_of(fr.build(ME, farm_clock([(500000, fr.spawn(55100, "mob", 21999, "")),
+                                         (500300, fr.skill_damage(ME, 55100, 5000)), (500400, fr.vanish(55100, 1))]),
+                         map_name="aldebaran", xp=(7500, 100, 10 ** 9))[0])
+cq_.finished = cu_.finished = False
+log = {"xp_learn": {"measures": [
+    dict(src="x.rrf#0", date="2026-10-20 10:00", map="clock_01", mins=12, kills=300, ratio=1.1, gain=5000, char="9999",
+         quests=[]),
+    dict(src="y.rrf#0", date="2026-10-20 11:00", map="pay_fild01", mins=12, kills=300, ratio=1.0, gain=5000,
+         char="9999", quests=[]),
+    dict(src="z.rrf#fim", date="2026-10-20 12:00", map="gef_fild06", mins=12, kills=300, ratio=0.5, gain=5000,
+         char="9999", quests=[3477])]}}
+p_log = xpmod.predict(log, 7500, "clock_01")
+check(xpmod._one_map(ck, 0, ck.now) is None and xpmod._kill_map(ck, 0, ck.now) == "clock_01"
+      and xpmod.calibration_hint(ck, {}) == "clock_01" and xpmod.calibration_hint(cq_, {}) is None
+      and xpmod.calibration_hint(cu_, {}) is None and xpmod.calibration_hint(ck, log) is None
+      and p_log is not None and p_log[1] == "registro" and abs(p_log[0] - 1.1) < 1e-9
+      and xpmod.predict(log, 7500, "gef_fild06") is None,
+      "XP: começou na cidade e farmou no clock_01: a medida é do clock_01; sem aviso quando gravar de novo não mede "
+      "(missão, monstro sem XP) ou quando o mapa já foi medido antes (registro, sem as com missão) -> %s" % (p_log,))
+with tempfile.TemporaryDirectory() as tmp:
+    def pair(gap_s, name, gid):
+        data, _off = fr.build(ME, farm_clock(), date=(2026, 11, 19, 10, 0, 0), map_name="aldebaran",
+                              xp=(gid, 1000, 10 ** 9))
+        pa = os.path.join(tmp, name + "_a.rrf")
+        with open(pa, "wb") as f:
+            f.write(data)
+        end = 10 * 3600 + 70400 // 1000 + 32 * 20 + gap_s           # o último abate fecha a gravação
+        when = (2026, 11, 19, end // 3600, end // 60 % 60, end % 60)
+        data, _off = fr.build(ME, [], date=when, xp=(gid, 1000 + 34 * 34 * 3, 10 ** 9))
+        with open(os.path.join(tmp, name + "_b.rrf"), "wb") as f:
+            f.write(data)
+        rf = meter.ReplayFile(pa)
+        rf.poll(max_bytes=1 << 30)
+        cfg_p = {}
+        xpmod.calibrate(rf.combat, cfg_p, meter.xp_after)
+        return [(x[3].split("#")[1], x[4]) for x in (cfg_p.get("xp_corr") or {}).get(str(gid), {}).get("samples", [])]
+    got2, got4 = pair(150, "dois", 7501), pair(240, "quatro", 7502)
+check(got2 == [("fim", "clock_01")] and got4 == [],
+      "XP: a gravação seguinte 2,5 min depois ainda mede (o jogo demora para parar e começar outra), 4 min não; a "
+      "medida é do mapa dos abates -> %s / %s" % (got2, got4))
+
+
+# resumo da sessão (o usuário, 2026-11-19): o antigo "Sorte grande" (qualquer carta ou favorito) era fácil demais;
+# agora a carta de MVP, a mão de 6 cartas ou mais e o item marcado são destaques separados
+def loot(items, mob=1039):
+    """O Bafomé morre e deixa cair cada item de `items`; quem grava pega todos."""
+    ev = [(0, fr.spawn(58000, "mob", mob, "Bafomé", boss=mob == 1039)), (500, fr.skill_damage(ME, 58000, 100)),
+          (900, fr.vanish(58000, 1))]
+    for i, item in enumerate(items):
+        mid = 950000 + i
+        ev += [(1000, item_fall(mid, item, 100 + i, 100)), (2000 + i * 300, pick_action(ME, mid)),
+               (2010 + i * 300, struct.pack("<HI", rrf.P_ITEM_GONE, mid)), (2050 + i * 300, pickup_ack(item))]
+    return combat_of(fr.build(ME, ev)[0])
+
+
+hl_mvp = session.highlights(loot([4147, 4001]), {})
+hl_six = session.highlights(loot([4001, 4001, 4001, 4002, 4004, 4006]), {})
+hl_five = session.highlights(loot([4001, 4001, 4002, 4004, 4006]), {})
+hl_fav = session.highlights(loot([607], 1002), {}, favs=[607])
+hl_ping = session.highlights(loot([607], 1002), {}, marked=[607])
+first = hl_mvp[0] if hl_mvp else {}
+six = next((h for h in hl_six if h["key"] == "cards"), {})
+check(first.get("key") == "mvp_card" and first["deal"]["cards"] == [4147] and first["deal"]["mob"] == 1039
+      and first["deal"]["name"] and not any(h["key"] == "cards" for h in hl_mvp)
+      and six.get("deal", {}).get("n") == 6 and len(six["deal"]["cards"]) == 6
+      and not any(h["key"] == "cards" for h in hl_five)
+      and [h["key"] for h in hl_fav] == ["marked"] and [h["key"] for h in hl_ping] == ["marked"]
+      and not session.highlights(loot([607], 1002), {})
+      and not {"cards", "marked"} & set(session.hl_chosen({"session_hl_off": ["card"]}))
+      and "mvp_card" in session.hl_chosen({"session_hl_off": ["card"]}),
+      "resumo da sessão: carta de MVP (com quem deixou cair) na frente; mão de cartas só com 6 ou mais; item favorito "
+      "ou marcado nos avisos à parte; quem desligou o antigo \"Sorte grande\" fica sem os dois novos -> %s / %s"
+      % ([h["key"] for h in hl_mvp], six.get("chip")))
 items = {31975: {"identifiedDisplayName": "Visual Batata-doce na Boca", "identifiedDescriptionName": {
             1: "[Durante o Evento]", 2: "EXP obtida por monstros +5%.", 3: "-", 4: "Conjunto",
             5: "[Visual] Chapéu do Festival da Colheita", 6: "Dano físico +10%.",
