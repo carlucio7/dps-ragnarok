@@ -38,10 +38,11 @@ FIELDS = [
 KEYS = [k for k, _n in FIELDS]
 DEFAULT = ["duration", "xp", "levels", "kills", "deaths", "favs", "bosses"]
 MIN_MS = 60000                # gravação de menos de 1 min só tem resumo se teve um destes acontecimentos:
-SHORT_OK = ("mvp_card", "cards", "marked", "one_shot", "levelup", "boss")
+SHORT_OK = ("maxlevel", "mvp_card", "cards", "marked", "one_shot", "levelup", "boss")
 SESSION_END_S = 15.0          # o arquivo parado há isso: a gravação acabou (o mesmo tempo do "Gravando" do rodapé)
 GREEN, RED, WHITE, DIM, GOLD = "#4ade80", "#f87171", "#ffffff", "#a3a8b5", "#fbbf24"
 PURPLE, TEAL, BLUE, PINK = "#c084fc", "#2dd4bf", "#60a5fa", "#f472b6"
+SKY = "#7dd3fc"               # o "Nível máximo": o azul-claro da aura de nível máximo do jogo
 
 # Destaques: o que a sessão teve de especial. O primeiro vira o título do cartão, com o emblema e uma animação curta
 # dele (confete, moedinhas, estrelas, brilho, chuva); os outros viram selos embaixo. Cada um pode ser desligado na aba
@@ -49,6 +50,7 @@ PURPLE, TEAL, BLUE, PINK = "#c084fc", "#2dd4bf", "#60a5fa", "#f472b6"
 # A ordem da lista é a prioridade: com vários na mesma sessão, o primeiro da lista é o título.
 # (chave, nome na aba Cartões, quando aparece)
 HIGHLIGHTS = [
+    ("maxlevel", "Nível máximo", "Chegou ao nível máximo da classe"),
     ("mvp_card", "Carta de MVP", "Caiu uma carta de MVP e você pegou"),
     ("one_shot", "One shot", "Derrubou um chefe com um golpe só"),
     ("cards", "Mão de cartas", "Pegou %d cartas ou mais na gravação"),
@@ -91,12 +93,14 @@ RECORD_KILLS = 50             # ...e pelo menos estes abates lá
 MAIN_SHARE = 0.8              # o mapa da caça: com pelo menos isto dos abates (senão, só "e mais N mapas")
 SALMON, ICE = "#ff8f7a", "#a5f3fc"   # golpes e dano; o "Intocável"
 # o símbolo de cada destaque: no círculo à esquerda do título e no começo do selo
-EMBLEMS = {"mvp_card": "♔", "cards": "♠", "marked": "✦", "one_shot": "✊", "levelup": "▲", "record": "✪",
+EMBLEMS = {"maxlevel": "⇑", "mvp_card": "♔", "cards": "♠", "marked": "✦", "one_shot": "✊", "levelup": "▲",
+           "record": "✪",
            "untouchable": "◆", "top_damage": "♛",
            "miracle": "★", "boss": "♚", "close": "➚", "top_hit": "✸", "kills": "⚔", "picked": "⛁", "used": "⚗",
            "long": "⌛", "tough": "☁"}
 # os títulos de cada destaque: um deles, sempre o mesmo para a mesma gravação
 TITLES = {
+    "maxlevel": ("Nível máximo!", "Chegou ao topo!", "Nível %d!"),
     "mvp_card": ("Carta de MVP!", "Lendária!", "A carta do chefe!"),
     "cards": ("Mão de cartas!", "Baralho cheio!", "Coleção de cartas!"),
     "marked": ("Olha o drop!", "Sorte grande!", "Caiu o que você queria!"),
@@ -123,12 +127,16 @@ TITLES = {
 # "deck" (Mão de cartas): o Coringa do jogo embaralha e distribui as cartas da sessão (as ilustrações delas) num leque;
 # "mvp_card" (Carta de MVP): o cartão escurece, o MVP que deixou a carta cai num facho de luz, a carta sobe girando e
 # se revela por cima de tudo, depois desce para o palco com raios dourados, brilho holográfico e fogos
-FX = {"mvp_card": "mvp_card", "cards": "deck", "marked": "lucky", "one_shot": "asura", "levelup": "confetti",
+# "maxlevel" (Nível máximo): o cartão escurece, quem grava (o personagem dele, de qualquer classe) aparece num pilar de
+# luz, o anjo da subida de nível do jogo sobe dele, o nível rola até o máximo e a aura (os anéis azuis do nível máximo
+# do jogo) começa a subir dos pés; depois ele desce para o palco com a aura, as estrelinhas e o anjo de tempos em tempos
+FX = {"maxlevel": "maxlevel", "mvp_card": "mvp_card", "cards": "deck", "marked": "lucky", "one_shot": "asura",
+      "levelup": "confetti",
       "record": "confetti", "untouchable": "diamonds", "top_damage": "combo", "miracle": "stars", "boss": "boss_down",
       "close": "glow", "top_hit": "heavy", "kills": "chase", "picked": "coins_stack", "used": "coins_down",
       "long": "glow", "tough": "rain"}
 FX_KINDS = ("confetti", "coins_stack", "coins_down", "stars", "sparkle", "glow", "lucky", "flash", "rain", "jabs",
-            "one_punch", "chase", "diamonds", "combo", "heavy", "asura", "boss_down", "deck", "mvp_card")
+            "one_punch", "chase", "diamonds", "combo", "heavy", "asura", "boss_down", "deck", "mvp_card", "maxlevel")
 # os cartões de dano são cenas de luta com os desenhos do jogo: "combo" (Maior DPS: uma sequência rápida de golpes, um
 # monte de números), "heavy" (Maior golpe: um golpe carregado só, um número grande, o monstro cambaleia) e "asura" (one
 # shot: carrega, avança, o monstro cai e a tela racha). "boss_down" (Chefe derrotado): a luta com o chefe da sessão,
@@ -299,6 +307,29 @@ def sample_card(cfg):
                 sub=(_("%s caçando em %s") % ("1:12:40", "ve_fild07")) if "duration" in keys else "")
 
 
+def sample_card_info(cfg, key):
+    """O cartão de exemplo de uma informação, para a prévia da aba Cartões (a pessoa vê como ela fica para escolher se
+    quer): as informações escolhidas e mais esta, mesmo desmarcada, com o texto de exemplo. "focus": a posição da
+    linha dela em "lines" ("sub" para a duração e o mapa, que vão no subtítulo), que a prévia acende; "focus_off":
+    ela está desmarcada (não sai no cartão de verdade)."""
+    keys = chosen(cfg)
+    demo = _demo()
+    card = sample_card(cfg)
+    lines, focus = [], None
+    for k in KEYS:
+        if k == "duration" or (k not in keys and k != key):
+            continue
+        if k == key:
+            focus = len(lines)
+        lines.append(demo[k])
+    card["lines"] = lines
+    if key == "duration":
+        card["sub"] = _("%s caçando em %s") % ("1:12:40", "ve_fild07")
+        focus = "sub"
+    card.update(focus=focus, focus_off=key not in keys)
+    return card
+
+
 def _demo():
     """{informação: (texto, cor)} de mentira, para a prévia e para a coluna Exemplo da aba Cartões."""
     return {
@@ -320,6 +351,19 @@ def _demo():
         "miracle": (_("Milagre: %d vezes") % 2, GOLD),
         "used": (_("Itens usados: %d (%s ×%d)") % (803, "Asas de Mosquito", 760), DIM),
     }
+
+
+def _max_demo():
+    """As informações de exemplo do "Nível máximo": a subida do 249 para o 250, com a XP do nível 249 de uma 4ª classe
+    (269B; o exemplo comum dizia "Subiu de nível: 96 → 97" e 2,9M embaixo de "Nível 250"), e sem "Nível agora" e
+    "Próximo nível", que o cartão de verdade não mostra no nível máximo."""
+    demo = _demo()
+    demo.update(xp=(_("XP: +%s do nível (%s)") % ("63,12%", "170B"), WHITE),
+                xp_hour=(_("XP por hora: %s (%s)") % ("52,1%", "140B"), DIM),
+                levels=(_("Subiu de nível: %d → %d") % (249, 250), GREEN))
+    for k in ("level_now", "eta"):
+        demo.pop(k)
+    return demo
 
 
 def sample_lines(cfg):
@@ -363,16 +407,22 @@ def _seed(c):
 def _title(seed, key, n=None):
     import random
     text = _(random.Random("%s|%s" % (seed, key)).choice(TITLES[key]))
-    return text % n if n is not None else text
+    return text % n if n is not None and "%" in text else text
 
 
-def _hl(key, title, chip, color, sub=None, bar=None, fx=None, tag=None, fight=None, deal=None):
+def _hl(key, title, chip, color, sub=None, bar=None, fx=None, tag=None, fight=None, deal=None, rise=None):
     """Um destaque. tag: o número que flutua ao lado do emblema na animação ("+1.412" itens pegos, "−268" usados).
     glass: o cartão fica translúcido (o "Intocável"). fight: a cena de luta dos cartões de dano (fight_of). deal: as
-    cartas das cenas de carta (deal_of)."""
+    cartas das cenas de carta (deal_of). rise: a cena do "Nível máximo" (rise_of)."""
     return dict(key=key, title=title, chip=EMBLEMS.get(key, "✦") + " " + chip, color=color, emblem=EMBLEMS.get(key),
                 fx=FX.get(key) if fx is None else fx, sub=sub, bar=bar, tag=tag, glass=key == "untouchable",
-                fight=fight, deal=deal)
+                fight=fight, deal=deal, rise=rise)
+
+
+def rise_of(look, level):
+    """A cena do "Nível máximo": dict(look (o visual de quem grava, de qualquer classe; None = o Mestre), level (o
+    nível máximo), prev (o nível de onde o contador rola))."""
+    return dict(look=dict(look) if look else None, level=level, prev=level - 1)
 
 
 def deal_of(cards, n, mob=None, name=None):
@@ -561,7 +611,13 @@ def highlights(c, cfg, favs=(), records=None, marked=()):
                               sub=_("%s caiu com um golpe só: %s") % (name, num(dmg)),
                               fight=fight_of(c, hit=dmg, mob=_mob_of(c, h1)))
     ups = getattr(c, "level_ups", None) or []
-    if "levelup" in want and ups:
+    top = xp.max_level(getattr(c.session, "job", None)) if ups else None
+    peak = next((lv for _t, lv in ups if top and lv >= top), None)
+    if "maxlevel" in want and peak:
+        got["maxlevel"] = _hl("maxlevel", _title(seed, "maxlevel", peak), _("Nível %d") % peak, SKY,
+                              sub=_("Chegou ao nível %d, o máximo da classe") % peak,
+                              rise=rise_of(getattr(c.session, "look", None), peak))
+    if "levelup" in want and ups and "maxlevel" not in got:      # o "Nível máximo" já diz que subiu
         first, last = c.session.base_level, ups[-1][1]
         got["levelup"] = _hl("levelup", _title(seed, "levelup") if len(ups) == 1 else _title(seed, "levelups", len(ups)),
                              "%d → %d" % (first, last), GREEN,
@@ -684,7 +740,8 @@ def highlights(c, cfg, favs=(), records=None, marked=()):
 # a prévia de cada destaque na aba Cartões: a cena (monstro, maior golpe, golpe médio) dos que têm luta
 SAMPLE_SCENES = {"one_shot": (1087, 86341920, 0), "top_damage": (1583, 11500000, 1250000),
                  "boss": (1312, 10200000, 900000), "top_hit": (1039, 86341920, 0)}
-COLORS = {"mvp_card": GOLD, "cards": PURPLE, "marked": TEAL, "one_shot": SALMON, "levelup": GREEN, "record": GOLD,
+COLORS = {"maxlevel": SKY, "mvp_card": GOLD, "cards": PURPLE, "marked": TEAL, "one_shot": SALMON, "levelup": GREEN,
+          "record": GOLD,
           "untouchable": ICE, "top_damage": SALMON, "miracle": PURPLE, "boss": GOLD, "close": TEAL, "top_hit": SALMON,
           "kills": BLUE, "picked": GOLD, "used": GOLD, "long": BLUE, "tough": BLUE}
 # as cartas das prévias: a do Bafomé (que ele mesmo deixa cair) e uma mão de 9 cartas de monstros comuns
@@ -701,6 +758,7 @@ def _sample_texts(key):
     import meter as _m
     baph = _m.item_name(4147) or "Carta Bafomé"
     return {
+        "maxlevel": (_("Nível máximo!"), _("Nível %d") % 250, _("Chegou ao nível %d, o máximo da classe") % 250),
         "mvp_card": (_("Carta de MVP!"), baph, _("Caiu e você pegou: %s") % (baph + " ×1")),
         "cards": (_("Mão de cartas!"), _("%d cartas") % 9,
                   _("Mais vieram: %s") % ("%s ×2, %s ×1, +5" % (_m.item_name(4001) or "Carta Poring",
@@ -740,9 +798,13 @@ def sample_card_for(cfg, key, look=None):
     fight = dict(look=look, mob=scene[0], hit=scene[1], avg=scene[2] or None) if scene else None
     deal = deal_of(*SAMPLE_DEALS[key], name=chip if key == "mvp_card" else None) if key in SAMPLE_DEALS else None
     main = _hl(key, title, chip, COLORS[key], sub=sub, tag=tag, fight=fight, bar=92.6 if key == "close" else None,
-               deal=deal)
+               deal=deal, rise=rise_of(look, 250) if key == "maxlevel" else None)
     card = sample_card(cfg)
-    card["hl"] = [main] + [h for h in card["hl"] if h["key"] != key][:2]
+    if key == "maxlevel":
+        demo = _max_demo()
+        card["lines"] = [demo[k] for k in chosen(cfg) if k != "duration" and k in demo]
+    skip = {key, "levelup"} if key == "maxlevel" else {key}   # o "Nível máximo" já diz que subiu (como no de verdade)
+    card["hl"] = [main] + [h for h in card["hl"] if h["key"] not in skip][:2]
     return card
 
 

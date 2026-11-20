@@ -374,8 +374,16 @@ class XpSim:
                 return "—"
             recent, more, more_ms = parts
             got = (xp.simulate(c, cfg, recent, o)["xp"] or 0.0) if recent else 0.0
+            keep = "miracle" not in (o or {})
+            if recent and keep and got:
+                # cada abate com o Milagre de agora, como no "Até o próximo nível" lá de cima (xp.now_rows); o
+                # Milagre trocado aqui no simulador já vale para o recorte inteiro
+                plain = xp.estimate(c, cfg, recent)["kill_xp"]
+                if plain:
+                    got *= sum(x for _t, x in xp.now_rows(c, cfg, recent)) / plain
+            more *= (scale if o else 1.0) * (xp.carry_scale(c, cfg) if keep else 1.0)
             ms = (xp.active_ms(c, recent) if recent else 0.0) + more_ms
-            rate = (got + more * (scale if o else 1.0)) * 60000.0 / ms if ms > 0 else 0.0   # o mesmo ritmo de caça
+            rate = (got + more) * 60000.0 / ms if ms > 0 else 0.0   # o mesmo ritmo de caça
             ms, _left = xp.time_to_level(c, cfg, rate) if rate > 0 else (None, None)
             return xp.span_text(ms) if ms else ("—" if ms is None else _("a qualquer momento"))
 

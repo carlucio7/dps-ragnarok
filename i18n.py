@@ -2266,6 +2266,9 @@ CATALOG.update({
     "Prévia: %s": (
         "Preview: %s",
         "Vista previa: %s"),
+    "Prévia: %s (desmarcada)": (
+        "Preview: %s (unticked)",
+        "Vista previa: %s (desmarcada)"),
     "Prévia: contadores (exemplo)": (
         "Preview: timers (example)",
         "Vista previa: contadores (ejemplo)"),
@@ -3193,6 +3196,11 @@ CATALOG.update({
     "%s por minuto, em média": ("%s per minute on average", "%s por minuto en promedio"),
     # os destaques na aba Cartões: nome e quando aparece
     "Sorte grande": ("Lucky drop", "Gran suerte"),
+    "Nível máximo": ("Max level", "Nivel máximo"),
+    "Chegou ao nível máximo da classe": ("Reached the class's max level", "Llegó al nivel máximo de la clase"),
+    "Chegou ao nível %d, o máximo da classe": ("Reached level %d, the class's max", "Llegó al nivel %d, el máximo de "
+                                                                                  "la clase"),
+    "NÍVEL MÁXIMO": ("MAX LEVEL", "NIVEL MÁXIMO"),
     "Carta de MVP": ("MVP card", "Carta de MVP"),
     "Caiu uma carta de MVP e você pegou": ("An MVP card dropped and you picked it up",
         "Cayó una carta de MVP y la recogiste"),
@@ -3242,6 +3250,9 @@ CATALOG.update({
         "%d deaths or more: a nudge for next time", "%d muertes o más: un empujón para la próxima"),
     # os títulos (um deles por gravação)
     "Sorte grande!": ("Lucky drop!", "¡Gran suerte!"),
+    "Nível máximo!": ("Max level!", "¡Nivel máximo!"),
+    "Chegou ao topo!": ("Top of the world!", "¡En la cima!"),
+    "Nível %d!": ("Level %d!", "¡Nivel %d!"),
     "Carta de MVP!": ("MVP card!", "¡Carta de MVP!"),
     "Lendária!": ("Legendary!", "¡Legendaria!"),
     "A carta do chefe!": ("The boss's card!", "¡La carta del jefe!"),

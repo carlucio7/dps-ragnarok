@@ -2,6 +2,17 @@
 
 Português · [English](#english) · [Español](#español)
 
+## 1.13.0
+
+Novo destaque de nível máximo, MVPs no topo dos Alvos e melhorias de desempenho.
+
+- Novo destaque no resumo da sessão: Nível máximo, quando você chega ao nível máximo da classe (99, 200 ou 250), com o seu personagem.
+- Alvos: os MVPs ficam sempre em cima, depois os monstros chefes e depois o resto, e a lista rola com a roda do mouse.
+- Até o próximo nível: quando o Milagre começa ou acaba, a previsão muda na hora.
+- Resumo da sessão: o ✕ fecha o cartão, o Zerar também fecha, e ele sai da tela sozinho depois de 10 minutos.
+- Cartões: a prévia não trava mais o programa, e as cenas abrem mais rápido.
+- Cartões: clicar numa informação mostra no exemplo onde ela aparece, mesmo desmarcada.
+
 ## 1.12.0
 
 Melhorias de calibração, detecção de buffs e novos cartões.
@@ -282,6 +293,17 @@ Primeira versão pública.
 
 ## English
 
+### 1.13.0
+
+New max level highlight, MVPs on top of Targets and performance improvements.
+
+- New highlight in the session summary: Max level, when you reach your class's max level (99, 200 or 250), with your own character.
+- Targets: MVPs always stay on top, then boss monsters, then the rest, and the list scrolls with the mouse wheel.
+- Time to next level: when the Miracle starts or ends, the forecast changes right away.
+- Session summary: the ✕ closes the card, Reset closes it too, and it leaves the screen by itself after 10 minutes.
+- Cards: the preview no longer freezes the program, and the scenes open faster.
+- Cards: clicking an information line shows in the example where it appears, even when unticked.
+
 ### 1.12.0
 
 Calibration and buff detection improvements, and new cards.
@@ -561,6 +583,17 @@ First public version.
 ---
 
 ## Español
+
+### 1.13.0
+
+Nuevo destacado de nivel máximo, MVPs arriba en Objetivos y mejoras de rendimiento.
+
+- Nuevo destacado en el resumen de la sesión: Nivel máximo, cuando llegas al nivel máximo de la clase (99, 200 o 250), con tu personaje.
+- Objetivos: los MVPs quedan siempre arriba, después los monstruos jefes y después el resto, y la lista se desplaza con la rueda del ratón.
+- Hasta el próximo nivel: cuando el Milagro empieza o termina, la previsión cambia al instante.
+- Resumen de la sesión: la ✕ cierra la tarjeta, Reiniciar también la cierra, y sale de la pantalla sola después de 10 minutos.
+- Tarjetas: la vista previa ya no traba el programa, y las escenas abren más rápido.
+- Tarjetas: al hacer clic en una información, el ejemplo muestra dónde aparece, aunque esté desmarcada.
 
 ### 1.12.0
 

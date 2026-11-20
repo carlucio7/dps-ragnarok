@@ -49,6 +49,16 @@ MODE_TEXT = {
 }
 
 
+def clear_selection(table):
+    """Tira a seleção de uma lista (Table); o aviso de seleção dela chega depois, com None."""
+    try:
+        sel = table.tree.selection()
+        if sel:
+            table.tree.selection_remove(*sel)
+    except tk.TclError:
+        pass
+
+
 class CardPreview(tk.Canvas):
     """Um widget de mentira do tamanho do de verdade (largura, linhas, zoom e tema escolhidos), com o cartão ou os
     contadores pedidos por cima, desenhados pelas funções do widget de verdade."""
@@ -77,6 +87,10 @@ class CardPreview(tk.Canvas):
         self.what = ("trackers", None)
         self.rows, self.pinned, self.fx, self.extra_pin = [], {}, [], None
         self.session_data = None      # o cartão do resumo da sessão da gravação aberta (None: o de exemplo)
+        # os desenhos da cena do resumo (o d["chase"]) de um quadro para o outro: (a cena, {desenhos}). O cartão é
+        # refeito a cada quadro, e sem isso a cena era montada de novo em todo quadro (o "Nível máximo" levava uns
+        # 0,6 s por quadro e o programa inteiro travava; a carta de MVP refazia o monstro caindo)
+        self.scene = (None, {})
         self.started = time.time()
         self._after = self._anim = None
         self._tries = 0
@@ -96,10 +110,11 @@ class CardPreview(tk.Canvas):
     def show(self, what, rows=None, pinned=None, fx=None, extra_pin=None, session_data=None):
         """what: ("system", chave do cartão) ou ("trackers", None) com os contadores em `rows`. `pinned`: {chave:
         linha} dos efeitos na faixa fixa; `fx`: os que aparecem como cartão; `extra_pin`: um efeito a mostrar na faixa
-        fixa só na prévia (o botão Faixa fixa sob o mouse); `session_data`: o resumo da sessão da gravação aberta
-        (session.card; None = o de exemplo)."""
+        fixa só na prévia (o botão Faixa fixa sob o mouse); `session_data`: o resumo da sessão de exemplo a mostrar
+        (de um destaque ou de uma informação; None = o de exemplo das escolhas)."""
         self.what, self.rows, self.pinned, self.fx = what, rows or [], pinned or {}, fx or []
         self.extra_pin, self.session_data = extra_pin, session_data
+        self.scene = (None, {})
         self.started = time.time()
         self._tries = 0
         self.redraw()
@@ -269,6 +284,7 @@ class CardPreview(tk.Canvas):
         if scale != self._scale:                   # zoom diferente: as fontes do widget de mentira acompanham
             self._scale = p._s = scale
             p.make_fonts()
+            self.scene = (None, {})                # e os desenhos da cena saem de novo, no tamanho novo
 
     def redraw(self):
         if self._after is not None:
@@ -317,8 +333,11 @@ class CardPreview(tk.Canvas):
                     p.summary_card = (data, now - 0.01)
                 elif shape == "session":
                     hl = data.get("hl") or []
-                    if hl and hl[0].get("fx") in self.mod.SCENE_FX:   # cenas com os desenhos do jogo
-                        data["chase"] = data.get("chase") or {}           # (entram quando ficam prontos)
+                    fx = hl[0].get("fx") if hl else None
+                    if fx in self.mod.SCENE_FX:                       # cenas com os desenhos do jogo
+                        if self.scene[0] != fx:                       # (entram quando ficam prontos e ficam)
+                            self.scene = (fx, {})
+                        data["chase"] = data.get("chase") or self.scene[1]
                         if clientdata.NAMES.grf:
                             sprites.MONSTERS.start(clientdata.NAMES.grf)
                             sprites.LOADER.start(clientdata.NAMES.grf)
@@ -764,11 +783,20 @@ class CardsTab:
             self.mode_text.pack_forget()
             data = None
             if what[1] == "session":
-                key = getattr(self, "pv_hl", None)
-                data = self.sample_for(key) if key else self.real_session()
-                name = next((n for k, n, _w in session.HIGHLIGHTS if k == key), None)
-                if name:
-                    self.pv_title.configure(text=_("Prévia: %s") % _(name))
+                # sempre o exemplo (a aba é para ver como cada cartão fica e escolher se quer; o usuário, 2026-11-20:
+                # "Não precisa conter dados dos replays gravados"): o do destaque escolhido, o da informação escolhida
+                # (com a linha dela acesa, mesmo desmarcada) ou, sem nada escolhido, o das escolhas de agora
+                key, info = getattr(self, "pv_hl", None), getattr(self, "pv_info", None)
+                if key:
+                    data = self.sample_for(key)
+                    name = next((n for k, n, _w in session.HIGHLIGHTS if k == key), None)
+                    if name:
+                        self.pv_title.configure(text=_("Prévia: %s") % _(name))
+                elif info:
+                    data = session.sample_card_info(self.cfg(), info)
+                    name = _(dict(session.FIELDS).get(info, info))
+                    self.pv_title.configure(text=(_("Prévia: %s (desmarcada)") if data.get("focus_off") else
+                                                  _("Prévia: %s")) % name)
             self.preview.show(what, [], pinned, session_data=data)
             return
         pick = what[1]
@@ -830,31 +858,17 @@ class CardsTab:
 
     def sample_for(self, key):
         """O cartão de exemplo com o destaque `key` no título; o personagem da cena é o da gravação aberta quando ele
-        é de uma classe de punho."""
+        é de uma classe de punho (nas lutas) ou sempre, no "Nível máximo" (o cartão de verdade mostra quem grava de
+        qualquer classe)."""
         c = self.win.combat() if hasattr(self.win, "combat") else None
         look = None
-        if c is not None and getattr(c.session, "job", 0) in session.FIST_JOBS:
+        if c is not None and getattr(c.session, "look", None) and (
+                key == "maxlevel" or getattr(c.session, "job", 0) in session.FIST_JOBS):
             look = dict(c.session.look)
         try:
             return session.sample_card_for(self.cfg(), key, look)
         except (KeyError, ValueError):
             return None
-
-    def real_session(self):
-        """O resumo da sessão da gravação aberta na análise (session.card; sem gravação: None = o exemplo). Gravação de
-        menos de 1 min, como no widget: só com um acontecimento (session.SHORT_OK)."""
-        c = self.win.combat() if hasattr(self.win, "combat") else None
-        if c is None:
-            return None
-        try:
-            app = self.win.app
-            d = session.card(c, self.cfg(), favs=self.cfg().get("drop_favs") or [], marked=app.ping_items())
-        except Exception:  # noqa: BLE001 - a prévia é um extra
-            self.win.app.log_error(*sys.exc_info())
-            return None
-        if c.now < session.MIN_MS and not any(h["key"] in session.SHORT_OK for h in d["hl"]):
-            return None
-        return d
 
     # ------------------------------------------------------------ ações
 
@@ -975,13 +989,23 @@ class CardsTab:
 
     def hl_selected(self, row):
         """Escolheu um destaque: a prévia mostra o cartão com ele no título, com a animação dele (a cena de luta usa o
-        personagem da gravação aberta, se for de uma classe de punho)."""
-        self.pv_hl = row["key"] if row else None
+        personagem da gravação aberta, se for de uma classe de punho). A lista de informações perde a seleção: a
+        prévia segue esta lista."""
+        if row is None:               # a seleção saiu (escolheram uma informação): a prévia fica com a de lá
+            return
+        self.pv_hl, self.pv_info = row["key"], None
+        clear_selection(self.t_info)
         self.show_preview(("system", "session"))
 
     def info_selected(self, row):
-        """Escolheu uma informação: a prévia volta para o resumo da gravação aberta (ou o de exemplo)."""
-        self.pv_hl = None
+        """Escolheu uma informação: a prévia mostra o cartão de exemplo com a linha dela acesa (mesmo desmarcada, para
+        ver como ficaria), animando como nos destaques. Antes mostrava o cartão da gravação aberta, igual em todo
+        clique (com a do 250 de um amigo, sempre o "Nível máximo"; o usuário, 2026-11-20). A lista de destaques perde
+        a seleção."""
+        if row is None:               # a seleção saiu (escolheram um destaque): a prévia fica com o de lá
+            return
+        self.pv_hl, self.pv_info = None, row["key"]
+        clear_selection(self.t_hl)
         self.show_preview(("system", "session"))
 
     def set_highlights(self, keys):

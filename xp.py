@@ -78,6 +78,7 @@ MAX_LEVEL_4TH = 250
 
 
 _BASE_EXP = None
+_MAX_LEVEL = {}                  # {classe: nível máximo} da mesma tabela
 
 
 def _base_exp():
@@ -93,9 +94,20 @@ def _base_exp():
                               if int(v) != 999999999 and int(k) < int(g.get("max") or 9999)}
                     for job in g.get("jobs", []):
                         _BASE_EXP[int(job)] = levels
+                        if g.get("max"):
+                            _MAX_LEVEL[int(job)] = int(g["max"])
         except (OSError, ValueError, TypeError, AttributeError):
             pass
     return _BASE_EXP
+
+
+def max_level(job):
+    """O nível máximo da classe: 250 nas 4ªs classes do LATAM (o rAthena já vai a 275), senão o da tabela do
+    rAthena (99 nas classes 1 e 2, 200 nas 3ªs e na Doram). None para classe fora da tabela."""
+    if job in FOURTH_JOBS:
+        return MAX_LEVEL_4TH
+    _base_exp()
+    return _MAX_LEVEL.get(job)
 
 
 def table_need(job, level):
@@ -2149,15 +2161,57 @@ def recent_range(c, cfg):
 
 
 def recent_pace(c, cfg):
-    """XP por minuto de caça no trecho recente (recent_parts), ou None enquanto aquece."""
+    """XP por minuto de caça no trecho recente (recent_parts), ou None enquanto aquece. Cada abate conta com o
+    Milagre de agora (now_rows), não com o que valeu nele."""
     parts = recent_parts(c, cfg)
     if parts is None:
         return None
     rng, more, more_ms = parts
-    got = estimate(c, cfg, rng)["kill_xp"] if rng else 0.0      # ritmo só dos abates
+    got = sum(x for _t, x in now_rows(c, cfg, rng)) if rng else 0.0      # ritmo só dos abates
     ms = (active_ms(c, rng) if rng else 0.0) + more_ms
-    rate = (got + more) * 60000.0 / ms if ms > 0 else 0.0
+    rate = (got + more * carry_scale(c, cfg)) * 60000.0 / ms if ms > 0 else 0.0
     return rate if rate > 0 else None
+
+
+# O Milagre dobra a XP de uma vez quando liga e quando acaba, e o ritmo dos últimos 10 min misturava abates de antes e
+# de depois dele por 10 min. Um jogador no clock_01 (2026-11-19) subiu para o 250 uns 8 min depois do previsto: o
+# Milagre acabou 14 min antes da subida, e a previsão seguiu no ritmo dobrado. Agora cada abate do trecho vale o
+# primeiro passo do fator de agora (o Milagre; sem ele, o alvo da Oposição). Os outros bônus ficam como valeram:
+# repesar todos pelo fator de agora piorou a previsão (o Njord e os manuais vão e voltam). Prever que o Milagre acaba
+# na hora marcada também piorou: ele renova a cada 25 a 45 min de farm em quem tem.
+def _first_step(a, t, mob, marks):
+    """O primeiro passo do fator de um abate (factor_at): 1 + o Milagre ou, sem ele, o alvo da Oposição."""
+    return 1.0 + (a["first"] or mark_pct(marks, t, mob)) / 100.0
+
+
+def now_rows(c, cfg, rng):
+    """[(t, XP)] dos abates do recorte, cada um com o primeiro passo do fator de agora (o Milagre) no lugar do que
+    valeu nele. No modo fixo (sem Milagre na conta), a XP de cada um como foi."""
+    rows = [r for r in estimate(c, cfg, rng)["rows"] if r.get("total")]
+    if not rows or factor(c, cfg)[0] is not None:
+        return [(r["t"], r["total"]) for r in rows]
+    wins, sets, marks = windows(c, cfg), settings(cfg, c), marks_of(c)
+    parts = _parts(c, cfg, wins, sets)
+    a_now = parts.at(c.now)
+    return [(r["t"], r["total"] * _first_step(a_now, c.now, r["mob"], marks)
+             / _first_step(parts.at(r["t"]), r["t"], r["mob"], marks)) for r in rows]
+
+
+def miracle_step(c, cfg):
+    """O multiplicador do Milagre agora: 2,0 com ele (o % dele), 1,0 sem (e no modo fixo)."""
+    if factor(c, cfg)[0] is not None:
+        return 1.0
+    wins, sets = windows(c, cfg), settings(cfg, c)
+    return 1.0 + _parts(c, cfg, wins, sets).at(c.now)["first"] / 100.0
+
+
+def carry_scale(c, cfg):
+    """Quanto a XP que veio do fim da gravação anterior (carry) vale no Milagre de agora: ele pode ter ligado ou
+    acabado entre uma gravação e a outra."""
+    k = carry(c)
+    if not k or not k.get("m"):
+        return 1.0
+    return miracle_step(c, cfg) / k["m"]
 
 
 # Reiniciar a gravação (para calibrar) não zera o ritmo do "Até o próximo nível": a gravação que começa até 1 min
@@ -2192,15 +2246,18 @@ def carry_from(c, prev, cfg):
     if fs is not None:
         est = estimate(prev, cfg, (fs, prev.now))
         farm_ms, farm_xp = float(prev.now - fs), est["kill_xp"]
-        rows = sorted((r["t"] - prev.now, r.get("total") or 0.0) for r in est["rows"] if r["t"] >= prev.now - PACE_MS)
+        # cada abate com o Milagre do fim dela (now_rows); "m" diz qual era, para a nova repesar se ele mudou
+        rows = sorted((t - prev.now, x) for t, x in now_rows(prev, cfg, (max(fs, prev.now - PACE_MS), prev.now)))
     old = carry(prev)
     if old is not None and farm_ms < PACE_MS:
         # a anterior também continuava outra (reiniciou duas vezes seguidas): os abates de lá completam os 10 min
         # (o intervalo entre as gravações fica de fora do tempo de caça pela regra das pausas)
-        rows = [(t - prev.now, x) for t, x in old["rows"] if t - prev.now >= -PACE_MS] + rows
+        k = carry_scale(prev, cfg)
+        rows = [(t - prev.now, x * k) for t, x in old["rows"] if t - prev.now >= -PACE_MS] + rows
         farm_ms += old["farm_ms"]
         farm_xp += old["farm_xp"]
-    c.carry = dict(rows=rows, farm_ms=farm_ms, farm_xp=farm_xp, warm=not warming_up(prev, cfg), gap=gap)
+    c.carry = dict(rows=rows, farm_ms=farm_ms, farm_xp=farm_xp, warm=not warming_up(prev, cfg), gap=gap,
+                   m=miracle_step(prev, cfg))
     return True
 
 

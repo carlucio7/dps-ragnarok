@@ -9,6 +9,7 @@ foco do jogo: as teclas continuam indo para o Ragnarok. Passe o mouse sobre um
 botão para ver o que ele faz no rodapé; o botão direito abre todas as opções.
 """
 
+import base64
 import collections
 import ctypes
 import faulthandler
@@ -68,7 +69,7 @@ MIN_SCALE, MAX_SCALE = 0.7, 2.5
 FONT_PX = {"big": 30, "big_s": 23, "spaced": 13, "unit": 11, "title": 12, "text": 11, "small": 10, "num": 12, "icon": 11, "tab": 11}
 MIN_FONT_PX = 8
 ALERT_S = 7.0          # quanto tempo um aviso fica no rodapé
-DROP_SCROLL_ROWS = 3   # itens que a roda do mouse rola na aba Drops
+DROP_SCROLL_ROWS = 3   # linhas que a roda do mouse rola nas abas Drops e Alvos
 MIRACLE_FLASH_S = 9.0  # o widget brilha por esse tempo quando o Milagre ativa
 MIRACLE_BANNER_S = 6.0
 MIRACLE_COLORS = ("#fbbf24", "#fde68a", "#c084fc", "#f9a8d4", "#ffffff", "#a5b4fc")
@@ -105,11 +106,13 @@ CAST, ATK1, ATK2, ATK3 = 12, 5, 10, 11      # ações do .act de jogador: conjur
 FIGHT_ACTS = {"combo": (ATK2, ATK3), "heavy": (CAST, ATK1), "asura": (CAST, ATK1), "boss_down": (ATK2, ATK3, ATK1)}
 BOSS_FALL_S = 3.4         # "Chefe derrotado": o golpe final, o chefe cai e vem o confete
 FIGHT_DUMMY = 1002        # o alvo quando o monstro da sessão não tem desenho: um Poring
+FIGHT_KEEP = 6            # cenas de luta montadas guardadas (a prévia da aba Cartões passa de uma para a outra)
 # o palco: nas cenas com personagens o texto sobe e eles ficam numa faixa no pé do cartão (não passam por cima das
 # linhas); acabada a animação, ela recolhe em STAGE_FOLD_S e as linhas voltam
-SCENE_FX = ("combo", "heavy", "asura", "boss_down", "chase", "jabs", "one_punch", "deck", "mvp_card")
+SCENE_FX = ("combo", "heavy", "asura", "boss_down", "chase", "jabs", "one_punch", "deck", "mvp_card", "maxlevel")
 STAGE_H = 50              # altura do palco (pixels, no zoom 1)
-STAGE_HS = {"mvp_card": 64, "deck": 58}   # a carta de MVP e o Coringa (uma carta gigante) pedem palco mais alto
+# a carta de MVP, o Coringa (uma carta gigante) e quem grava com a aura do nível máximo pedem palco mais alto
+STAGE_HS = {"mvp_card": 64, "deck": 58, "maxlevel": 64}
 STAGE_FOLD_S = 0.5
 # "Mão de cartas": o Coringa do jogo embaralha (as metades do baralho se intercalam) e distribui as cartas da sessão
 # num leque, cada uma virando no ar até mostrar a ilustração dela (do data.grf; sem o jogo, cartas desenhadas)
@@ -129,6 +132,23 @@ MVP_SPIN = (1.0, 2.15)    # a carta gira subindo...
 MVP_REVEAL_S = 2.75       # ...a revelação cobre o cartão até aqui...
 MVP_LAND_S = 3.35         # ...e a carta desce para o palco até aqui
 MVP_GOLD = ("#fbbf24", "#fde68a", "#ffffff", "#f59e0b")
+# "Nível máximo": por cima de tudo, o cartão escurece e quem grava (o personagem dele, de qualquer classe) aparece num
+# pilar de luz; o anjo da subida de nível do jogo sobe dele; o nível rola até o máximo com um clarão e a aura do nível
+# máximo (anéis azul-claros, do anel difuso do jogo) começa a subir dos pés; o nome do feito aparece; depois ele desce
+# para o palco, onde fica com a aura subindo, as estrelinhas azuis do jogo e o anjo de tempos em tempos
+MAXLV_HERO = (56, 40)     # altura do corpo de quem grava na revelação e no palco (zoom 1)
+MAXLV_ANGEL = (42, 24)    # altura do anjo na revelação e no palco
+MAXLV_RING = (48, 32)     # largura do anel da aura na revelação e no palco (a altura é 30% dela)
+MAXLV_ANGEL_S = (0.4, 1.3)   # o anjo sobe e some...
+MAXLV_NUMBER_S = 1.2      # ...o nível de antes aparece quando ele já está sumindo...
+MAXLV_COUNT = (1.45, 1.7)  # ...e rola até o máximo, com o clarão no fim...
+MAXLV_REVEAL_S = 3.2      # ...a revelação cobre o cartão até aqui...
+MAXLV_LAND_S = 3.8        # ...e quem grava desce para o palco até aqui
+MAXLV_SKY = ("#7dd3fc", "#bae6fd", "#ffffff", "#38bdf8")   # a aura: azul-claro, quase branco, branco, azul
+MAXLV_FADES = (1.0, 0.72, 0.48, 0.28, 0.12)                # tons montados do anjo e dos anéis (transparência)
+MAXLV_RISE_S = 1.6        # um anel leva isso para subir e sumir...
+MAXLV_RING_EVERY = 0.32   # ...e sai um a cada tanto, desde o clarão do número
+MAXLV_GROW = (1.0, 1.15, 1.3)                             # o anel alarga um pouco enquanto sobe
 CRIT_TINT, SHOT_TINT = (255, 228, 60), (255, 160, 48)   # números amarelos (crítico) e laranja (one shot)
 STAR_JOBS = {4047, 4048, 4239, 4241, 4243, 4244, 4302, 4316}   # a linha estelar: estrelinhas no lugar das esferas
 BIG_PART = (1.6, 2.5)     # peça maior que isto (altura, largura) vezes o corpo fica fora da cena (chapéu-aura etc.)
@@ -187,6 +207,7 @@ HINTS = {
     "shot": _("Copiar a imagem do widget (cole com Ctrl+V)"),
     "summary": _("Clique: abrir o Dedo Duro · botão direito: desligar o resumo da luta"),
     "session": _("Clique: abrir a análise · botão direito: fechar, escolher o que mostrar ou desligar"),
+    "session_x": _("Fechar este resumo"),
     "more": _("Opções"), "min": _("Minimizar"), "close": _("Fechar o medidor"), "reset": _("Zerar: começa a contar de novo"),
     "view": _("Escolher o que mostrar: tudo ou uma luta"), "prev": _("Luta anterior"), "next": _("Próxima luta"),
     "group": _("Dano de cada jogador"), "skills": _("O seu dano por skill"), "targets": _("Em quem você bateu"),
@@ -622,6 +643,9 @@ class DpsApp:
         self.enc_back = 0                   # 0 = encontro atual, 1 = anterior...
         self.drop_scroll = 0                # primeira linha mostrada na aba Drops (roda do mouse)
         self.drop_view = (0, 0, 0)          # (primeira, linhas, total) para a barra de rolagem
+        self.target_scroll = 0              # o mesmo na aba Alvos
+        self.target_view = (0, 0, 0)
+        self.target_key = None              # a luta da lista de alvos (outra luta: volta para o começo)
         self.session_hidden = set()         # drops ocultos só até fechar o programa
         self.hover = self.pressed = self.drag = self.resize = None
         self.hwnd = None
@@ -1821,6 +1845,13 @@ class DpsApp:
         self.dirty = True
         self.start_session_anim()
 
+    def close_session_card(self):
+        """Fecha o resumo da sessão (o ✕, o menu dele, o Zerar, o tempo dele); volta pelo menu do widget, em "Resumo da
+        última sessão"."""
+        self.session_card = None
+        self.session_waiting = False
+        self.dirty = True
+
     def reopen_session(self):
         """O menu do widget: mostra de novo o último resumo da sessão (com a animação)."""
         d = self.last_session
@@ -1844,6 +1875,11 @@ class DpsApp:
         card = self.session_card
         if not card:
             self.session_waiting = False
+            return
+        if not self.session_covered() and now - card[1] > SESSION_CARD_S:
+            # o tempo dele acabou: aqui vale sempre (no check_session ele só contava com a gravação aberta e sem
+            # replay fixado, e o cartão podia ficar na tela para sempre)
+            self.close_session_card()
             return
         if self.session_covered():
             self.session_card = (card[0], now)
@@ -1873,6 +1909,8 @@ class DpsApp:
                     frames["rider"] = self.rider_frames()
             elif hl["fx"] in ("deck", "mvp_card"):
                 self.card_scene(d.setdefault("chase", {}), hl["fx"], hl.get("deal") or {})
+            elif hl["fx"] == "maxlevel":
+                self.rise_scene(d.setdefault("chase", {}), hl.get("rise") or {})
         except Exception:  # noqa: BLE001 - a cena é um extra: sem ela, os desenhos de reserva
             self.log_error(*sys.exc_info())
 
@@ -1914,8 +1952,7 @@ class DpsApp:
     def session_menu(self):
         m = self.new_menu()
         m.add_command(label=_("Abrir a análise"), command=self.open_session)
-        m.add_command(label=_("Fechar este resumo"), command=lambda: (setattr(self, "session_card", None),
-                                                                     setattr(self, "dirty", True)))
+        m.add_command(label=_("Fechar este resumo"), command=self.close_session_card)
         m.add_command(label=_("Escolher o que o resumo mostra…"), command=self.open_session_options)
         m.add_command(label=_("Não mostrar mais o resumo da sessão"), command=lambda: self.toggle_cfg("session_card"))
         return m
@@ -2003,8 +2040,12 @@ class DpsApp:
             c.create_line(x0 + 10 * s, y1 - stage, x1 - 10 * s, y1 - stage, fill=mix(CARD_BG, col, 0.3))
         parts, fit = self.session_layout(d, stage)
         lines = list(d.get("lines") or [])
+        focus = d.get("focus")                    # a prévia da aba Cartões acende a informação escolhida
         if len(lines) > fit:
-            lines = (lines[:fit - 1] + [(_("mais %d na análise (clique)") % (len(lines) - fit + 1), CARD_DIM)]
+            head = lines[:fit - 1]
+            if isinstance(focus, int) and focus >= fit - 1:    # ela fica à vista no lugar da última que cabe
+                head, focus = (head[:-1] + [lines[focus]], fit - 2) if fit >= 2 else (head, None)
+            lines = (head + [(_("mais %d na análise (clique)") % (len(lines) - fit + 1), CARD_DIM)]
                      if fit >= 1 else [])
         heights = dict(sub=13 * s, phrase=14 * s, bar=14 * s, chips=21 * s)
         total = 22 * s + sum(h for p, h in heights.items() if p in parts) + 14 * s * len(lines)
@@ -2020,10 +2061,19 @@ class DpsApp:
         if anim:
             self.draw_session_fx(main["fx"], k, (x0, y0, x1, y1), col, y + 8 * s, (bx0 + 13 * s, y + 8 * s),
                                  main.get("tag"), d.setdefault("chase", {}), GLASS_BG if glass else CARD_BG,
-                                 main.get("fight"), main.get("deal"))
+                                 main.get("fight"), main.get("deal"), main.get("rise"))
+        over_x = self.hover == ("session_x", None)
         cid = c.create_text(x1 - pad, y0 + pad + 4 * s, anchor="e", text="✕", font=self.fonts["small"],
-                            fill=CARD_DIM)
-        count_w = c.bbox(cid)[2] - c.bbox(cid)[0]
+                            fill=CARD_WHITE if over_x else CARD_DIM)
+        bb = c.bbox(cid)
+        count_w = bb[2] - bb[0]
+        # o ✕ fecha (antes o cartão inteiro era uma área só e o clique no ✕ abria a análise): a área dele vem
+        # depois da do cartão, então ganha dela, e é maior que o símbolo
+        if over_x:
+            r = max(bb[2] - bb[0], bb[3] - bb[1]) / 2 + 3 * s
+            mx, my = (bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2
+            c.tag_lower(c.create_oval(mx - r, my - r, mx + r, my + r, fill=mix(CARD_BG, col, 0.3), outline=""), cid)
+        self.hits.append((("session_x", None), (bb[0] - 6 * s, bb[1] - 5 * s, bb[2] + 6 * s, bb[3] + 5 * s)))
         xr = x1 - pad - (count_w + 6 * s if y < y0 + pad + 14 * s else 0)
         xl = x0 + pad
         if main and main.get("emblem"):           # o emblema: um círculo na cor do destaque com o símbolo dele
@@ -2042,6 +2092,8 @@ class DpsApp:
         if "sub" in parts:
             sub = d.get("sub") or ""
             text = (_("Resumo da sessão") + (" · " + sub if sub else "")) if main else sub
+            if focus == "sub":
+                self.draw_focus(cx, y + 4 * s, text, col, d.get("focus_off"), x0 + pad, x1 - pad)
             self.center_text(cx, y + 4 * s, text, self.fonts["small"], CARD_DIM, x0 + pad, x1 - pad)
             y += 13 * s
         if "phrase" in parts:
@@ -2054,15 +2106,28 @@ class DpsApp:
         if "chips" in parts:
             self.draw_session_chips(hls[1:], y + 9 * s, x0 + pad, x1 - pad)
             y += 21 * s
-        for text, fill in lines:
+        for i, (text, fill) in enumerate(lines):
+            if i == focus:
+                self.draw_focus(cx, y + 5 * s, text, col, d.get("focus_off"), x0 + pad, x1 - pad)
             self.center_text(cx, y + 5 * s, text, self.fonts["small"], fill or CARD_DIM, x0 + pad, x1 - pad)
             y += 14 * s
         if anim and main.get("fx") == "mvp_card" and k < MVP_LAND_S:   # a carta de MVP se revela por cima
             self.draw_mvp_reveal(k, (x0, y0, x1, y1), main.get("deal") or {}, d.setdefault("chase", {}), col)
+        if anim and main.get("fx") == "maxlevel" and k < MAXLV_LAND_S:  # o nível máximo também
+            self.draw_maxlv_reveal(k, (x0, y0, x1, y1), main.get("rise") or {}, d.setdefault("chase", {}), col)
         left = 1.0 - k / SESSION_CARD_S
         if left > 0.005:
             c.create_line(x0 + 10 * s, y1 - 3 * s, x0 + 10 * s + (x1 - x0 - 20 * s) * left, y1 - 3 * s, fill=col,
                           width=max(2, int(2 * s)))
+
+    def draw_focus(self, cx, cy, text, col, off, xl, xr):
+        """A linha da informação escolhida na prévia da aba Cartões, acesa: uma faixa na cor do cartão atrás dela,
+        tracejada se a informação está desmarcada (no cartão de verdade ela não sai)."""
+        c, s = self.canvas, self.s
+        w = min(xr - xl + 8 * s, self.fonts["small"].measure(text) + 18 * s)
+        c.create_polygon(round_rect_pts(cx - w / 2, cy - 6.5 * s, cx + w / 2, cy + 6.5 * s, 6 * s), smooth=True,
+                         fill=mix(CARD_BG, col, 0.12 if off else 0.28), outline=mix(CARD_BG, col, 0.9),
+                         width=max(1, int(s)), **({"dash": (4, 3)} if off else {}))
 
     def draw_fist(self, x, y, k, fade, bg, t=0.0):
         """O punho de um monge socando para a direita, com a frente em (x, y); k = tamanho (s). O antebraço e a mão
@@ -2313,13 +2378,16 @@ class DpsApp:
         """Os desenhos da cena de luta de um cartão de dano, do jogo: o lutador (o visual de quem grava, se for de uma
         classe de punho, ou o Mestre) nas ações da cena, virado para a direita; o monstro (o da sessão, ou um Poring)
         parado, apanhando e caindo, virado para o lutador; e os números de dano. Guardados por (visual, monstro, cena,
-        zoom); None sem o guarda-roupa do jogo."""
+        zoom), as últimas FIGHT_KEEP (guardando uma só, cada troca de destaque na prévia da aba Cartões montava tudo de
+        novo: 0,2 a 0,5 s parado); None sem o guarda-roupa do jogo."""
         look = fight.get("look") or FIGHTER
         mob = fight.get("mob")
         key = (repr(sorted(look.items())), mob, kind, round(self.s, 3))
-        cache = getattr(self, "_fight", None)
-        if cache is not None and cache[0] == key:
-            return cache[1]
+        cache = getattr(self, "_fights", None)
+        if cache is None:
+            cache = self._fights = {}
+        if key in cache:
+            return cache[key]
         w, book = sprites.LOADER.wardrobe, sprites.MONSTERS.book
         if w is None:
             return None
@@ -2347,8 +2415,7 @@ class DpsApp:
         except Exception:  # noqa: BLE001 - sem o lutador: os socos desenhados entram no lugar
             out["acts"] = {}
         if not out["acts"]:
-            self._fight = (key, None)
-            return None
+            return self.keep_fight(key, None)
         if book is not None:
             import ui_parts
             target = mob if mob and book.has(mob) else (FIGHT_DUMMY if book.has(FIGHT_DUMMY) else None)
@@ -2365,8 +2432,16 @@ class DpsApp:
                 out["digits"] = book.digits()
             except Exception:  # noqa: BLE001 - sem os números do jogo: os escritos
                 out["digits"] = None
-        self._fight = (key, out)
-        return out
+        return self.keep_fight(key, out)
+
+    def keep_fight(self, key, assets):
+        """Guarda os desenhos de uma cena de luta (fight_assets) entre as últimas FIGHT_KEEP; devolve `assets`."""
+        cache = self._fights
+        cache.pop(key, None)
+        cache[key] = assets
+        while len(cache) > FIGHT_KEEP:
+            cache.pop(next(iter(cache)))
+        return assets
 
     @staticmethod
     def scene_look(w, look):
@@ -2795,15 +2870,15 @@ class DpsApp:
         else:
             self.draw_card_face(cx, cy, w * max(0.1, f), h, None, bg, gold=True, fade=fade)
 
-    def draw_rays(self, cx, cy, r, k, n, bg, alpha, spin=0.6):
-        """Raios dourados girando atrás de algo em (cx, cy)."""
+    def draw_rays(self, cx, cy, r, k, n, bg, alpha, spin=0.6, color=MVP_GOLD[0]):
+        """Raios (dourados, ou na cor `color`) girando atrás de algo em (cx, cy)."""
         c = self.canvas
         for rr, ww, aa in ((r, 0.42, 0.5), (r * 0.6, 0.26, 1.0)):     # o raio longo e fraco, e o curto e forte
             for j in range(n):
                 a = k * spin + j * 2 * math.pi / n
                 w = math.pi / n * ww
                 c.create_polygon(cx, cy, cx + math.cos(a - w) * rr, cy + math.sin(a - w) * rr, cx + math.cos(a + w) * rr,
-                                 cy + math.sin(a + w) * rr, fill=mix(bg, MVP_GOLD[0], alpha * aa * (1.0 if j % 2 else 0.6)),
+                                 cy + math.sin(a + w) * rr, fill=mix(bg, color, alpha * aa * (1.0 if j % 2 else 0.6)),
                                  outline="")
 
     def draw_mvp_reveal(self, k, box, deal, frames, col):
@@ -2944,6 +3019,333 @@ class DpsApp:
                                   fill=mix(bg, spark.choice(MVP_GOLD + ("#fb923c",)), fade * (1 - u / 0.9)),
                                   width=max(1, int(1.6 * s)))
 
+    # ------------------------------------------------------------------ "Nível máximo"
+
+    def fx_bgra(self, img, tw, th, alpha=1.0, color=None, glow=False):
+        """Uma textura de efeito do jogo ((w, h, BGRA), Bestiary.effect_tex) em tw x th: `glow` (luz somada: o preto
+        vira transparente), tingida de `color` ("#rrggbb": o branco vira a cor) e com a transparência vezes `alpha`.
+        (tw, th, bytes BGRA)."""
+        import gdip
+        import streffect
+        w, h, bgra = img
+        if glow:
+            bgra = streffect.glow(bgra)
+        tw, th = max(1, int(round(tw))), max(1, int(round(th)))
+        out = gdip.resize(w, h, bgra, tw, th)
+        if out is None:                                     # sem o GDI+: o pixel mais perto
+            rows = []
+            for y in range(th):
+                sy = min(h - 1, y * h // th)
+                row = bytearray()
+                for x in range(tw):
+                    p = (sy * w + min(w - 1, x * w // tw)) * 4
+                    row += bgra[p:p + 4]
+                rows.append(bytes(row))
+            out = b"".join(rows)
+        if color or alpha < 1.0:
+            r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5)) if color else (255, 255, 255)
+            out = streffect.tint(out, (r, g, b, 255 * alpha))
+        return tw, th, out
+
+    def bgra_photo(self, w, h, bgra):
+        """Bytes BGRA (de cima para baixo) como imagem do Tk, com a transparência."""
+        import gdip
+        data = sprites.png_rgba(w, h, gdip.swap_rb(bgra))
+        return tk.PhotoImage(master=self.root, data=base64.b64encode(data).decode("ascii"), format="png")
+
+    def hero_photo(self, look, height):
+        """Quem grava de pé e de frente, com `height` de altura do corpo com a cabeça (já no zoom): (foto, x da origem,
+        y da origem) ou None sem o desenho."""
+        w = sprites.LOADER.wardrobe
+        if w is None:
+            return None
+        try:
+            look, body_h = self.scene_look(w, look)
+            r = w.render(look, sprites.IDLE, 0, 0)
+        except Exception:  # noqa: BLE001 - sem o personagem: a cena desenha o seu
+            return None
+        if r is None:
+            return None
+        wd, ht, px, ox, oy = r[:5]
+        f = height / float(body_h or ht)
+        tw, th = max(1, int(round(wd * f))), max(1, int(round(ht * f)))
+        photo = tk.PhotoImage(master=self.root, data=sprites.png_b64(tw, th, sprites.resize(wd, ht, px, tw, th)),
+                              format="png")
+        return photo, ox * f, oy * f
+
+    def rise_scene(self, frames, rise):
+        """Monta os desenhos do "Nível máximo" em `frames` (o d["chase"] do resumo): "hero" ({"big", "mid", "small"}:
+        quem grava de pé e de frente; o Mestre sem o visual dele), "angel" ({(tamanho, tom): foto}: o anjo da subida de
+        nível do jogo), "ring" ({(tamanho, crescimento, tom, "back"/"front"): foto}: as metades de trás e da frente do
+        anel da aura, achatado e azul-claro), "star" ({(tamanho, tom): foto}: a estrelinha azul) e "light" ({tamanho:
+        foto}: o brilho redondo atrás dele). Só o que falta; sem o jogo, a cena desenha a sua versão.
+        Guardados por zoom (quem grava, por visual e zoom), como os das outras cenas: a prévia da aba Cartões refaz o
+        cartão a cada quadro, e montar tudo de novo levava uns 0,6 s por quadro (o programa inteiro travava)."""
+        s = self.s
+        zoom = round(s, 3)
+        if "hero" not in frames and sprites.LOADER.wardrobe is not None:
+            look = rise.get("look") or FIGHTER
+            key = (repr(sorted(look.items())), zoom)
+            cache = getattr(self, "_rise_hero", None)
+            if cache is None or cache[0] != key:
+                mid = (MAXLV_HERO[0] + MAXLV_HERO[1]) / 2.0
+                cache = self._rise_hero = (key, {name: self.hero_photo(look, h * s) for name, h in (
+                    ("big", MAXLV_HERO[0]), ("mid", mid), ("small", MAXLV_HERO[1]))})
+            frames["hero"] = cache[1]
+        book = sprites.MONSTERS.book
+        if book is None or "angel" in frames:
+            return
+        cache = getattr(self, "_rise", None)
+        if cache is None or cache[0] != zoom:
+            cache = self._rise = (zoom, self.rise_textures(book))
+        frames.update(cache[1])
+
+    def rise_textures(self, book):
+        """As fotos das texturas do "Nível máximo" (rise_scene) no zoom de agora. O brilho (a luz somada: o preto
+        some) sai uma vez por textura; antes saía uma vez por foto, 48 vezes, e era 90% do tempo de montar a cena."""
+        import streffect
+        s = self.s
+        out = dict(angel={}, ring={}, star={}, light={})
+        try:
+            angel, ring, star, light = ((t[0], t[1], streffect.glow(t[2])) if t else None
+                                        for t in (book.effect_tex(n) for n in ("angel", "ring", "star", "light")))
+            if angel:                                       # o jogo soma o anjo à cena (luz)
+                for i, size in enumerate(MAXLV_ANGEL):
+                    for j, a in enumerate(MAXLV_FADES):
+                        out["angel"][(i, j)] = self.bgra_photo(*self.fx_bgra(
+                            angel, size * s * angel[0] / float(angel[1]), size * s, a))
+            if ring:
+                for i, size in enumerate(MAXLV_RING):
+                    for g, grow in enumerate(MAXLV_GROW):
+                        for j, a in enumerate(MAXLV_FADES):
+                            w, h, px = self.fx_bgra(ring, size * s * grow, size * s * grow * 0.3, a, MAXLV_SKY[1])
+                            half = (h // 2) * w * 4
+                            out["ring"][(i, g, j, "back")] = self.bgra_photo(w, h // 2, px[:half])
+                            out["ring"][(i, g, j, "front")] = self.bgra_photo(w, h - h // 2, px[half:])
+            if star:
+                for i, size in enumerate((9, 15)):
+                    for j, a in enumerate((1.0, 0.6, 0.3)):
+                        out["star"][(i, j)] = self.bgra_photo(*self.fx_bgra(star, size * s, size * s, a))
+            if light:
+                for i, size in enumerate((96, 62)):
+                    out["light"][i] = self.bgra_photo(*self.fx_bgra(light, size * s, size * s * 0.85, 0.5,
+                                                                    MAXLV_SKY[0]))
+        except Exception:  # noqa: BLE001 - sem as texturas: a cena desenha as suas
+            self.log_error(*sys.exc_info())
+        return out
+
+    def maxlv_spots(self, box):
+        """Onde fica a cena do "Nível máximo": (x do centro, pés na revelação, pés no palco, y do número)."""
+        s = self.s
+        x0, y0, x1, y1 = box
+        return (x0 + x1) / 2, y1 - 12 * s, y1 - 9 * s, y0 + (y1 - y0) * 0.27
+
+    def maxlv_font(self, size):
+        """A fonte do número do "Nível máximo" (para medir os dígitos), guardada por tamanho: criar uma a cada quadro
+        deixaria dezenas de fontes do Tk para o coletor."""
+        cache = getattr(self, "_maxlv_fonts", None)
+        if cache is None:
+            cache = self._maxlv_fonts = {}
+        if size not in cache:
+            cache[size] = tkfont.Font(root=self.root, family=self.fonts["title"].actual("family"), size=-size,
+                                      weight="bold")
+        return cache[size]
+
+    @staticmethod
+    def maxlv_rings(k):
+        """Onde está cada anel da aura no instante k: [fração do caminho (0 a 1)], do mais alto para o mais baixo."""
+        out = []
+        i = 0
+        while True:
+            u = (k - MAXLV_COUNT[1] - i * MAXLV_RING_EVERY) / MAXLV_RISE_S
+            if u < 0:
+                break
+            if u < 1:
+                out.append(u)
+            i += 1
+        return out
+
+    def maxlv_ring(self, frames, x, y, u, size, part, bg, fade=1.0):
+        """Um anel da aura com o centro em (x, y), `u` (0 a 1) do caminho subindo: acende, sobe alargando e some.
+        `part`: "back" (a metade de trás, antes do personagem) ou "front". A textura do jogo; sem ela, um arco."""
+        a = min(1.0, u / 0.12) * (1.0 - u) ** 1.1 * fade
+        if a <= 0.06:
+            return
+        g = min(len(MAXLV_GROW) - 1, int(u * len(MAXLV_GROW)))
+        j = min(range(len(MAXLV_FADES)), key=lambda i: abs(MAXLV_FADES[i] - a))
+        photo = (frames.get("ring") or {}).get((size, g, j, part))
+        if photo is not None:
+            self.canvas.create_image(x, y, anchor="s" if part == "back" else "n", image=photo)
+            return
+        s = self.s
+        w = MAXLV_RING[size] * s * MAXLV_GROW[g] / 2
+        h = w * 0.3
+        self.canvas.create_arc(x - w, y - h, x + w, y + h, start=0 if part == "back" else 180, extent=180,
+                               style="arc", outline=mix(bg, MAXLV_SKY[0], a), width=max(1, int(2 * s)))
+
+    def maxlv_hero(self, frames, name, x, feet, bg, fade=1.0):
+        """Quem grava de pé em (x, pés), no tamanho `name` ("big", "mid", "small"); sem o desenho dele, o aventureiro
+        desenhado."""
+        hero = (frames.get("hero") or {}).get(name)
+        if hero:
+            photo, ox, oy = hero
+            self.canvas.create_image(x - ox, feet - oy, anchor="nw", image=photo)
+        else:
+            self.draw_hero(x, feet, 0.0, fade, bg)
+
+    def maxlv_stars(self, frames, k, cx, cy, rx, ry, n, size, bg, fade, seed, box):
+        """Estrelinhas azuis do jogo piscando em volta de (cx, cy), dentro de `box`; sem a textura, "✦"."""
+        c, s = self.canvas, self.s
+        bx0, by0, bx1, by1 = box
+        rnd = random.Random(seed)
+        stars = frames.get("star") or {}
+        for i in range(n):
+            a, r = rnd.uniform(0, 2 * math.pi), rnd.uniform(0.55, 1.0)
+            x, y = cx + math.cos(a) * rx * r, cy + math.sin(a) * ry * r
+            tw = 0.5 + 0.5 * math.sin(k * rnd.uniform(4, 7) + i * 1.9)
+            if tw < 0.25 or not (bx0 < x < bx1 and by0 < y < by1):
+                continue
+            photo = stars.get((size, 0 if tw > 0.75 else 1 if tw > 0.5 else 2))
+            if photo is not None and fade > 0.5:
+                c.create_image(x, y, image=photo)
+            else:
+                c.create_text(x, y, text="✦", fill=mix(bg, MAXLV_SKY[1], tw * fade),
+                              font=("Segoe UI Symbol", -int((7 + 4 * size) * s)))
+
+    def draw_maxlv_reveal(self, k, box, rise, frames, col):
+        """"Nível máximo", por cima do texto: o cartão escurece, um pilar de luz desce e quem grava aparece nele com um
+        clarão nos pés; o anjo da subida de nível do jogo sobe dele e some; o nível rola até o máximo e explode em luz,
+        a aura começa a subir dos pés e o nome do feito aparece; depois ele desce para o palco enquanto o escuro
+        escorre e o texto aparece."""
+        c, s = self.canvas, self.s
+        x0, y0, x1, y1 = box
+        if "angel" not in frames or "hero" not in frames:
+            self.rise_scene(frames, rise)
+        cx, feet, stage_feet, ny = self.maxlv_spots(box)
+        dark = "#05070d"
+        land = min(1.0, max(0.0, (k - MAXLV_REVEAL_S) / (MAXLV_LAND_S - MAXLV_REVEAL_S)))
+        ease = land * land * (3 - 2 * land)
+        top = y0 + 2 * s + (y1 - y0) * ease                # o escuro escorre para baixo na descida
+        show = 1.0 - ease
+        burst = MAXLV_COUNT[1]
+        hh = MAXLV_HERO[0] * s
+        hy = feet + (stage_feet - feet) * ease             # os pés de quem grava, descendo para o palco
+        if top < y1 - 4 * s:
+            c.create_polygon(round_rect_pts(x0 + 2 * s, top, x1 - 2 * s, y1 - 2 * s, 8 * s), smooth=True, fill=dark,
+                             outline="")
+            beam = min(1.0, max(0.0, (k - 0.1) / 0.4)) * show
+            if beam > 0:                                    # o pilar: camadas do largo e fraco ao fino e forte
+                bot = top + (feet - top) * min(1.0, max(0.0, (k - 0.1) / 0.4))
+                pulse = 1 + 0.06 * math.sin(k * 6) + 0.5 * max(0.0, 1 - abs(k - burst) / 0.3)
+                for wd, a in ((24, 0.07), (15, 0.13), (8, 0.24), (3, 0.5)):
+                    w = wd * s * pulse
+                    c.create_rectangle(cx - w, top, cx + w, bot, fill=mix(dark, MAXLV_SKY[0], a * beam), outline="")
+            light = (frames.get("light") or {}).get(0)
+            if light is not None and 0.3 <= k < MAXLV_REVEAL_S:
+                c.create_image(cx, feet - hh * 0.5, image=light)
+            if burst <= k < MAXLV_REVEAL_S:                 # os raios atrás do número (saem antes da descida: eles
+                self.draw_rays(cx, ny, 74 * s, k, 16, dark, 0.28, 0.5, MAXLV_SKY[0])   # passariam do escuro)
+            sparks = random.Random(17)
+            for j in range(30):                             # faíscas azuis subindo pelo pilar
+                t = k - 0.35 - sparks.uniform(0.0, 2.3)
+                life = sparks.uniform(0.6, 1.2)
+                if 0 <= t < life:
+                    x = cx + sparks.uniform(-22, 22) * s + math.sin(t * 5 + j) * 3 * s
+                    y = feet - 4 * s - sparks.uniform(35, 85) * s * t
+                    if y > top + 3 * s:
+                        r = sparks.uniform(0.8, 1.7) * s
+                        c.create_oval(x - r, y - r, x + r, y + r, fill=mix(dark, sparks.choice(MAXLV_SKY),
+                                                                            (1 - t / life) * show), outline="")
+        rings = self.maxlv_rings(k) if show > 0.05 else []
+        for u in rings:
+            self.maxlv_ring(frames, cx, hy - u * hh * 0.95, u, 0, "back", dark, show)
+        if k >= 0.3:
+            name = "big" if ease < 0.35 else "mid" if ease < 0.7 else "small"
+            self.maxlv_hero(frames, name, cx, hy, dark)
+            if k < 0.75:                                    # o clarão nos pés quando ele aparece
+                u = (k - 0.3) / 0.45
+                rx, ry = (8 + 34 * u) * s, (3 + 10 * u) * s
+                c.create_oval(cx - rx, feet - ry, cx + rx, feet + ry, outline=mix(dark, "#ffffff", 1 - u),
+                              width=max(1, int(2 * s)))
+        for u in rings:
+            self.maxlv_ring(frames, cx, hy - u * hh * 0.95, u, 0, "front", dark, show)
+        if MAXLV_ANGEL_S[0] <= k < MAXLV_ANGEL_S[1]:       # o anjo da subida de nível sobe dele e some
+            u = (k - MAXLV_ANGEL_S[0]) / (MAXLV_ANGEL_S[1] - MAXLV_ANGEL_S[0])
+            a = min(1.0, u / 0.15) * min(1.0, (1.0 - u) / 0.45)
+            j = min(range(len(MAXLV_FADES)), key=lambda i: abs(MAXLV_FADES[i] - a))
+            photo = (frames.get("angel") or {}).get((0, j))
+            if photo is not None and a > 0.08:
+                c.create_image(cx, feet - hh - 2 * s - u * 26 * s, anchor="s", image=photo)
+        if k >= burst and show > 0.3:
+            self.maxlv_stars(frames, k, cx, (ny + feet - hh) / 2, 95 * s, (feet - ny) * 0.55, 12, 1, dark, show, 5,
+                             (x0 + 6 * s, max(top, y0) + 6 * s, x1 - 6 * s, y1 - 6 * s))
+        if k < MAXLV_NUMBER_S or top > ny - 22 * s:
+            return
+        level, prev = rise.get("level") or 250, rise.get("prev") or 249
+        family = self.fonts["title"].actual("family")
+        big = int(30 * s)
+        if k >= burst:                                      # o clarão do número
+            u = (k - burst) / 0.45
+            if u < 1:
+                r = (12 + 46 * u) * s
+                c.create_oval(cx - r, ny - r * 0.8, cx + r, ny + r * 0.8, fill=mix(dark, "#e0f2fe", 0.85 * (1 - u)),
+                              outline="")
+        grow = 1.0 + 0.4 * max(0.0, 1.0 - (k - burst) / 0.25) if k >= burst else 1.0
+        font = (family, -int(big * grow), "bold")
+        a = min(1.0, (k - MAXLV_NUMBER_S) / 0.2) * show
+        if k < burst:                                       # o nível de antes, rolando para o máximo no fim
+            old, new = str(prev), str(level)
+            same = 0
+            while same < min(len(old), len(new)) and old[same] == new[same]:
+                same += 1
+            fnt = self.maxlv_font(big)
+            u = min(1.0, max(0.0, (k - MAXLV_COUNT[0]) / (MAXLV_COUNT[1] - MAXLV_COUNT[0])))
+            wide = fnt.measure(new)
+            left = cx - wide / 2.0
+            base = mix(dark, MAXLV_SKY[1], a)
+            if same:
+                c.create_text(left, ny, anchor="w", text=new[:same], font=font, fill=base)
+            xs = left + fnt.measure(new[:same])
+            c.create_text(xs, ny - u * 16 * s, anchor="w", text=old[same:], font=font, fill=mix(dark, MAXLV_SKY[1],
+                                                                                                 a * (1 - u)))
+            if u > 0:
+                c.create_text(xs, ny + (1 - u) * 16 * s, anchor="w", text=new[same:], font=font,
+                              fill=mix(dark, MVP_GOLD[1], a * u))
+        else:
+            glow_ = 0.5 + 0.5 * math.sin((k - burst) * 5)
+            c.create_text(cx + 2 * s, ny + 2 * s, text=str(level), font=font, fill=mix(dark, "#000000", a))
+            c.create_text(cx, ny, text=str(level), font=font, fill=mix(dark, mix(MVP_GOLD[1], "#ffffff", 0.35 * glow_),
+                                                                           a))
+        if k >= burst + 0.15:                               # o nome do feito, com as letras espaçadas
+            u = min(1.0, (k - burst - 0.15) / 0.3)
+            title = " ".join(_("NÍVEL MÁXIMO"))
+            size = int(12 * s * (1.0 + 0.12 * (1 - u)))
+            tf = (family, -max(6, size), "bold")
+            c.create_text(cx + s, ny - 26 * s + s, text=title, font=tf, fill=mix(dark, "#000000", u * show))
+            c.create_text(cx, ny - 26 * s, text=title, font=tf, fill=mix(dark, MAXLV_SKY[1], u * show))
+
+    def draw_maxlv_stage(self, k, box, fade, rise, frames, bg):
+        """"Nível máximo", no palco: quem grava com a aura subindo dos pés, o brilho atrás e as estrelinhas azuis do
+        jogo piscando em volta."""
+        s = self.s
+        x0, _y0, x1, y1 = box
+        if "angel" not in frames or "hero" not in frames:
+            self.rise_scene(frames, rise)
+        cx, _feet, feet, _ny = self.maxlv_spots(box)
+        hh = MAXLV_HERO[1] * s
+        light = (frames.get("light") or {}).get(1)
+        if light is not None and fade > 0.5:
+            self.canvas.create_image(cx, feet - hh * 0.45, image=light)
+        rings = self.maxlv_rings(k)
+        for u in rings:
+            self.maxlv_ring(frames, cx, feet - u * hh * 0.95, u, 1, "back", bg, fade)
+        self.maxlv_hero(frames, "small", cx, feet, bg, fade)
+        for u in rings:
+            self.maxlv_ring(frames, cx, feet - u * hh * 0.95, u, 1, "front", bg, fade)
+        stage_top = y1 - STAGE_HS["maxlevel"] * s
+        self.maxlv_stars(frames, k, cx, feet - hh * 0.5, 70 * s, hh * 0.65, 9, 0, bg, fade, 9,
+                         (x0 + 6 * s, stage_top + 4 * s, x1 - 6 * s, y1 - 5 * s))
+
     def draw_poring(self, x, y, color, hop, fade, bg):
         """Um bichinho de geleia (o Poring e a família dele) de pé em (x, y): a gota, o brilho, olhos e a boquinha
         aberta de susto. hop: 0 no chão (achatado) a 1 no alto."""
@@ -3031,7 +3433,7 @@ class DpsApp:
             x += w + gap
 
     def draw_session_fx(self, kind, k, box, col, title_y, origin, tag=None, chase=None, bg=CARD_BG, fight=None,
-                        deal=None):
+                        deal=None, rise=None):
         """A animação do destaque principal nos primeiros SESSION_FX_S do resumo (atrás do texto): confete (do alto e
         dos cantos), moedinhas que se empilham (ganhou muito) ou que caem do emblema (gastou muito), estrelas piscando
         (Milagre), brilhos em volta do título, ondas saindo do emblema, chuva ou a moldura pulsando. As peças saem
@@ -3232,6 +3634,9 @@ class DpsApp:
         elif kind == "mvp_card":                    # a carta de MVP no palco (a revelação vem por cima do texto)
             if k >= MVP_LAND_S:
                 self.draw_mvp_stage(k, box, fade, deal or {}, chase if chase is not None else {}, bg)
+        elif kind == "maxlevel":                    # quem grava no palco com a aura (a revelação vem por cima)
+            if k >= MAXLV_LAND_S:
+                self.draw_maxlv_stage(k, box, fade, rise or {}, chase if chase is not None else {}, bg)
         elif kind == "chase":                       # Porings, Drops, Poporings e Marins fugindo de um cavaleiro
             self.draw_chase(k, box, fade, chase if chase is not None else {}, bg)
         elif kind == "diamonds":                    # o "Intocável": diamantes brilhando no vidro
@@ -3958,10 +4363,17 @@ class DpsApp:
         elif tab == "xp":
             rows = self.xp_rows(self.combat())[:n]
         else:
-            tg = snap["targets"]
-            top = tg[0]["total"] if tg else 1
+            # MVPs primeiro, depois os monstros chefes, depois o resto, cada grupo pelo dano (meter.target_rank): com a
+            # aura vermelha os MVPs tomam 1% do dano e ficavam no fim da lista, fora da tela; a roda do mouse rola
+            tg = sorted(snap["targets"], key=lambda g: (g.get("rank", 2), -g["total"]))
+            top = max([g["total"] for g in tg] + [1])
             total = snap["my_total"] or 1
-            for g in tg[:n]:
+            key = (snap.get("start"), self.cfg["session"], self.enc_back)
+            if key != self.target_key:          # outra luta: a lista volta para o começo (os MVPs à vista)
+                self.target_key, self.target_scroll = key, 0
+            first = max(0, min(self.target_scroll, len(tg) - n))
+            self.target_scroll, self.target_view = first, (first, n, len(tg))
+            for g in tg[first:first + n]:
                 rows.append(dict(label=g["name"], value=num(g["total"]),
                                  right="%.0f%%" % (g["total"] * 100.0 / total),
                                  frac=g["total"] / (top or 1), me=True))
@@ -4003,8 +4415,8 @@ class DpsApp:
             if r.get("pin"):                   # botão direito na linha: fixar, ocultar...
                 self.hits.insert(0, (("row", r["pin"]), (x0, y, x1, y1)))
             y += ROW_H * s
-        first, shown, total = self.drop_view if tab == "drops" else (0, 0, 0)
-        if total > shown > 0:                  # barrinha de rolagem: tem mais itens (roda do mouse)
+        first, shown, total = {"drops": self.drop_view, "targets": self.target_view}.get(tab, (0, 0, 0))
+        if total > shown > 0:                  # barrinha de rolagem: tem mais linhas (roda do mouse)
             top_y, h = self.rows_y0() * s, shown * ROW_H * s - 3 * s
             c.create_line(W - 4 * s, top_y, W - 4 * s, top_y + h, fill=t["track"], width=max(2, int(2 * s)))
             a = top_y + h * first / total
@@ -4504,7 +4916,7 @@ class DpsApp:
                 c.itemconfigure("hover_%s_bg" % key, fill=shade(base, 0.12))
         cursor = ""
         if tgt:
-            cursor = {"btn": "hand2", "tab": "hand2", "fav": "hand2", "ping": "hand2",
+            cursor = {"btn": "hand2", "tab": "hand2", "fav": "hand2", "ping": "hand2", "session_x": "hand2",
                       "grip": "size_nw_se"}.get(tgt[0], "")
         c.configure(cursor=cursor)
 
@@ -4528,6 +4940,9 @@ class DpsApp:
             xp.keep_level(cb, self.cfg)          # a posição no nível não volta para trás com os abates apagados
             cb.reset()
         self.enc_back = 0
+        # começar a contar de novo também tira da frente os resumos do que já passou (o da sessão e o da luta)
+        self.close_session_card()
+        self.summary_card = None
         self.dirty = True
 
     def toggle_session(self):
@@ -5183,6 +5598,8 @@ class DpsApp:
                 self.dirty = True
             elif not moved and self.press_target and self.press_target[0] == "summary":
                 self.open_summary()
+            elif not moved and self.press_target and self.press_target[0] == "session_x":
+                self.close_session_card()
             elif not moved and self.press_target and self.press_target[0] == "session":
                 self.open_session()
             elif not moved and self.press_target and self.press_target[0] == "fxcard":
@@ -5207,7 +5624,7 @@ class DpsApp:
             self.popup(self.boss_menu, e.x_root, e.y_root)
         elif tgt and tgt[0] == "summary":
             self.popup(self.summary_menu, e.x_root, e.y_root)
-        elif tgt and tgt[0] == "session":
+        elif tgt and tgt[0] in ("session", "session_x"):
             self.popup(self.session_menu, e.x_root, e.y_root)
         elif tgt and tgt[0] == "ping":
             self.popup(self.ping_menu, e.x_root, e.y_root)
@@ -5221,12 +5638,18 @@ class DpsApp:
     def on_wheel(self, e):
         if e.state & 0x4:                                   # Ctrl
             self.set_scale(self.cfg["scale"] * (1.08 if e.delta > 0 else 1 / 1.08))
-        elif self.cfg["tab"] == "drops":                    # rola a lista de itens (3 por "clique" da roda)
-            first, shown, total = self.drop_view
+        elif self.cfg["tab"] in ("drops", "targets"):      # rola a lista de itens ou de alvos (3 por "clique")
+            drops = self.cfg["tab"] == "drops"
+            # a posição pedida (não a do último desenho): girando rápido, vários cliques antes de redesenhar somam
+            first = self.drop_scroll if drops else self.target_scroll
+            _drawn, shown, total = self.drop_view if drops else self.target_view
             step = DROP_SCROLL_ROWS * max(1, abs(e.delta) // 120)
             new = max(0, min(total - shown, first + (-step if e.delta > 0 else step)))
             if new != first:
-                self.drop_scroll = new
+                if drops:
+                    self.drop_scroll = new
+                else:
+                    self.target_scroll = new
                 self.dirty = True
 
 

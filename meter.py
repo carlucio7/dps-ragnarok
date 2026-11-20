@@ -223,6 +223,19 @@ def rathena_mvp(mob_id):
     return _rathena_mvp.get(mob_id)
 
 
+_rathena_boss = {}
+
+
+def rathena_boss(mob_id):
+    """Monstro da classe chefe pela base do rAthena (True/False; os MVPs também são), ou None quando o monstro não
+    está lá."""
+    if not _rathena_boss:
+        _rathena_boss.update({int(k): v.get("c") == "Boss"
+                              for k, v in (_load("rathena.json").get("mobs") or {}).items()})
+        _rathena_boss.setdefault(-1, False)
+    return _rathena_boss.get(mob_id)
+
+
 STATUSES = _load("status.json")
 EFST = _load("efst.json")             # id -> nome interno e skills que aplicam (gerado do rAthena)
 ITEMS = _load("item.json")
@@ -826,6 +839,21 @@ class Combat:
 
     def counts_target(self, aid):
         return self.targets != "mvp" or self.is_mvp(aid)
+
+    def target_rank(self, aid):
+        """A ordem da aba Alvos (o usuário, 2026-11-20: "MVPs > Monstros chefes > Monstros normais", como um
+        favorito automático): 0 MVP (e boneco de treino, is_mvp), 1 monstro chefe (marca 1 no pacote de aparecer;
+        sem marca, a do mesmo monstro em outro pacote ou a classe dele no rAthena), 2 o resto. Num mapa de muita vida
+        os MVPs com a aura vermelha tomam 1% do dano e iam para o fim da lista, fora da tela (Laboratório Central)."""
+        if self.is_mvp(aid):
+            return 0
+        e = self.entities.get(self.alias.get(aid, aid))
+        if e is None or e.kind != "mob":
+            return 2
+        mark = e.boss if e.boss is not None else self.job_marks.get(e.job)
+        if mark is None:
+            mark = 1 if rathena_boss(e.job) else 0
+        return 1 if mark else 2
 
     def target_name(self, aid):
         n = self.phases.get(aid, 0)
@@ -2019,7 +2047,7 @@ class Combat:
             dps_now=self.dps_now() if live else 0.0,
             group_total=group_total if rows else 0,
             players=players, skills=skill_rows,
-            targets=[dict(name=self.target_name(a), total=v) for a, v in targets],
+            targets=[dict(name=self.target_name(a), total=v, rank=self.target_rank(a)) for a, v in targets],
             target=self.target_name(main_target) if main_target else "",
         )
 

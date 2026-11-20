@@ -125,6 +125,17 @@ betel = c.snapshot(encs[2])
 check(betel["my_total"] == 6000 and betel["target"] == "Betelgeuse ★ (2 fases)",
       "fases somadas: %s / %s" % (betel["my_total"], betel["target"]))
 check(betel["duration_ms"] == 20000 - 12000, "troca de fase fora do tempo: %d ms" % betel["duration_ms"])
+# aba Alvos: MVPs > monstros chefes > comuns, cada grupo pelo dano (o MVP com a aura vermelha toma 1% do dano e ficava
+# no fim da lista; Laboratório Central, 2026-11-20)
+rank_events = [(0, fr.spawn(70001, "mob", 1127, "Hode")), (0, fr.spawn(70002, "mob", 1791, "Galion", boss=1)),
+               (0, fr.spawn(70003, "mob", 1785, "Atroce", boss=True)), (0, fr.spawn(70004, "mob", 1127, "Hode")),
+               (1000, fr.skill_damage(ME, 70001, 1000)), (1200, fr.skill_damage(ME, 70002, 500)),
+               (1400, fr.skill_damage(ME, 70003, 10)), (1600, fr.skill_damage(ME, 70004, 700))]
+rank_snap = combat_of(fr.build(ME, rank_events)[0]).snapshot(session=True)
+rank_order = [(g["rank"], g["total"]) for g in sorted(rank_snap["targets"], key=lambda g: (g["rank"], -g["total"]))]
+check(rank_order == [(0, 10), (1, 500), (2, 1000), (2, 700)] and meter.rathena_boss(1791) is True
+      and meter.rathena_boss(1127) is False and meter.rathena_boss(9999999) is None,
+      "aba Alvos: MVP (10) > chefe (500) > comuns pelo dano (1000, 700) -> %s" % rank_order)
 sess = c.snapshot(session=True)
 check(sess["my_total"] == 6155, "sessao soma tudo -> %d" % sess["my_total"])
 check(sess["duration_ms"] == 1000 + 1000 + 8000 + 1000, "sessao usa so tempo em combate -> %d" % sess["duration_ms"])
@@ -1851,6 +1862,49 @@ check([h["key"] for h in hl_s][:1] == ["levelup"] and hl_s[0]["fx"] == "confetti
       and session.place("ve_fild07") == "ve_fild07" and session.subtitle(cs_, {"session_fields": ["xp"]}) == "",
       "resumo da sessão: o destaque vira o título (Subiu de nível, com confete); o subtítulo diz onde caçou; a "
       "instância aparece pelo nome do jogo -> %s / %s" % ([h["key"] for h in hl_s], sub_s))
+# nível máximo: chegar ao 250 numa 4ª classe (a gravação de teste é de um Mestre Celestial) vira o "Nível máximo", na
+# frente de tudo e sem o "Subiu de nível"; desligado na aba Cartões, volta o "Subiu de nível"
+cs_max = combat_of(fr.build(ME, ep + [(670000, fr.hp(250, rrf.SP_BASELEVEL))], xp=(7212, 0, 10 ** 9))[0])
+hl_max = session.highlights(cs_max, {})
+hl_max_off = [h["key"] for h in session.highlights(cs_max, {"session_hl_off": ["maxlevel"]})]
+check([h["key"] for h in hl_max][:1] == ["maxlevel"] and "levelup" not in [h["key"] for h in hl_max]
+      and hl_max[0]["rise"]["level"] == 250 and hl_max[0]["rise"]["prev"] == 249 and hl_max[0]["fx"] == "maxlevel"
+      and hl_max_off[:1] == ["levelup"] and [h["key"] for h in hl_s][:1] == ["levelup"]
+      and xpmod.max_level(4302) == 250 and xpmod.max_level(4054) == 200 and xpmod.max_level(1) == 99
+      and xpmod.max_level(99999) is None and "maxlevel" in session.SHORT_OK and session.HL_KEYS[0] == "maxlevel",
+      "resumo da sessão: chegar ao nível máximo da classe (250 na 4ª classe) vira o \"Nível máximo\", na frente e sem "
+      "o \"Subiu de nível\"; desligado, volta o \"Subiu de nível\" -> %s" % [h["key"] for h in hl_max])
+# o nível máximo de cada tipo de classe (conferido nas 257 gravações em 2026-11-20: quem grava e os outros jogadores
+# têm sempre o código da classe; montado, só as opções mudam, então os códigos de montaria do cliente não aparecem)
+MAX_BY_KIND = {99: [0, 1, 7, 10, 13, 23, 24, 25, 4001, 4008, 4011, 4014, 4023, 4030, 4045, 4046, 4047, 4048, 4049,
+                    4222, 4225, 4228],
+               200: [4054, 4060, 4064, 4080, 4096, 4190, 4191, 4211, 4212, 4215, 4218, 4220, 4223, 4229, 4239, 4240,
+                     4241, 4243],
+               250: [4252, 4253, 4258, 4262, 4278, 4302, 4303, 4304, 4305, 4306, 4307, 4308, 4316]}
+wrong_max = {j: xpmod.max_level(j) for top, jobs in MAX_BY_KIND.items() for j in jobs if xpmod.max_level(j) != top}
+check(not wrong_max, "nível máximo por tipo de classe: 99 (1ª, 2ª, trans, bebê, Super Aprendiz, Justiceiro, Ninja, "
+      "Taekwon, Mestre Taekwon, Espiritualista), 200 (3ª, 3ª trans e bebê, expandidas, Doram), 250 (4ª e 4ª expandida)"
+      " -> erradas: %s" % wrong_max)
+# o exemplo do "Nível máximo" na prévia da aba Cartões: sobe do 249 para o 250 com a XP desse nível, sem "Nível agora"
+# e "Próximo nível" (o exemplo comum dizia "Subiu de nível: 96 → 97" e 2,9M embaixo de "Nível 250")
+ex_max = [t for t, _c in session.sample_card_for({"session_fields": ["xp", "levels", "level_now", "eta", "kills"]},
+                                                  "maxlevel")["lines"]]
+ex_up = [t for t, _c in session.sample_card_for({"session_fields": ["levels", "level_now"]}, "levelup")["lines"]]
+check(len(ex_max) == 3 and "249 → 250" in ex_max[1] and "170B" in ex_max[0] and ex_max[2].startswith("Abates")
+      and len(ex_up) == 2 and "96 → 97" in ex_up[0],
+      "prévia do \"Nível máximo\": o exemplo sobe do 249 para o 250 com a XP desse nível, sem o nível agora e o "
+      "próximo nível; os outros destaques seguem com o exemplo comum -> %s / %s" % (ex_max, ex_up))
+# a prévia de uma informação: o cartão de exemplo com a linha dela acesa (a marcada no lugar dela; a desmarcada entra
+# na ordem do cartão, para ver como ficaria); a duração vai no subtítulo
+cfg_inf = {"session_fields": ["duration", "xp", "kills", "deaths"]}
+in_on, in_off = session.sample_card_info(cfg_inf, "kills"), session.sample_card_info(cfg_inf, "xp_hour")
+in_dur = session.sample_card_info({"session_fields": ["xp"]}, "duration")
+check(in_on["focus"] == 1 and in_on["lines"][1][0].startswith("Abates") and not in_on["focus_off"]
+      and len(in_on["lines"]) == 3 and in_off["focus"] == 1 and in_off["lines"][1][0].startswith("XP por hora")
+      and in_off["focus_off"] and len(in_off["lines"]) == 4 and in_dur["focus"] == "sub" and in_dur["focus_off"]
+      and "ve_fild07" in in_dur["sub"] and in_on["hl"],
+      "prévia de uma informação: o exemplo com a linha dela acesa, marcada ou não (a duração no subtítulo) -> %s / %s"
+      % ([t for t, _c in in_on["lines"]], [t for t, _c in in_off["lines"]]))
 # recordes: a primeira gravação só marca; outra com um golpe maior bate o recorde; contada de novo, continua batendo
 # (compara com o de antes dela)
 ep_hit = []
@@ -3108,6 +3162,36 @@ xpmod.carry_from(c_d, c_a, {})
 check(pace_c and abs(pace_c - pace_a) / pace_a < 0.1 and xpmod.recent_parts(c_d, {})[1:] == (0.0, 0.0),
       "XP: reiniciar duas vezes seguidas mantém o ritmo; com 10 min de farm na nova, a anterior sai da conta -> %s"
       % (pace_c and round(pace_c, 1)))
+
+# o Milagre dobra a XP quando liga e quando acaba: o ritmo dos últimos 10 min vê a mudança na hora, não 10 min depois
+# (um jogador subiu para o 250 uns 8 min depois do previsto: o Milagre acabou 14 min antes da subida, 2026-11-19)
+def farm_miracle(extra=(), date=(2026, 11, 19, 21, 0, 0), first=0):
+    ev = list(extra)
+    for i in range(73):                                                 # um abate a cada 10 s por 12 min
+        aid = 56000 + first + i
+        ev += [(i * 10000 + 2000, fr.spawn(aid, "mob", 1124, "Goblin")),
+               (i * 10000 + 2300, fr.skill_damage(ME, aid, 5000)), (i * 10000 + 2400, fr.vanish(aid, 1))]
+    return combat_of(fr.build(ME, sorted(ev, key=lambda e: e[0]), date=date, xp=(7320, 1000, 10 ** 9))[0])
+
+
+MIR_ON = fr.status(ME, meter.MIRACLE_EFST, True, 3600000, 3600000, 1)
+m_plain = farm_miracle()
+m_ended = farm_miracle([(1000, MIR_ON), (480000, fr.status(ME, meter.MIRACLE_EFST, False))])    # acabou aos 8 min
+m_began = farm_miracle([(480000, MIR_ON)])                                                    # ligou aos 8 min
+p_plain, p_ended, p_began = (xpmod.recent_pace(m_plain, {}), xpmod.recent_pace(m_ended, {}),
+                             xpmod.recent_pace(m_began, {}))
+check(p_plain and abs(p_ended / p_plain - 1.0) < 1e-6 and abs(p_began / p_plain - 2.0) < 1e-6
+      and abs(xpmod.time_to_level(m_ended, {})[0] / xpmod.time_to_level(m_plain, {})[0] - 1.0) < 0.02,
+      "XP: o Milagre que acabou (ou ligou) no meio dos últimos 10 min muda o ritmo do \"Até o próximo nível\" na hora "
+      "-> %.2f e %.2f do ritmo sem Milagre" % (p_ended / p_plain, p_began / p_plain))
+m_a = farm_miracle([(1000, MIR_ON)])                                    # com Milagre até o fim...
+m_b = combat_of(fr.build(ME, [(60000, fr.spawn(56900, "mob", 1124, "Goblin")),
+                              (60300, fr.skill_damage(ME, 56900, 5000)), (60400, fr.vanish(56900, 1))],
+                         date=(2026, 11, 19, 21, 12, 32), xp=(7320, 1000 + 73 * 68, 10 ** 9))[0])   # ...e a nova sem
+xpmod.carry_from(m_b, m_a, {})
+check(abs(xpmod.recent_pace(m_b, {}) * 2.0 / xpmod.recent_pace(m_a, {}) - 1.0) < 0.05,
+      "XP: reiniciou e o Milagre não veio junto: o ritmo que veio da gravação anterior cai para a metade -> %.2f"
+      % (xpmod.recent_pace(m_b, {}) / xpmod.recent_pace(m_a, {})))
 
 # o aviso de calibrar voltava depois de reiniciar (relato de um jogador no clock_01, 2026-11-19): a gravação começava
 # na cidade e a medida ficava sem mapa; o jogo leva 1,5 a 3 min para parar e começar outra (o limite era 1 min); e o

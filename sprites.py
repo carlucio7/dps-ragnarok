@@ -1306,6 +1306,11 @@ TRAP_ART = "트랩.bmp"                                       # o item Armadilha
 ITEM_ICON = "data\\texture\\유저인터페이스\\item\\"         # ícones pequenos (24 × 24) dos itens
 CARD_ART = "data\\texture\\유저인터페이스\\cardbmp\\"      # as ilustrações das cartas (300 × 400, a carta inteira)
 CARD_TABLE = "data\\num2cardillustnametable.txt"          # carta -> nome do arquivo da ilustração ("4147#바포메트카드#")
+# texturas soltas de efeito do jogo, do cartão "Nível máximo": o anjo da subida de nível, o anel difuso (a aura), a
+# estrelinha azul e o brilho redondo
+FX_TEX = "data\\texture\\effect\\"
+RISE_TEX = {"angel": FX_TEX + "angel.bmp", "ring": FX_TEX + "ring_b.bmp", "star": FX_TEX + "pika001.bmp",
+            "light": FX_TEX + "light.bmp"}
 MOB_IDLE, MOB_WALK, MOB_ATTACK, MOB_HURT, MOB_DIE = 0, 1, 2, 3, 4   # ações dos .act dos monstros
 ANIM_FRAMES = 16              # a animação de um monstro usa no máximo estes quadros (pula os do meio)
 
@@ -1321,21 +1326,35 @@ def crop(w, h, px):
 
 
 def resize(w, h, px, tw, th):
-    """Redimensiona para tw x th: média de alguns pontos por pixel ao reduzir, vizinho mais próximo ao ampliar."""
+    """Redimensiona para tw x th: média de alguns pontos por pixel ao reduzir, vizinho mais próximo ao ampliar.
+    Os pontos de cada coluna e de cada linha saem uma vez só, e os transparentes (que somam zero) são pulados: o mesmo
+    resultado, pixel a pixel, de quando a conta era refeita em cada ponto (a carta de MVP levava ~0,9 s no primeiro
+    quadro da cena)."""
     n = max(1, min(4, int(-(-max(w / float(tw), h / float(th)) // 1))))
+    cols = [[min(w - 1, int((x + (i + 0.5) / n) * w / tw)) for i in range(n)] for x in range(tw)]
+    rows = [[min(h - 1, int((y + (j + 0.5) / n) * h / th)) * w for j in range(n)] for y in range(th)]
+    zero = (0, 0, 0, 0)
     out = []
-    for y in range(th):
-        for x in range(tw):
+    add = out.append
+    if n == 1:                                  # um ponto por pixel: o vizinho mais próximo
+        for (base,) in rows:
+            for (x,) in cols:
+                pr, pg, pb, pa = px[base + x]
+                add((pr, pg, pb, pa) if pa else zero)
+        return out
+    nn = n * n
+    for ys in rows:
+        for xs in cols:
             r = g = b = a = 0
-            for j in range(n):
-                sy = min(h - 1, int((y + (j + 0.5) / n) * h / th))
-                for i in range(n):
-                    pr, pg, pb, pa = px[sy * w + min(w - 1, int((x + (i + 0.5) / n) * w / tw))]
-                    r += pr * pa
-                    g += pg * pa
-                    b += pb * pa
-                    a += pa
-            out.append((r // a, g // a, b // a, a // (n * n)) if a else (0, 0, 0, 0))
+            for base in ys:
+                for x in xs:
+                    pr, pg, pb, pa = px[base + x]
+                    if pa:
+                        r += pr * pa
+                        g += pg * pa
+                        b += pb * pa
+                        a += pa
+            add((r // a, g // a, b // a, a // nn) if a else zero)
     return out
 
 
@@ -1348,17 +1367,23 @@ def bmp_rgba(data):
     flip, h = h > 0, abs(h)
     stride = ((w * bpp + 31) // 32) * 4
     px = []
+    if w <= 0 or h <= 0:
+        return w, h, px
+    if bpp not in (8, 24):
+        raise ValueError("bmp de %d bits" % bpp)
+    # uma linha inteira de uma vez (antes, pixel a pixel: as cartas da "Mão de cartas" levavam ~0,1 s cada)
+    lut = [(r, g, b, 0 if (r > 240 and g < 16 and b > 240) else 255) for r, g, b in pal]
+    size = w if bpp == 8 else 3 * w
     for y in range(h):
         start = off + (h - 1 - y if flip else y) * stride
-        row = data[start:start + stride]
-        for x in range(w):
-            if bpp == 8:
-                r, g, b = pal[row[x]]
-            elif bpp == 24:
-                b, g, r = row[3 * x:3 * x + 3]
-            else:
-                raise ValueError("bmp de %d bits" % bpp)
-            px.append((r, g, b, 0 if (r > 240 and g < 16 and b > 240) else 255))
+        row = data[start:start + size]
+        if len(row) < size:
+            raise ValueError("bmp cortado")
+        if bpp == 8:
+            px.extend([lut[v] for v in row])
+        else:
+            px.extend([(r, g, b, 0 if (r > 240 and g < 16 and b > 240) else 255)
+                       for b, g, r in zip(row[0::3], row[1::3], row[2::3])])
     return w, h, px
 
 
@@ -1396,7 +1421,8 @@ class Bestiary:
     Só lê o que for pedido, e guarda."""
 
     def __init__(self, grf_path):
-        self.grf = Grf(grf_path, prefixes=(MONSTER, LUA, ITEM_ART, ITEM_ICON, EFFECT_SPR, CARD_ART, CARD_TABLE))
+        self.grf = Grf(grf_path, prefixes=(MONSTER, LUA, ITEM_ART, ITEM_ICON, EFFECT_SPR, CARD_ART, CARD_TABLE)
+                       + tuple(RISE_TEX.values()))
         self._cards = None            # carta -> nome da ilustração (lido na primeira carta pedida)
 
         def table(name, glob):
@@ -1488,6 +1514,23 @@ class Bestiary:
                 try:
                     img = bmp_rgba(raw)
                 except Exception:  # noqa: BLE001 - imagem estranha: fica sem a ilustração
+                    img = None
+            self.cache[key] = img
+        return self.cache[key]
+
+    def effect_tex(self, name):
+        """Uma das texturas soltas de efeito do jogo (RISE_TEX: "angel", "ring", "star", "light"): (w, h, bytes BGRA de
+        cima para baixo; o magenta do jogo já transparente) ou None."""
+        key = ("fx", name)
+        if key not in self.cache:
+            path = RISE_TEX.get(name)
+            raw = self.grf.read(path) if path else None
+            img = None
+            if raw:
+                try:
+                    import streffect
+                    img = (streffect.tga_bgra if path.lower().endswith(".tga") else streffect.bmp_bgra)(raw)
+                except Exception:  # noqa: BLE001 - textura estranha: a cena desenha a sua
                     img = None
             self.cache[key] = img
         return self.cache[key]
