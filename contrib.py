@@ -336,10 +336,13 @@ def _apply_skills(efst):
 
 def appliers(c, x, efst):
     """[(início, fim, quem pôs ou None)] dos trechos de um efeito no chefe: quem usou a skill que põe o efeito
-    logo antes de ele aparecer (uso, conjuração ou golpe da skill)."""
+    logo antes de ele aparecer (uso, conjuração ou golpe da skill). Sem o uso à vista, o único do grupo cuja classe
+    tem a skill: o Pólen nasce quando o chefe pisa no Florescer, que o Magus pôs bem antes (num Betelgeuse de amigo
+    os 81M do Pólen ficavam "sem dono" e o Magus, com 4 mil)."""
     sk = _apply_skills(efst)
     acts = sorted([(u[0], u[2]) for u in c.uses if u[4] in sk] + [(u[0], u[2]) for u in c.casts if u[4] in sk]
                   + [(h.t, h.src) for h in c.hits if h.out and h.skill in sk])
+    able = [a for a in x.party if dd.JOB_SKILLS.get(dd.job_id(c, a), set()) & sk]
     before, after = APPLY_WINDOW
     out = []
     for p in x.phases:
@@ -348,6 +351,8 @@ def appliers(c, x, efst):
             for t, a in acts:
                 if s - before <= t <= s + after:
                     who = a
+            if who is None and len(able) == 1:
+                who = able[0]
             out.append((s, e, who, v))
     return out
 

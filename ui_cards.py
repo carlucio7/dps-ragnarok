@@ -18,6 +18,7 @@ import tkinter as tk
 from tkinter import ttk
 
 import cards
+import class_scenes
 import clientdata
 import itemping
 import meter
@@ -35,6 +36,7 @@ ALL = "Todos os tipos"
 SYS_SOUNDS = {"miracle": ("miracle_sound", "miracle_volume", "chime"), "fusion": ("fusion_sound", "fusion_volume", "beep"),
               "rec": ("rec_sound", "fusion_volume", "beep"), "ping": ("ping_sound", "ping_volume", "ping")}
 BETEL, AQUILA, AQUILA_OVER, PORING = 20994, 21531, 21588, 1002
+ATROCE = 1785                 # o "Curar" do monstro (dano que vira cura), como no Laboratório Central
 PREVIEW_TRIES = 12            # redesenhos enquanto os desenhos do jogo carregam
 TICK_MS = 150                 # a prévia anima a esse passo enquanto a aba está à vista
 IDLE_MS = 700                 # ...e confere com essa calma quando não está
@@ -82,7 +84,7 @@ class CardPreview(tk.Canvas):
         p.hits, p.hover, p.phase, p.sprite_photos = [], None, 0, {}
         p.tracker_rows, p.tracker_n, p.pinned_fx = [], 0, {}
         p.fx_cards, p.fx_closed, p.fx_now = [], set(), []
-        p.death_card = p.boss_card = p.ping_card = p.summary_card = p.session_card = None
+        p.death_card = p.boss_card = p.ping_card = p.summary_card = p.session_card = p.follow_offer = None
         p.miracle_at = -1e9
         self.what = ("trackers", None)
         self.rows, self.pinned, self.fx, self.extra_pin = [], {}, [], None
@@ -187,6 +189,8 @@ class CardPreview(tk.Canvas):
             return "boss", dict(name=betel, mech="relief", souls=6, pct=90, sprite=("mob", BETEL))
         if key == "def_break":
             return "boss", dict(name=aquila, mech="def_break", sprite=("mob", AQUILA_OVER))
+        if key == "damage_heal":
+            return "boss", dict(name=self.mob_name(ATROCE, "Atroce"), mech="heal_phys", sprite=("mob", ATROCE))
         if key == "summary":
             return "summary", dict(key=0, sprite=("mob", BETEL), name=betel, killed=True, ms=154000, share=0.231,
                                    rank=2, players=7, grave=1, warn=2,
@@ -200,6 +204,9 @@ class CardPreview(tk.Canvas):
             return "ping", dict(kind="drop", ref=None, item=item, name=meter.item_name(item), count=1,
                                 map="prt_fild08", x=123, y=45, mob=self.mob_name(PORING, "Poring"), secs=12.0,
                                 sprite=("item", item, art) if art else None)
+        if key == "follow":
+            return "follow", dict(path="RagnarokReplay_0121.rrf", name="RagnarokReplay_0121.rrf",
+                                  current="RagnarokReplay_0098.rrf")
         if key == "death":
             meteor, judge = meter.skill_name(83), meter.skill_name(0)
             src = [dict(source=betel, skill=meteor, element="Fire", dmg=121410, hits=2, killing=True, job=BETEL,
@@ -296,7 +303,7 @@ class CardPreview(tk.Canvas):
         p = self.p
         now = time.time()
         self.sync()
-        p.death_card = p.boss_card = p.ping_card = p.summary_card = p.session_card = None
+        p.death_card = p.boss_card = p.ping_card = p.summary_card = p.session_card = p.follow_offer = None
         p.miracle_at = -1e9
         kind, key = self.what
         el = (now - self.started) * 1000.0
@@ -341,15 +348,18 @@ class CardPreview(tk.Canvas):
                         if clientdata.NAMES.grf:
                             sprites.MONSTERS.start(clientdata.NAMES.grf)
                             sprites.LOADER.start(clientdata.NAMES.grf)
+                            class_scenes.KIT.start(clientdata.NAMES.grf)
                     p.session_card = (data, now - self.session_k())
                 elif shape == "ping":
                     p.ping_card = (data, now - 0.01)
+                elif shape == "follow":
+                    p.follow_offer = data
             spec = (data or {}).get("sprite")
         p.t = p.theme()
         self.delete("all")
         self.configure(bg=p.t["bg"])
         self.backdrop(self.foot_text(key) if foot else None)
-        card_up = shape in ("death", "boss", "summary", "session", "ping") or bool(p.fx_now)
+        card_up = shape in ("death", "boss", "summary", "session", "ping", "follow") or bool(p.fx_now)
         try:
             if not card_up:
                 p.draw_pins(None)
@@ -369,6 +379,8 @@ class CardPreview(tk.Canvas):
                 p.draw_session_card()
             elif shape == "ping":
                 p.draw_ping_card()
+            elif shape == "follow":
+                p.draw_follow_card()
             if shape == "death" and p.cfg.get("pins"):          # o resumo da morte cobre o DPS: a faixa fica acima
                 p.draw_pins(None, top=self.mod.TOP_Y + 14)
         except Exception:  # noqa: BLE001 - a prévia é um extra: um erro nela não derruba a aba
@@ -792,6 +804,9 @@ class CardsTab:
                     name = next((n for k, n, _w in session.HIGHLIGHTS if k == key), None)
                     if name:
                         self.pv_title.configure(text=_("Prévia: %s") % _(name))
+                        # quando aparece (e, nas versões dos cartões de classe, a animação): na lista ele fica cortado
+                        self.mode_text.configure(text=session.hl_text(key)[1])
+                        self.mode_text.pack(fill="x", pady=(0, 6), before=self.pv_scroll.canvas.master)
                 elif info:
                     data = session.sample_card_info(self.cfg(), info)
                     name = _(dict(session.FIELDS).get(info, info))
@@ -857,14 +872,20 @@ class CardsTab:
         self.win.app.set_fx_show(kind, ident, mode)
 
     def sample_for(self, key):
-        """O cartão de exemplo com o destaque `key` no título; o personagem da cena é o da gravação aberta quando ele
-        é de uma classe de punho (nas lutas) ou sempre, no "Nível máximo" (o cartão de verdade mostra quem grava de
-        qualquer classe)."""
+        """O cartão de exemplo com o destaque `key` no título; o personagem da cena é o da gravação aberta (como no
+        cartão de verdade, que mostra quem grava de qualquer classe); nos cartões de classe, só quando a classe dele
+        serve para o cartão."""
         c = self.win.combat() if hasattr(self.win, "combat") else None
         look = None
-        if c is not None and getattr(c.session, "look", None) and (
-                key == "maxlevel" or getattr(c.session, "job", 0) in session.FIST_JOBS):
+        if c is not None and getattr(c.session, "look", None):
+            job = getattr(c.session, "job", 0)
             look = dict(c.session.look)
+            if not look.get("job"):
+                look["job"] = job
+            if key in session.ROLE_KEYS:      # os cartões de classe: quem grava, se a classe dele serve para o cartão
+                jobs = session.ROLE_JOBS[key][1]
+                if jobs is not None and job not in jobs:
+                    look = None
         try:
             return session.sample_card_for(self.cfg(), key, look)
         except (KeyError, ValueError):
@@ -1190,12 +1211,14 @@ class CardsTab:
         m = self.mod()
         secs = {"death": m.DEATH_CARD_S, "summary": m.SUMMARY_CARD_S, "ping": m.PING_CARD_S,
                 "miracle": m.MIRACLE_BANNER_S, "buff_end": m.ALERT_S, "death_foot": m.ALERT_S}
+        if key == "damage_heal":
+            return _("%d s (o efeito todo)") % m.MECH_SECS["heal_phys"]
         if key in cards.BOSS_KEYS:
             return "%d s" % m.BOSS_CARD_S
         if key in secs:
             return "%d s" % secs[key]
         return {"session": _("até fechar (10 min no máximo)"), "fusion": _("enquanto o HP estiver baixo"),
-                "rec": _("até voltar a gravar")}.get(key, "")
+                "rec": _("até voltar a gravar"), "follow": _("até você escolher")}.get(key, "")
 
     def fill_results(self):
         group = next((g for g in cards.GROUPS if _(g) == self.group.get()), None)

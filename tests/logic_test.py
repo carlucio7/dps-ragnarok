@@ -2330,6 +2330,35 @@ check(mech == [(1000, ABOSS, "maxpain_on"), (6000, ABOSS, "maxpain_off"), (8000,
 check(list(cmx.fight_ends.values()) == [(AQ, 15000)] and any(a[2] == "bossdead" for a in cmx.alerts),
       "fim da luta: a morte do chefe fica anotada para o resumo -> %s" % cmx.fight_ends)
 
+# o "Curar" do monstro (NPC_DAMAGE_HEAL 753, nele mesmo): por 30 s o dano físico (1), mágico (2) ou especial (3) vira
+# cura. O uso chega em dois pacotes iguais (um aviso só); outro monstro que não é chefe, ou o uso em outro, não avisa
+ev = [(0, fr.spawn(ABOSS, "mob", 1785, "Atroce", boss=2)), (0, fr.spawn(MOB, "mob", 1002, "Poring")),
+      (1000, fr.skill_use(ABOSS, ABOSS, 753, level=1)), (1000, fr.skill_use(ABOSS, ABOSS, 753, level=1)),
+      (40000, fr.skill_use(ABOSS, ABOSS, 753, level=2)), (80000, fr.skill_use(ABOSS, ABOSS, 753, level=3)),
+      (90000, fr.skill_use(MOB, MOB, 753, level=1)), (95000, fr.skill_use(ABOSS, ME, 753, level=1)),
+      (99000, fr.skill_damage(ME, ABOSS, 1000, hits=1))]
+chl = combat_of(fr.build(ME, ev)[0])
+heal = [(b["t"], b["mech"], cards.boss_card_key(b)) for b in sorted(chl.boss_alerts.values(), key=lambda b: b["t"])
+        if b.get("mech")]
+check(heal == [(1000, "heal_phys", "damage_heal"), (40000, "heal_magic", "damage_heal"),
+               (80000, "heal_misc", "damage_heal")]
+      and any("dano físico vira cura por 30 s" in a[3] for a in chl.alerts),
+      "Curar do chefe: dano físico, mágico e especial viram aviso (o pacote repetido, uma vez só) -> %s" % heal)
+check(cards.enabled({}, "damage_heal") and not cards.enabled({"cards_off": ["damage_heal"]}, "damage_heal")
+      and not cards.enabled({"alert_boss": False}, "damage_heal"),
+      "Curar do chefe: o cartão liga e desliga na aba Cartões e com os outros avisos do chefe")
+_p114 = r"C:\Gravity\Ragnarok\Replay\RagnarokReplay_0114.rrf"
+if os.path.isfile(_p114):
+    _rf = meter.ReplayFile(_p114)
+    while _rf.poll():
+        pass
+    _h = [(round(b["t"] / 1000.0, 1), b["mech"]) for b in _rf.combat.boss_alerts.values()
+          if (b.get("mech") or "").startswith("heal")]
+    check(_h == [(544.5, "heal_phys"), (587.1, "heal_phys"), (621.8, "heal_phys")],
+          "RagnarokReplay_0114: o Atroce do Laboratório converteu o dano físico em cura 3 vezes -> %s" % _h)
+else:
+    print("pula  RagnarokReplay_0114.rrf (nao encontrado)")
+
 # Aliviar do chefe subindo com as Almas (30% sem nenhuma, +10% por Alma): avisa a partir de 90%, uma vez
 ev = [(0, fr.spawn(ABOSS, "mob", 1038, "Chefe", boss=2))]
 for i, val in enumerate((30, 40, 80, 90, 99, 90, 99, 80, 90)):
@@ -2513,10 +2542,11 @@ with tempfile.TemporaryDirectory() as tmp2:
     cfga = {}
     corr = xpmod.calibrate(rfa.combat, cfga, meter.xp_after)
     esta = xpmod.estimate(rfa.combat, cfga)
-    check(cfga["xp_bonuses"]["server"] == {"on": True, "pct": 200, "auto": True} and corr == 1.0
+    check(xpmod.settings(cfga, rfa.combat)["server"] == {"on": True, "pct": 200.0}
+          and cfga["xp_server_band"] == {"200+": {"on": True, "pct": 200, "auto": True}} and corr == 1.0
           and round(esta["xp"]) == 333 and esta["source"][0] == "medido",
           "XP automática: o evento do servidor (+200%%) sai da XP exata e a lista fecha sozinha -> %s %s" % (
-              cfga.get("xp_bonuses"), corr))
+              cfga.get("xp_server_band"), corr))
     cfgl = {"xp_mode": "lista"}
     xpmod.calibrate(rfa.combat, cfgl, meter.xp_after)
     check("xp_bonuses" not in cfgl, "XP: no modo \"pela lista\" o programa não mexe no evento do servidor")
@@ -2575,7 +2605,8 @@ with tempfile.TemporaryDirectory() as tmp5:
     c5 = xpmod.stored_correction(rf5.combat, cfg5, here5)
     c6 = xpmod.stored_correction(rf5.combat, cfg6, here5)
     c7 = xpmod.stored_correction(rf5.combat, cfg7, here5)
-    check(not cfg5.get("xp_spot") and cfg5["xp_bonuses"]["server"]["pct"] == 50 and abs(c5[0] - 250 / 166.5) < 1e-3
+    check(not cfg5.get("xp_spot") and xpmod.settings(cfg5, rf5.combat)["server"]["pct"] == 50
+          and abs(c5[0] - 250 / 166.5) < 1e-3
           and not cfg6.get("xp_spot") and abs(c6[0] - 250 / 166.5) < 1e-3
           and cfg7["xp_spot"][here5]["pct"] == 20 and abs(c7[0] - 250 / (166.5 * 1.2)) < 1e-3
           and abs(custom - 111 * 1.75) < 1e-6 and 20.0 in xpmod.SPOT_CHOICES and 50.0 in xpmod.SPOT_CHOICES,
@@ -2624,6 +2655,222 @@ check(not same and moved and left == [("1", "b#0")] and cfg_k["xp_learn"]["chang
       and xpmod.predict(old40, 1, "m") == (1.0, "mapa", 1),
       "XP: memória de 30 dias; medida nova 25%% acima das antigas do mapa = o mapa mudou: as antigas dele saem (de "
       "todos os personagens) e a mudança vai para o registro -> %s" % left)
+# proteções da calibração (estudo de 2026-11-21): a medida que discorda das do mapa sem provar a mudança entra junto
+cfg_f = {"xp_corr": {"1": {"samples": [[1.0, 100, "2026-11-01 10:00", "a#0", "mapa_x", 300]]},
+                     "2": {"samples": [[1.02, 100, "2026-11-03 10:00", "c#0", "mapa_x", 300]]}}}
+kept = xpmod._check_change(cfg_f, 1, [1.25, 100, "2026-11-21 10:00", "e#0", "mapa_x", 300], keep=lambda: True)
+left_f = sorted(x[3] for e in cfg_f["xp_corr"].values() for x in e["samples"])
+check(not kept and left_f == ["a#0", "c#0"],
+      "XP: medida que discorda do mapa sem provar a mudança (frágil, replay aberto à mão) não apaga as dele -> %s"
+      % left_f)
+with tempfile.TemporaryDirectory() as tmp:
+    def guard_rec(name, date, exp, events, gid=7300):
+        data, _off = fr.build(ME, events, date=date, xp=(gid, exp, 50000))
+        with open(os.path.join(tmp, name), "wb") as f:
+            f.write(data)
+        rf_ = meter.ReplayFile(os.path.join(tmp, name))
+        rf_.poll(max_bytes=1 << 30)
+        return rf_.combat
+
+    def goblins(base):
+        ev = []
+        for i in range(6):                     # um abate por minuto, de 0:30 a 5:30
+            t, aid = 30000 + i * 60000, base + i
+            ev += [(t - 400, fr.spawn(aid, "mob", 1124, "Goblin")), (t - 100, fr.skill_damage(ME, aid, 5000)),
+                   (t, fr.vanish(aid, 1))]
+        return ev
+    late = guard_rec("tarde.rrf", (2026, 11, 6, 10, 0, 0), 1000,
+                     goblins(53001) + [(60000, fr.status(ME, 250, True, 1800000, 1800000, val1=100))])
+    early = guard_rec("cedo.rrf", (2026, 11, 6, 12, 0, 0), 1000,
+                      goblins(53101) + [(0, fr.status(ME, 250, True, 1800000, 1800000, val1=100))])
+    s_late, s_early = xpmod.timing_sensitivity(late, {}, (0, late.now)), xpmod.timing_sensitivity(early, {}, (0, early.now))
+    check(abs(s_late + 2 / 11.0) < 1e-9 and s_early == 0.0,
+          "XP: manual de +100%% ligando no 1º minuto: com os bônus 2 min depois a lista do trecho cai 2/11 (medida "
+          "frágil); manual já ativo no começo: nada muda -> %.4f %.4f" % (s_late, s_early))
+    xk, mk = xpmod.kills(late)[0][0]["xp"], xpmod._kill_map(late, 0, late.now)
+    guard_rec("tarde2.rrf", (2026, 11, 6, 10, 6, 0), int(1000 + 22 * xk), [])     # 30 s depois: razão 2,0 e 1,83
+    guard_rec("cedo2.rrf", (2026, 11, 6, 12, 6, 0), int(1000 + 22 * xk), [])
+
+    def old_samples(mode="medido"):            # medidas antigas do mapa a ×1,0: deste personagem e de outro
+        return {"xp_mode": mode, "xp_corr": {"7300": {"samples": [[1.0, 500, "2026-11-05 09:00", "velha#0", mk, 300]]},
+                                             "7301": {"samples": [[1.0, 500, "2026-11-05 09:30", "outro#0", mk, 300]]}}}
+
+    def names(cfg):
+        return sorted(x[3] for e in cfg["xp_corr"].values() for x in e["samples"])
+    cf_late, cf_early = old_samples(), old_samples()
+    xpmod._CACHE.clear()
+    xpmod.calibrate(late, cf_late, meter.xp_after)
+    xpmod._CACHE.clear()
+    xpmod.calibrate(early, cf_early, meter.xp_after)
+    check(names(cf_late) == ["outro#0", "tarde.rrf#fim", "velha#0"] and names(cf_early) == ["cedo.rrf#fim"],
+          "XP: medida frágil (manual ligando no meio) que discorda do mapa entra sem apagar as outras; a firme que "
+          "discorda apaga as do mapa (o mapa mudou) -> %s %s" % (names(cf_late), names(cf_early)))
+    calls, real_ds = [], xpmod.detect_server
+    xpmod.detect_server = lambda *a, **k: calls.append(1)
+    try:
+        cf_hand, cf_live = old_samples("auto"), old_samples("auto")
+        xpmod._CACHE.clear()
+        xpmod.calibrate(early, cf_hand, meter.xp_after, live=False)
+        n_hand = len(calls)
+        xpmod._CACHE.clear()
+        xpmod.calibrate(early, cf_live, meter.xp_after)
+    finally:
+        xpmod.detect_server = real_ds
+    check(n_hand == 0 and len(calls) == 1 and names(cf_hand) == ["cedo.rrf#fim", "outro#0", "velha#0"]
+          and names(cf_live) == ["cedo.rrf#fim"],
+          "XP: replay aberto à mão mede, mas não confere o evento do servidor nem apaga as medidas do mapa (de nenhum "
+          "personagem) -> %s" % names(cf_hand))
+# abates de monstros sem XP conhecida (a escolta do MVP de Amicitia, 2026-11-21): poucos não tiram a medida do trecho
+# (cada um entra pela metade do maior abate do trecho); muitos, ou um chefe sem XP conhecida, deixam o trecho sem
+# medida; e um trecho assim não impede mais os outros trechos da gravação de dizerem o evento do servidor
+with tempfile.TemporaryDirectory() as tmp:
+    def kill_ev(t, aid, job, name="", boss=False):
+        return [(t - 400, fr.spawn(aid, "mob", job, name, boss=boss)), (t - 100, fr.skill_damage(ME, aid, 5000)),
+                (t, fr.vanish(aid, 1))]
+
+    def unk_rec(name, n_unk, boss=False):
+        ev = []
+        for i in range(100):                              # 100 Goblins (34 de XP pela lista no 240), um a cada 6 s
+            ev += kill_ev(1000 + i * 6000, 56000 + i, 1124, "Goblin")
+        for j in range(n_unk):                            # cópia invocada que o programa não conhece
+            ev += kill_ev(4000 + j * 6000, 56500 + j, 21999, boss=boss)
+        with open(os.path.join(tmp, name), "wb") as f:
+            f.write(fr.build(ME, sorted(ev, key=lambda e: e[0]), xp=(7310, 1000, 10 ** 9))[0])
+        rf_ = meter.ReplayFile(os.path.join(tmp, name))
+        rf_.poll(max_bytes=1 << 30)
+        return rf_.combat
+    u_recs = [unk_rec("u0.rrf", 0), unk_rec("u1.rrf", 1), unk_rec("u4.rrf", 4), unk_rec("ub.rrf", 1, boss=True)]
+    xpmod._CACHE.clear()
+    lu0, lu1, lu4, lub = [xpmod._list_xp(c_, {}, (0, c_.now)) for c_ in u_recs]
+    check(lu0 and lu1 and abs(lu1 / lu0 - 1.005) < 1e-9 and lu4 is None and lub is None,
+          "XP: 1 abate sem XP conhecida entre 100 não tira a medida (entra pela metade do maior abate: lista ×1,005); "
+          "4 (4%% da lista) ou um chefe sem XP conhecida deixam o trecho sem medida -> %s %s %s %s"
+          % (lu0, lu1, lu4, lub))
+    ev_u = []
+    for i in range(3):                                    # nível 240: 3 Goblins e 2 sem XP conhecida
+        ev_u += kill_ev(1000 + i * 20000, 56600 + i, 1124, "Goblin")
+    for j in range(2):
+        ev_u += kill_ev(11000 + j * 20000, 56650 + j, 21999)
+    ev_u.append((60000, fr.hp(241, rrf.SP_BASELEVEL)))    # subiu (faltavam 204)
+    for i in range(30):                                   # nível 241: 30 Goblins = 1020 pela lista, sem evento
+        ev_u += kill_ev(61000 + i * 20000, 56700 + i, 1124, "Goblin")
+    ev_u.append((661000, fr.hp(242, rrf.SP_BASELEVEL)))   # subiu de novo: o 241 inteiro (3060) = ×3, evento +200%
+    with open(os.path.join(tmp, "dois.rrf"), "wb") as f:
+        f.write(fr.build(ME, sorted(ev_u, key=lambda e: e[0]), date=(2026, 11, 8, 10, 0, 0),
+                         xp=(7320, 1000 - 204, 1000))[0])
+    rf_u = meter.ReplayFile(os.path.join(tmp, "dois.rrf"))
+    rf_u.poll(max_bytes=1 << 30)
+    cfg_u = {"xp_mode": "auto", "xp_levels": {"4302": {"241": 3060}}}
+    xpmod._CACHE.clear()
+    segs_u = xpmod.exact_segments(rf_u.combat, cfg_u)
+    corr_u = xpmod.calibrate(rf_u.combat, cfg_u, meter.xp_after)
+    got_u = [x[3] for x in cfg_u.get("xp_corr", {}).get("7320", {}).get("samples", [])]
+    check(len(segs_u) == 2 and xpmod.settings(cfg_u, rf_u.combat)["server"] == {"on": True, "pct": 200.0}
+          and got_u == ["dois.rrf#1"] and corr_u is not None and abs(corr_u - 1.0) < 1e-9,
+          "XP: o nível com abates sem XP conhecida demais fica sem medida, mas o nível seguinte ainda diz o evento "
+          "(+200%%) e mede ×1,0 -> %s %s %s" % (cfg_u.get("xp_bonuses"), got_u, corr_u))
+check(all(xpmod.MOB_EXP.get(m) and not xpmod.MOB_EXP[m][1] for m in (21048, 21049, 21050, 21051, 20516, 21379, 21589))
+      and xpmod.MOB_EXP.get(21533) == [215, 7798710, 5430080],
+      "XP: as cópias invocadas (escolta de MVP: Quimeras mutantes, Ferus Esqueleto, Sapo de Lava...) entram como sem "
+      "XP, e os monstros do arquivo extra chegam aos dados (Juncea)")
+# medida frágil (bônus ligando no meio do trecho) só vale quando o mapa não tem medida firme (2026-11-22, Amicitia)
+fr_firm = [0.85, 2.7e9, "2026-11-19 23:25", "up.rrf#fim", "amicitia2", 455, 0]
+fr_frag = [0.65, 1.4e9, "2026-11-21 18:26", "aga.rrf#fim", "amicitia2", 344, 1]
+p_both = xpmod.predict({"xp_corr": {"1": {"samples": [fr_firm, fr_frag]}}}, 1, "amicitia2")
+p_only = xpmod.predict({"xp_corr": {"1": {"samples": [fr_frag]}}}, 1, "amicitia2")
+p_old = xpmod.predict({"xp_corr": {"1": {"samples": [fr_firm[:6], fr_frag[:6]]}}}, 1, "amicitia2")
+flags = {x[3]: x[6] for e in list(cf_late["xp_corr"].values()) + list(cf_early["xp_corr"].values())
+         for x in e["samples"] if len(x) >= 7}
+check(p_both == (0.85, "mapa", 1) and p_only == (0.65, "mapa", 1)
+      and abs(p_old[0] - (0.85 * 2.7 + 0.65 * 1.4) / 4.1) < 1e-9
+      and flags.get("tarde.rrf#fim") == 1 and flags.get("cedo.rrf#fim") == 0,
+      "XP: medida frágil fica fora da média do mapa quando há medida firme; sozinha, vale; as guardadas antes (sem a "
+      "marca) contam como firmes; a calibração marca a frágil -> %s %s %s %s" % (p_both, p_only, p_old, flags))
+# no automático os bônus vistos na gravação contam sempre (o amigo tinha desmarcado o Njord e o Cetro, 2026-11-22);
+# a caixa só vale em "Pela lista abaixo"; as medidas são sempre sobre a lista travada
+off_b = {"manual": {"on": False, "pct": 50}, "njord": {"on": False, "pct": 60}, "vip": {"on": True, "pct": 25}}
+cfg_auto_off, cfg_list_off = {"xp_mode": "auto", "xp_bonuses": off_b}, {"xp_mode": "lista", "xp_bonuses": off_b}
+s_auto, s_list = xpmod.settings(cfg_auto_off), xpmod.settings(cfg_list_off)
+xpmod._CACHE.clear()
+la, l_def = xpmod._list_xp(late, cfg_auto_off, (0, late.now)), xpmod._list_xp(late, {}, (0, late.now))
+l_ui = xpmod.estimate(late, dict(cfg_list_off, xp_locked=xpmod.locked(cfg_list_off)), (0, late.now))["kill_xp"]
+l_cal = xpmod._list_xp(late, cfg_list_off, (0, late.now))
+check(s_auto["manual"]["on"] and s_auto["njord"]["on"] and s_auto["vip"]["pct"] == 20 and not s_list["manual"]["on"]
+      and not s_list["njord"]["on"] and s_list["vip"]["pct"] == 25 and la == l_def and l_cal == l_def and l_ui < l_def
+      and xpmod.locked({}) and xpmod.locked({"xp_mode": "medido"}) and not xpmod.locked(cfg_list_off)
+      and xpmod.overridden(cfg_auto_off) and not xpmod.overridden({"xp_mode": "auto"})
+      and not xpmod.overridden(cfg_list_off),
+      "XP: no automático os bônus vistos na gravação contam mesmo desmarcados (e com o %% do jogo); em 'Pela lista "
+      "abaixo' a caixa vale na tela, mas a medida é sempre sobre a lista travada -> %s %s %s %s" % (la, l_def, l_cal,
+                                                                                                   l_ui))
+# faixas de nível (2026-11-22): um Ferreiro abaixo do 100 não mexe no evento, nas medidas nem nos mapas de um
+# Mestre Celestial 230 (e vice-versa); o evento marcado à mão vale para todas as faixas
+import types  # noqa: E402
+lo_c = types.SimpleNamespace(session=types.SimpleNamespace(base_level=90, gid=1))
+hi_c = types.SimpleNamespace(session=types.SimpleNamespace(base_level=247, gid=2))
+cfg_bd = {"xp_bonuses": {"server": {"on": True, "pct": 100}},
+          "xp_server_band": {"<200": {"on": True, "pct": 200, "auto": True}},
+          "xp_corr": {"1": {"band": "<200", "samples": [[1.5, 100, "2026-11-05 10:00", "a#0", "mapa_x", 300],
+                                                         [1.0, 100, "2026-11-05 10:30", "a#1", "mapa_y", 300]]},
+                      "2": {"band": "200+", "samples": [[1.0, 100, "2026-11-05 11:00", "b#0", "mapa_y", 300]]},
+                      "3": {"band": "200+", "samples": [[1.2, 100, "2026-11-05 11:00", "c#0", "mapa_z", 300],
+                                                         [1.0, 100, "2026-11-05 11:30", "c#1", "mapa_y", 300]]}}}
+p_lo = xpmod.predict(cfg_bd, 2, "mapa_x")            # só um personagem de outra faixa mediu: não empresta
+p_hi = xpmod.predict(cfg_bd, 2, "mapa_z")            # outro da mesma faixa mediu: empresta
+moved = xpmod._check_change(cfg_bd, 2, [1.6, 100, "2026-11-06 10:00", "b#9", "mapa_y", 300])
+left_bd = sorted(x[3] for e in cfg_bd["xp_corr"].values() for x in e["samples"])
+check(xpmod.band_of(199) == "<200" and xpmod.band_of(200) == "200+"
+      and xpmod.settings(cfg_bd, lo_c)["server"]["pct"] == 200 and xpmod.settings(cfg_bd, hi_c)["server"]["pct"] == 100
+      and xpmod.settings(cfg_bd)["server"]["pct"] == 100 and p_lo == (1.0, "personagem", 1)
+      and p_hi[1] == "personagens" and abs(p_hi[0] - 1.2) < 1e-9 and moved and left_bd == ["a#0", "a#1", "c#0"],
+      "XP: faixas de nível: o evento deduzido para os abaixo de 200 não vale para o 247; o 247 não usa a medida do "
+      "mapa feita só pelo de nível 90, mas usa a de outro 200+; 'o mapa mudou' apaga só as medidas da faixa -> "
+      "%s %s %s" % (p_lo, p_hi, left_bd))
+with tempfile.TemporaryDirectory() as tmp_b:
+    ev_b = []                                         # 3 Goblins (37 cada pela lista sem evento) e +333 na seguinte
+    for i, aid in enumerate((57001, 57002, 57003)):
+        ev_b += [(i * 300000, fr.spawn(aid, "mob", 1122, "Goblin")), (i * 300000 + 200, fr.skill_damage(ME, aid, 5000)),
+                 (i * 300000 + 400, fr.vanish(aid, 1))]
+    for name, date, exp, events in (("a.rrf", (2026, 11, 5, 19, 35, 0), 1000, ev_b),
+                                    ("b.rrf", (2026, 11, 5, 19, 45, 40), 1000 + 333, [])):
+        with open(os.path.join(tmp_b, name), "wb") as f:
+            f.write(fr.build(ME, events, date=date, xp=(7110, exp, 10 ** 9))[0])
+    rf_b = meter.ReplayFile(os.path.join(tmp_b, "a.rrf"))
+    rf_b.poll(max_bytes=1 << 30)
+    cfg_ev = {"xp_mode": "auto", "xp_bonuses": {"server": {"on": True, "pct": 100}}}
+    xpmod._CACHE.clear()
+    xpmod.calibrate(rf_b.combat, cfg_ev, meter.xp_after)   # nível 240: a XP exata pede +200% (faixa 200+)
+s_lo, s_hi = xpmod.settings(cfg_ev, lo_c)["server"]["pct"], xpmod.settings(cfg_ev, rf_b.combat)["server"]["pct"]
+check(s_hi == 200 and s_lo == 100 and cfg_ev["xp_bonuses"]["server"]["pct"] == 100
+      and cfg_ev["xp_corr"]["7110"]["band"] == "200+"
+      and (cfg_ev.get("xp_learn") or {}).get("server", [{}])[-1].get("band") == "200+",
+      "XP: o evento que a XP exata de um personagem 200+ revela vale para a faixa dele; os abaixo de 200 e o geral "
+      "ficam como estavam -> %s %s %s" % (s_hi, s_lo, cfg_ev.get("xp_server_band")))
+# a conta guardada (estimate) refaz quando o evento da faixa muda: antes a calibração usava a lista com o evento velho
+# logo depois da troca e guardava uma medida errada (×1,55 num jogador)
+xpmod._CACHE.clear()
+cfg_cache = {"xp_mode": "lista", "xp_bonuses": {"server": {"on": True, "pct": 100}}}
+e_100 = xpmod.estimate(rf_b.combat, cfg_cache)["xp"]
+cfg_cache["xp_server_band"] = {"200+": {"on": True, "pct": 200}}
+e_200 = xpmod.estimate(rf_b.combat, cfg_cache)["xp"]
+check(e_100 and abs(e_200 / e_100 - 1.5) < 1e-9,
+      "XP: a XP guardada pela lista é refeita quando o evento da faixa muda (+100%% -> +200%%: ×1,5) -> %s %s"
+      % (e_100, e_200))
+# fora do automático, o aviso quando ele daria um valor muito diferente (AUTO_GAP, 15%)
+mk_late = xpmod._kill_map(late, 0, late.now)
+corr_cfg = {"xp_corr": {"7300": {"samples": [[1.3, 500, "2026-11-06 09:00", "v#0", mk_late, 300]]}}}
+corr_low = {"xp_corr": {"7300": {"samples": [[1.05, 500, "2026-11-06 09:00", "v#0", mk_late, 300]]}}}
+xpmod._CACHE.clear()
+g_auto = xpmod.auto_gap(late, dict(corr_cfg, xp_mode="auto"))
+g_list = xpmod.auto_gap(late, dict(corr_cfg, xp_mode="lista"))
+g_low = xpmod.auto_gap(late, dict(corr_low, xp_mode="lista"))
+g_off = xpmod.auto_gap(late, cfg_list_off)
+g_fix = xpmod.auto_gap(late, {"xp_mode": "fixo", "xp_fixed": 0.0})
+check(g_auto is None and g_list and abs(g_list[0] - 0.30) < 1e-6 and g_low is None and g_off and g_off[0] > 0.15
+      and g_fix and g_fix[0] > 0.15,
+      "XP: fora do automático, aviso quando ele daria 15%% ou mais de diferença (medida ×1,3 do mapa: +30%%; ×1,05: "
+      "nada; manual desmarcado na lista: o automático conta) -> %s %s %s %s"
+      % (g_list and round(g_list[0], 3), g_low, g_off and round(g_off[0], 3), g_fix and round(g_fix[0], 3)))
 # drops no registro: só abates isolados, cada item com a morte dele (o aid volta quando o monstro renasce), separados
 # pelos bônus de drop ativos (Chiclete 252 com o %)
 
@@ -2671,6 +2918,38 @@ check(h_new == "prt_fild08" and h_own is None and h_list is None and h_done is N
       and xpmod.calibration_hint(ch2, {}) is None,
       "XP: aviso de calibrar só em mapa sem medida, depois de 10 min de farm, com a gravação em andamento e no modo "
       "automático -> %s %s %s %s" % (h_new, h_own, h_list, h_done))
+# aviso de medida antiga: nenhuma medida exata na faixa de nível há 2 dias (o evento do servidor pode ter acabado);
+# o personagem do replay de teste é nível 240 (faixa 200+)
+ch.finished = False
+
+
+def _stale_cfg(date, band=None, log=None):
+    e = {"samples": [[1.0, 100, date, "x#0", "prt_fild08", 300]]}
+    if band:
+        e["band"] = band
+    out = {"xp_corr": {"7400": e}}
+    if log:
+        out["xp_learn"] = {"measures": log}
+    return out
+
+
+s_fresh = xpmod.stale_hint(ch, _stale_cfg("2026-10-22 10:00"))          # 13 h antes da gravação
+s_old = xpmod.stale_hint(ch, _stale_cfg("2026-10-19 10:00"))            # 3,5 dias
+s_log = xpmod.stale_hint(ch, _stale_cfg("2026-10-19 10:00", log=[dict(char="7401", level=230, date="2026-10-22 09:00",
+                                                                         ratio=1.0, map="pay_fild01", gain=5)]))
+s_other = xpmod.stale_hint(ch, dict(_stale_cfg("2026-10-19 10:00"), xp_learn={"measures": [
+    dict(char="7401", level=150, date="2026-10-22 09:00", ratio=1.0, map="pay_fild01", gain=5)]}))
+s_list = xpmod.stale_hint(ch, dict(_stale_cfg("2026-10-19 10:00"), xp_mode="lista"))
+s_none = xpmod.stale_hint(ch, {})
+ch.finished = True
+s_done = xpmod.stale_hint(ch, _stale_cfg("2026-10-19 10:00"))
+ch.finished = False
+s_short = xpmod.stale_hint(ch2, _stale_cfg("2026-10-19 10:00"))
+check(s_fresh is None and s_old == 3 and s_log is None and s_other == 3 and s_list is None and s_none is None
+      and s_done is None and s_short is None,
+      "XP: aviso de medida antiga (2 dias sem medida exata na faixa de nível, gravando, 10 min de farm, automático); "
+      "uma medida do registro de outro personagem da mesma faixa conta, a de outra faixa não -> %s"
+      % [s_fresh, s_old, s_log, s_other, s_list, s_none, s_done, s_short])
 # relatório: legível e sem nada pessoal (sem o número do personagem, sem nomes de arquivo)
 import xpreport  # noqa: E402
 cfg_r = {"xp_levels": {"4302": {"200": 653047446}}, "xp_learn": {
@@ -2698,6 +2977,13 @@ check(rows_r and rows_r[0]["t"] == "report" and {"m", "d", "u", "c"} <= {r["t"] 
       and cfg_r["xp_learn"].get("secret"),
       "relatório: bloco de dados no fim, uma linha por registro (medidas, drops, monstros sem XP, mudanças), só o dia "
       "(sem hora), com o sorteio do PC criado se faltava -> %s" % [r["t"] for r in rows_r])
+cfg_ru = {"xp_learn": {"measures": [dict(cfg_r["xp_learn"]["measures"][0], unknown=2)], "unknown": {}, "drops": {},
+                       "changes": [], "server": [], "names": {}}}
+rep_u = xpreport.text(cfg_ru, "9.9.9")
+check("396 (33), 2 sem XP conhecida" in rep_u
+      and any(json.loads(ln[3:]).get("unknown") == 2 for ln in rep_u.splitlines() if ln.startswith("RM|{\"bonus\"")),
+      "relatório: a medida com abates sem XP conhecida diz quantos foram -> %s"
+      % [ln for ln in rep_u.splitlines() if "396" in ln][:1])
 
 
 def _lrn(secret, measures, drops, unknown):
@@ -2877,11 +3163,11 @@ with tempfile.TemporaryDirectory() as tmp9:
     cfg_n = {"xp_bonuses": {"server": {"on": True, "pct": 100}}}
     xpmod.calibrate(rf9.combat, cfg_n, meter.xp_after)
     c_o = xpmod.stored_correction(rf9.combat, cfg_o, here9)
-    check(cfg_o["xp_bonuses"]["server"]["pct"] == 100 and abs(c_o[0] - 1.5) < 1e-3
-          and cfg_n["xp_bonuses"]["server"]["pct"] == 200,
+    check(xpmod.settings(cfg_o, rf9.combat)["server"]["pct"] == 100 and abs(c_o[0] - 1.5) < 1e-3
+          and xpmod.settings(cfg_n, rf9.combat)["server"]["pct"] == 200,
           "XP automática: XP acima da lista num mapa com os outros mapas fechando é coisa do mapa (a correção dele "
           "aprende ×1,5; o evento do servidor fica em 100%%); sem outros mapas medidos, o evento ainda é deduzido "
-          "-> %s %s %s" % (cfg_o["xp_bonuses"]["server"], c_o, cfg_n["xp_bonuses"]["server"]))
+          "-> %s %s %s" % (xpmod.settings(cfg_o, rf9.combat)["server"], c_o, xpmod.settings(cfg_n, rf9.combat)["server"]))
 # Monster Spotlight por monstro (lista do evento de 10/11 a 07/12/2026): no Lago do Abismo 4 só Ferus Esqueleto
 # (20616) e Acidus Esqueleto (20617) rendem +50%; Ferus Roxo (20612) não. O mapa marcado vale só para quem está
 # fora da lista, e desligar o bônus desliga os dois
@@ -3211,7 +3497,9 @@ ck.finished = False
 cq_ = combat_of(fr.build(ME, farm_clock([(500000, fr.quest_done(3477))]), map_name="aldebaran",
                          xp=(7500, 100, 10 ** 9))[0])
 cu_ = combat_of(fr.build(ME, farm_clock([(500000, fr.spawn(55100, "mob", 21999, "")),
-                                         (500300, fr.skill_damage(ME, 55100, 5000)), (500400, fr.vanish(55100, 1))]),
+                                         (500300, fr.skill_damage(ME, 55100, 5000)), (500400, fr.vanish(55100, 1)),
+                                         (520000, fr.spawn(55101, "mob", 21999, "")),     # 2 entre 33: 6% da lista
+                                         (520300, fr.skill_damage(ME, 55101, 5000)), (520400, fr.vanish(55101, 1))]),
                          map_name="aldebaran", xp=(7500, 100, 10 ** 9))[0])
 cq_.finished = cu_.finished = False
 log = {"xp_learn": {"measures": [
@@ -3478,6 +3766,44 @@ try:
     check(first == a_path and second == b_path and picks == ["b.rrf"] * 6 and back == a_path,
           "duas gravações em curso: segue a que começou por último sem pular entre elas, e volta para a outra "
           "quando ela para -> %s" % picks)
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+# --- cartão "Gravação nova": com um replay aberto à mão, o jogo começou a gravar outro ------------
+tmp = tempfile.mkdtemp()
+try:
+    old_p, live_p, new_p, new2_p = (os.path.join(tmp, n) for n in ("velho.rrf", "aovivo.rrf", "nova.rrf", "nova2.rrf"))
+    now = time.time()
+    with open(old_p, "wb") as fh:
+        fh.write(b"x")
+    os.utime(old_p, (now - 3600, now - 3600))                 # um replay antigo, parado
+    with open(live_p, "wb") as fh:                            # uma gravação em curso
+        fh.write(b"x")
+    w = meter.Watcher(tmp, auto=False)
+    w.scan(now)
+    w.open(old_p)                                             # a pessoa abre o antigo à mão
+    first = w.offer(now + 0.2)                                # a que já gravava não é novidade: ela saiu de lá
+    with open(new_p, "wb") as fh:                             # o jogo começa outra gravação
+        fh.write(b"x")
+    w.poll(now + 0.5)
+    offered = w.offered
+    w.skip(new_p)                                             # "Ficar neste"
+    after_skip = w.offer(now + 0.7)
+    with open(new2_p, "wb") as fh:                            # e mais outra: pergunta de novo
+        fh.write(b"x")
+    again = w.offer(now + 1.0)
+    w.follow(again)                                           # "Seguir a nova"
+    followed = (w.pinned, w.file.path if w.file else None)
+    w.poll(now + 1.2)
+    still = w.file.path if w.file else None
+    check(first is None and offered == new_p and after_skip is None and again == new2_p
+          and followed == (False, new2_p) and still == new2_p and w.offered is None and not w.pin_skip,
+          "Gravação nova: com um replay aberto à mão, a gravação que começou depois é oferecida (a que já gravava "
+          "não), 'Ficar neste' não pergunta de novo por ela, a próxima pergunta, e 'Seguir a nova' segue esta -> "
+          "%s" % [first, offered, after_skip, again, followed, still])
+    import cards as cardmod0  # noqa: E402
+    check(cardmod0.enabled({}, "follow") and not cardmod0.enabled({"cards_off": ["follow"]}, "follow"),
+          "Gravação nova: ligado por padrão e desligável na aba Cartões")
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
@@ -3777,6 +4103,245 @@ check(_car.name_of(AJR) == "Alfonso Jr." and rrf.decode_name("알퐁스".encode(
       and rrf.broadcast_arglist(fr.broadcast_list("lGJyDQ", 4300000, 2)) == [("lGJyDQ", ["4300000", "2"])],
       "nome em coreano (sem tradução) vira o da base; português em cp1252 continua; anúncio com vários argumentos "
       "-> %r %r" % (_car.name_of(AJR), _arg2))
+
+# --- cartões de classe e de papel (roles.py) -----------------------------------
+import roles  # noqa: E402
+import contrib as contrib_mod  # noqa: E402
+ALLY1, ALLY2, ALLY3, ALLY4 = 3001, 3002, 3003, 3004
+RBOSS = 60001
+
+
+def role_combat(extra, job=4258):
+    """Uma gravação com quem grava (da classe `job`), três aliados no grupo e o Bafomé (chefe), mais `extra`."""
+    ev = [(0, fr.spawn(ALLY1, "pc", 4302, "Aliado1")), (0, fr.spawn(ALLY2, "pc", 4255, "Aliado2")),
+          (0, fr.spawn(ALLY3, "pc", 4254, "Aliado3")), (0, fr.spawn(RBOSS, "mob", 1039, "Bafomé", boss=True)),
+          (0, fr.party_hp(ALLY1, 100, 100)), (0, fr.party_hp(ALLY2, 100, 100)), (0, fr.party_hp(ALLY3, 100, 100)),
+          (0, fr.hp(200000, rrf.SP_MAXHP)), (0, fr.hp(200000))]
+    data, _ = fr.build(ME, sorted(ev + extra, key=lambda e: e[0]))
+    cc = combat_of(data)
+    cc.session.job = job          # o cabeçalho de mentira é sempre de Mestre Celestial
+    return cc
+
+
+# Redenção: o dano dos aliados protegidos chega como um golpe de quem usou nele mesmo (skill 0)
+ev = [(3000, fr.skill_use(ME, ALLY1, 255)), (3010, fr.skill_use(ME, ALLY2, 255))]
+for i in range(25):
+    ev.append((4000 + 300 * i, fr.auto_attack(RBOSS, ALLY1, 90000 + i)))
+    ev.append((4001 + 300 * i, fr.auto_attack(ME, ME, 90000 + i)))
+ev.append((1200, fr.auto_attack(ME, ME, 50000)))                         # antes da Redenção: não conta
+rc = role_combat(ev)
+ab = roles.absorbed(rc)
+check(ab is not None and ab["hits"] == 25 and ab["total"] == sum(90000 + i for i in range(25)) and ab["allies"] == 2
+      and ab["life"] == 200000, "Redenção: 25 golpes que passaram para quem usou, 2 aliados protegidos, a vida dele "
+      "-> %r" % (ab and {k: ab[k] for k in ("hits", "total", "allies", "life")}))
+f_red = roles.found(rc, {"redeemer"})
+check("redeemer" in f_red, "Redentor: %s absorvido = %.1f vidas (limite %d) -> o cartão" % (
+    ab and ab["total"], (ab["total"] / 200000.0) if ab else 0, roles.HL_REDEEM_LIVES))
+check(roles.absorbed(role_combat([(1000, fr.auto_attack(ME, ME, 9000))])) is None,
+      "sem usar a Redenção: nada (o golpe nele mesmo não é dela)")
+ev2 = [(500, fr.skill_use(ME, ALLY1, 255))] + [(1000 + 300 * i, fr.auto_attack(ME, ME, 40000)) for i in range(25)]
+check("redeemer" not in roles.found(role_combat(ev2), {"redeemer"}), "Redentor: 5 vidas não bastam (limite 10)")
+
+# Lex Aeterna: o pico de 10 s numa luta de chefe
+ev = [(1000 + 400 * i, fr.skill_damage(ALLY1, RBOSS, 500000, skill=5473, hits=1)) for i in range(60)]
+ev += [(1100 + 330 * i, fr.skill_use(ME, RBOSS, 78)) for i in range(70)]
+rc = role_combat(ev, job=4256)
+lx = roles.lex_fights(rc)
+check(len(lx) == 1 and lx[0]["n"] == 70 and abs(lx[0]["peak"] - 3.1) < 0.11,
+      "Lex: 70 usos no chefe, pico de ~3 por segundo -> %r" % ([(x["n"], x["peak"]) for x in lx],))
+check("lex" in roles.found(rc, {"lex"}), "Chuva de Lex: pico acima de %s por segundo -> o cartão" % roles.HL_LEX_PER_S)
+ev3 = [(1000 + 400 * i, fr.skill_damage(ALLY1, RBOSS, 500000, skill=5473, hits=1)) for i in range(60)]
+ev3 += [(1100 + 900 * i, fr.skill_use(ME, RBOSS, 78)) for i in range(25)]
+check("lex" not in roles.found(role_combat(ev3, job=4256), {"lex"}), "Chuva de Lex: ~1 por segundo não basta")
+
+# Varredura: 21 monstros derrubados pela mesma skill no mesmo instante
+ev = []
+for i in range(21):
+    aid = 70000 + i
+    ev += [(0, fr.spawn(aid, "mob", 1002, "Poring")), (2000, fr.skill_damage(ME, aid, 9999, skill=5473, hits=1)),
+           (2100, fr.vanish(aid))]
+ev += [(0, fr.spawn(71000, "mob", 1002, "Poring")), (2000, fr.skill_damage(ME, 71000, 50, skill=5473, hits=1)),
+       (2050, fr.skill_damage(ALLY1, 71000, 9999, skill=5473, hits=1)), (2100, fr.vanish(71000))]   # este, outro matou
+rc = role_combat(ev, job=4302)
+mk = roles.multi_kill(rc)
+check(mk is not None and mk["n"] == 21 and mk["skill"] == 5473 and mk["mob"] == 1002,
+      "Varredura: 21 abates da mesma skill em 1 s (o monstro que outro terminou não conta) -> %r" % (mk,))
+check("aoe" in roles.found(rc, {"aoe"}), "Oi, tchau: %d ou mais -> o cartão" % roles.HL_MULTI)
+
+# Anjo da guarda: Ressuscitar seguido da volta do aliado
+ev = []
+for i, (ally, t) in enumerate(((ALLY1, 2000), (ALLY2, 5000), (ALLY3, 8000), (ALLY1, 11000))):
+    ev += [(t - 500, fr.vanish(ally)), (t, fr.skill_use(ME, ally, 54)), (t + 400, fr.resurrect(ally))]
+ev += [(14000, fr.skill_use(ME, ALLY2, 54))]                              # sem a volta: não conta
+rc = role_combat(ev, job=4256)
+check(roles.revived(rc) == (4, 3), "Ressuscitar: 4 voltas confirmadas, 3 aliados -> %r" % (roles.revived(rc),))
+check("revive" in roles.found(rc, {"revive"}), "Quero um aumento: %d ou mais -> o cartão" % roles.HL_REVIVE)
+
+# o destaque no resumo: o Redentor (o Escudo do Guardião), com o total na cena e no selo; desligado, some
+rc = role_combat([(500, fr.skill_use(ME, ALLY1, 255))] + [(1000 + 300 * i, fr.auto_attack(ME, ME, 90000))
+                                                           for i in range(25)])
+hl_all = session.highlights(rc, {})
+hl_none = session.highlights(rc, {"session_hl_off": ["redeemer"]})
+red = [h for h in hl_all if h["key"] == "redeemer"]
+check(len(red) == 1 and red[0]["fx"] == "bulwark" and red[0]["scene"]["total"] == 25 * 90000
+      and "2,25M" in red[0]["chip"],
+      "resumo: o Redentor com o Escudo do Guardião, o total na cena e no selo -> %r" % (
+          [(h["key"], h["fx"], h["chip"]) for h in red],))
+check(not [h for h in hl_none if h["key"] == "redeemer"], "resumo: desligado na aba Cartões, o Redentor não aparece")
+check([session.hl_text(k)[0] for k in ("buffed", "credit", "aoe", "revive", "served", "no_elixir")]
+      == ["Podem ir", "Sem mim era Wipe", "Oi, tchau", "Quero um aumento", "Bem servido", "Tá fácil pra ninguém"],
+      "os nomes que o usuário deu (2026-11-22) -> %r" % ([session.hl_text(k)[0] for k in session.ROLE_KEYS],))
+_name, _when = session.hl_text("buffed")
+check("40" in _when and "caçada" in _when and "%" in _when,
+      "aba Cartões: o Podem ir diz as duas condições (luta de chefe e caçada) -> %r" % (_when,))
+check(all(k in session.HL_KEYS for k in session.ROLE_KEYS)
+      and session.HL_KEYS.index("no_elixir") < session.HL_KEYS.index("marked"),
+      "os cartões de classe estão na lista de destaques, acima do Item marcado")
+check(all(session.FX[k] in session.FX_KINDS for k in session.ROLE_KEYS)
+      and [session.FX[k] for k in ("redeemer", "lex", "buffed", "credit", "aoe")]
+      == ["bulwark", "lex_double", "buff_wings", "credit_boss", "aoe_blast"],
+      "as versões aprovadas: Redentor B, Chuva de Lex B, Podem ir B, Sem mim era Wipe A, Oi tchau A")
+for key in session.ROLE_KEYS:
+    smp = session.sample_card_for({}, key)
+    check(smp["hl"][0]["key"] == key and smp["hl"][0]["scene"] and smp["hl"][0]["fx"] in session.FX_KINDS,
+          "prévia de %s: o exemplo com a cena (%s)" % (key, smp["hl"][0]["fx"]))
+
+# Podem ir na caçada: as rodadas de buff lançadas por quem grava (o pacote de conjuração dele logo antes do uso); o
+# buff que outro Cardeal pôs no grupo chega como um uso de quem grava nele mesmo, sem a conjuração dele, e não conta
+_BUFFS6 = (2041, 2042, 2045, 74, 75, 5281)
+ev, ev_other = [], []
+for r in range(45):
+    _t0 = 1000 + r * 40000
+    for j, sk in enumerate(_BUFFS6):
+        ev += [(_t0 + j * 300, fr.cast(ME, ME, sk, 0)), (_t0 + j * 300 + 10, fr.skill_use(ME, ME, sk))]
+        ev_other += [(_t0 + j * 300, fr.cast(ALLY4, ALLY4, sk, 0)), (_t0 + j * 300 + 10, fr.skill_use(ME, ME, sk))]
+rc = role_combat(ev, job=4256)
+rr = roles.buff_rounds(rc)
+check(rr is not None and rr["n"] == 45 and rr["skills"][0] in _BUFFS6,
+      "rodadas de buff: 45 rodadas de 6 buffs lançados por quem grava -> %r" % (rr and rr["n"],))
+_got = roles.found(rc, {"buffed"}).get("buffed") or {}
+check(_got.get("farm") and _got.get("n") == 45 and _got.get("members") == 3,
+      "Podem ir na caçada: %d rodadas ou mais, num grupo -> o cartão -> %r" % (roles.HL_ROUNDS, _got))
+_hl_farm = [h for h in session.highlights(rc, {}) if h["key"] == "buffed"]
+check(_hl_farm and "45" in _hl_farm[0]["chip"] and _hl_farm[0]["scene"].get("rounds") == 45,
+      "resumo: o Podem ir da caçada com as rodadas no selo e na cena -> %r" % ([h["chip"] for h in _hl_farm],))
+rc2 = role_combat(ev_other, job=4256)
+check(roles.buff_rounds(rc2) is None and "buffed" not in roles.found(rc2, {"buffed"}),
+      "os buffs que outro Cardeal pôs no grupo (sem a conjuração de quem grava) não contam")
+check(roles.own_cast(rc, ME, 1010, 2041) and not roles.own_cast(rc2, ME, 1010, 2041),
+      "own_cast: o uso logo depois da conjuração de quem grava é dele; o de outro, não")
+
+# Bem servido (KS): monstros que um jogador de fora do grupo começou (1 s antes) e em que bateu, e que quem grava matou
+_STRANGER = 3100
+ev = [(0, fr.spawn(_STRANGER, "pc", 4252, "Outro"))]
+ev2 = []
+for i in range(22):
+    _aid, _t0 = 72000 + i, 2000 + i * 5000
+    ev += [(0, fr.spawn(_aid, "mob", 1002, "Poring")),
+           (_t0, fr.skill_damage(_STRANGER, _aid, 30000, skill=5473, hits=1)),
+           (_t0 + 1500, fr.skill_damage(ME, _aid, 9999, skill=5473, hits=1)), (_t0 + 1600, fr.vanish(_aid))]
+    ev2 += [(0, fr.spawn(_aid, "mob", 1002, "Poring")),
+            (_t0, fr.skill_damage(ALLY1, _aid, 30000, skill=5473, hits=1)),
+            (_t0 + 1500, fr.skill_damage(ME, _aid, 9999, skill=5473, hits=1)), (_t0 + 1600, fr.vanish(_aid))]
+rc = role_combat(ev, job=4302)
+ks = roles.kill_steals(rc)
+check(ks is not None and ks["n"] == 22 and ks["victims"] == [4252] and ks["mob"] == 1002,
+      "KS: 22 monstros que outro jogador começou e quem grava matou -> %r" % (ks,))
+_got = roles.found(rc, {"served"}).get("served") or {}
+check(_got.get("kind") == "ks" and _got.get("n") == 22, "Bem servido: %d KS ou mais -> o cartão" % roles.HL_KS)
+_hl_ks = [h for h in session.highlights(rc, {}) if h["key"] == "served"]
+check(_hl_ks and _hl_ks[0]["fx"] == "served_ks" and "22 KS" in _hl_ks[0]["chip"]
+      and _hl_ks[0]["scene"]["others"] == [4252],
+      "resumo: o Bem servido dos KS, com quem foi roubado na cena -> %r" % ([(h["fx"], h["chip"]) for h in _hl_ks],))
+check(roles.kill_steals(role_combat(ev2, job=4302)) is None, "o monstro que alguém do grupo começou não é KS")
+
+# Bem servido (MVP): o aviso de MVP com quem grava, num chefe em que os outros já tinham dado 20% do dano antes dele
+ev = [(0, fr.spawn(_STRANGER, "pc", 4252, "Outro"))]
+ev += [(1000 + 500 * i, fr.skill_damage(_STRANGER, RBOSS, 1000000, skill=5473, hits=1)) for i in range(10)]
+ev += [(7000 + 300 * i, fr.skill_damage(ME, RBOSS, 2000000, skill=5473, hits=1)) for i in range(10)]
+ev += [(10000, fr.vanish(RBOSS))] + [(10050, fr.mvp(ME))] * 5         # o aviso chega repetido no mesmo instante
+rc = role_combat(ev, job=4302)
+lm = roles.late_mvp(rc)
+check(lm is not None and abs(lm["before"] - 1 / 3.0) < 0.01 and lm["others"] == [4252] and lm["late"] == 6000
+      and len(rc.mvp_log) == 1,
+      "MVP chegando depois: os outros deram 1/3 do dano antes, 6 s antes dele (o aviso repetido conta uma vez) -> %r" % (
+          lm,))
+_got = roles.found(rc, {"served"}).get("served") or {}
+check(_got.get("kind") == "mvp", "Bem servido: o MVP chegando depois -> o cartão")
+_hl_mvp = [h for h in session.highlights(rc, {}) if h["key"] == "served"]
+check(_hl_mvp and _hl_mvp[0]["fx"] == "served_mvp" and "33%" in _hl_mvp[0]["sub"],
+      "resumo: o Bem servido do MVP, com a parte dos outros na frase -> %r" % ([h["sub"] for h in _hl_mvp],))
+ev[-5:] = [(10050, fr.mvp(_STRANGER))]
+check(roles.late_mvp(role_combat(ev, job=4302)) is None, "o MVP que ficou com o outro não conta")
+
+# Tá fácil pra ninguém: o item de cura acabou (o uso deixou 0) apanhando, depois de usar com sobra
+_hurt = [(1000 + 400 * i, fr.auto_attack(RBOSS, ME, 50000)) for i in range(20)]
+ev = _hurt + [(1200 + 1000 * i, fr.item_use(ME, 1100005, 4 - i)) for i in range(5)]      # 4, 3, 2, 1, 0
+rc = role_combat(ev, job=4302)
+ro = roles.ran_out(rc)
+check(ro is not None and ro["item"] == 1100005 and ro["uses"] == 5 and ro["mob"] == 1039 and ro["t"] == 5200,
+      "Tá fácil pra ninguém: o Elixir Dourado acabou apanhando do Bafomé -> %r" % (ro,))
+_hl_el = [h for h in session.highlights(rc, {}) if h["key"] == "no_elixir"]
+check(_hl_el and _hl_el[0]["fx"] == "no_elixir" and _hl_el[0]["scene"]["item"] == 1100005,
+      "resumo: o Tá fácil pra ninguém com o item na cena -> %r" % ([h["chip"] for h in _hl_el],))
+ev = _hurt + [(1200 + 1000 * i, fr.item_use(ME, 12333, 0)) for i in range(5)]
+check(roles.ran_out(role_combat(ev, job=4256)) is None, "a Ancilla (feita e bebida na hora) não conta")
+ev = [(1200 + 1000 * i, fr.item_use(ME, 1100005, 4 - i)) for i in range(5)]
+check(roles.ran_out(role_combat(ev)) is None, "acabou fora da luta (sem apanhar): não conta")
+ev = _hurt + [(1200 + 1000 * i, fr.item_use(3001, 1100005, 4 - i)) for i in range(5)]
+check(roles.ran_out(role_combat(ev)) is None, "o item de outro jogador que acabou não conta")
+
+# as cenas de dano com a classe de quem grava, no estilo dela
+_GRF = r"C:\\Gravity\\Ragnarok\\data.grf"
+if os.path.isfile(_GRF):
+    import class_scenes as cs_mod  # noqa: E402
+    import sprites as spr_mod  # noqa: E402
+    _w = spr_mod.Wardrobe(_GRF)
+    _acts = {j: cs_mod.attack_act(_w, cs_mod.look_for(j)) for j in (4252, 4257, 4254, 4260, 4306, 4302, 4256)}
+    check(_acts == {4252: 10, 4257: 11, 4254: 11, 4260: 10, 4306: 10, 4302: spr_mod.ATTACK,
+                    4256: spr_mod.CAST},
+          "cenas: as classes físicas golpeiam com a arma (a ação em que ela aparece), o Mestre Celestial soca e "
+          "o Cardeal conjura -> %s" % _acts)
+    _parts = {j: [p.name for p in _w.parts(cs_mod.look_for(j), 6)[0]] for j in (4258, 4066)}
+    check(all("shield" in v and "weapon" in v for v in _parts.values()),
+          "os Guardiões (Imperial e Real) com lança e escudo; o Real não vira Aprendiz -> %s" % _parts)
+    _real = dict(job=4258, sex=1, hair=2, weapon=530015, shield=460157)
+    check("shield" in [p.name for p in _w.parts(_real, 6)[0]],
+          "o escudo comum de um visual de verdade (o Broquel do Guardião Imperial) é achado")
+else:
+    print("pula  armas e escudos das cenas (sem o data.grf)")
+check([session.fight_style(j) for j in (4302, 4256, 4257, 4252, 4038, 4030, 4306, 4255)]
+      == ["fist", "magic", "ranged", "melee", "fist", "melee", "ranged", "magic"],
+      "o estilo de luta de cada classe nas cenas de dano (o Mini Monge soca, o Mini Cavaleiro não)")
+rc.session.look = dict(job=4256, sex=0, hair=17, hair_color=2, weapon=15)
+_fo = session.fight_of(rc, hit=1000)
+check(_fo["look"] and _fo["look"]["job"] == 4256, "cena de dano: o visual de quem grava, de qualquer classe (o Cardeal)")
+
+# o dano creditado de um efeito sem o uso à vista vai para o único do grupo que tem a skill (o Pólen do Magus)
+_c_ev = [(0, fr.spawn(ALLY2, "pc", 4255, "Magus")), (0, fr.party_hp(ALLY2, 100, 100))]
+_c_ev += [(1000, fr.status(RBOSS, 1183, True, total=60000, left=60000))]
+_c_ev += [(1500 + 300 * i, fr.skill_damage(ALLY1, RBOSS, 1000000, skill=5473, hits=1)) for i in range(40)]
+rc = role_combat(_c_ev, job=4302)
+_x = dd.Ctx(rc, RBOSS, None)
+_ap = contrib_mod.appliers(rc, _x, 1183)
+check(_ap and all(w == ALLY2 for _s, _e, w, _v in _ap),
+      "Pólen sem o Florescer à vista: vai para o Magus do grupo -> %r" % ([w for _s, _e, w, _v in _ap],))
+
+# replays de verdade do usuário (se existirem): a Lex do Cardeal e os buffs dele, os KS do Mestre Celestial e o
+# Elixir Dourado que acabou
+for _path, _want in ((r"C:\Gravity\Ragnarok\Replay\RagnarokReplay_0067.rrf", {"lex", "credit"}),
+                     (r"C:\Gravity\Ragnarok\Replay\fdfdsf.rrf", {"lex", "buffed"}),
+                     (r"C:\Gravity\Ragnarok\Replay\RagnarokReplay_0029.rrf", {"served"}),
+                     (r"C:\Gravity\Ragnarok\Replay\afafads.rrf", {"no_elixir"})):
+    if not os.path.isfile(_path):
+        print("pula  %s (nao encontrado)" % _path)
+        continue
+    _rf = meter.ReplayFile(_path)
+    while _rf.poll():
+        pass
+    _got = roles.found(_rf.combat, set(session.ROLE_KEYS))
+    check(_want <= set(_got), "%s: cartões de classe %s -> %s" % (os.path.basename(_path), sorted(_want),
+                                                                   sorted(_got)))
 
 # --- todo texto da interface tem tradução -------------------------------------
 import ast  # noqa: E402

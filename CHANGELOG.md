@@ -2,6 +2,19 @@
 
 Português · [English](#english) · [Español](#español)
 
+## 1.14.0
+
+Novos cartões de classe no resumo da sessão, aviso de cura do chefe e melhorias na calibração de XP.
+
+- Novos cartões no resumo da sessão: "Redentor", "Chuva de Lex", "Podem ir", "Sem mim era Wipe", "Oi, tchau", "Quero um aumento", "Bem servido" e "Tá fácil pra ninguém".
+- As cenas de luta dos cartões usam o seu personagem, de qualquer classe, com a arma dele.
+- Novo aviso de chefe: dano físico ou mágico que vira cura por 30 s (como o Atroce do Laboratório Central).
+- Novo cartão "Gravação nova": com um replay aberto, quando o jogo começa a gravar, escolha seguir a gravação nova ou ficar no aberto.
+- XP: no modo automático os bônus ficam travados, e o programa avisa quando outro modo dá uma estimativa muito diferente ou quando a última medida está velha.
+- XP: personagens abaixo do nível 200 não mexem mais na calibração dos de nível 200 ou mais, e medidas instáveis, replays abertos à mão e monstros sem XP conhecida não estragam mais a calibração.
+- Visuais: os escudos e o Guardião Real aparecem certos.
+- Cartões: o ✕ fecha só o cartão, e o "Quase lá" aparece antes do "Item marcado".
+
 ## 1.13.0
 
 Novo destaque de nível máximo, MVPs no topo dos Alvos e melhorias de desempenho.
@@ -293,6 +306,19 @@ Primeira versão pública.
 
 ## English
 
+### 1.14.0
+
+New class cards in the session summary, boss healing alert and XP calibration improvements.
+
+- New cards in the session summary: "Redeemer", "Lex rain", "Good to go", "Without me it's a wipe", "Hi, bye", "I want a raise", "Don't mind if I do" and "It's not easy for anyone".
+- The fight scenes in the cards use your own character, of any class, with its weapon.
+- New boss alert: physical or magic damage that turns into healing for 30 s (like Atroce in the Central Laboratory).
+- New "New recording" card: with a replay open, when the game starts recording, choose to follow the new recording or stay on the open one.
+- XP: in automatic mode the bonuses are locked, and the program warns when another mode gives a very different estimate or when the last measurement is old.
+- XP: characters below level 200 no longer touch the calibration of level 200+ ones, and unstable measurements, replays opened by hand and monsters with unknown XP no longer spoil the calibration.
+- Costumes: shields and the Royal Guard now show correctly.
+- Cards: the ✕ closes only the card, and "Almost there" shows before "Marked item".
+
 ### 1.13.0
 
 New max level highlight, MVPs on top of Targets and performance improvements.
@@ -583,6 +609,19 @@ First public version.
 ---
 
 ## Español
+
+### 1.14.0
+
+Nuevas tarjetas de clase en el resumen de la sesión, aviso de curación del jefe y mejoras en la calibración de XP.
+
+- Nuevas tarjetas en el resumen de la sesión: "Redentor", "Lluvia de Lex", "Ya pueden ir", "Sin mí era wipe", "Hola, chau", "Quiero un aumento", "Bien servido" y "No está fácil para nadie".
+- Las escenas de pelea de las tarjetas usan tu personaje, de cualquier clase, con su arma.
+- Nuevo aviso de jefe: daño físico o mágico que se vuelve curación por 30 s (como el Atroce del Laboratorio Central).
+- Nueva tarjeta "Grabación nueva": con un replay abierto, cuando el juego empieza a grabar, elige seguir la grabación nueva o quedarte en el abierto.
+- XP: en el modo automático los bonos quedan bloqueados, y el programa avisa cuando otro modo da una estimación muy diferente o cuando la última medida es vieja.
+- XP: los personajes por debajo del nivel 200 ya no tocan la calibración de los de nivel 200 o más, y las medidas inestables, los replays abiertos a mano y los monstruos sin XP conocida ya no estropean la calibración.
+- Visuales: los escudos y el Guardia Real se ven bien.
+- Tarjetas: la ✕ cierra solo la tarjeta, y "Casi" aparece antes de "Ítem marcado".
 
 ### 1.13.0
 

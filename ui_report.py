@@ -84,7 +84,8 @@ def open_report(root, cfg, colors=None, font=None, status_fn=None):
     def save():
         path = filedialog.asksaveasfilename(
             parent=win, title=_("Salvar relatório"), defaultextension=".txt",
-            initialfile="replay-master-relatorio-%s.txt" % datetime.date.today().isoformat(),
+            # com a hora: relatórios de jogadores diferentes no mesmo dia vinham com o mesmo nome
+            initialfile="replay-master-relatorio-%s.txt" % datetime.datetime.now().strftime("%Y-%m-%d-%Hh%M"),
             filetypes=[(_("Texto"), "*.txt")])
         if path:
             with open(path, "w", encoding="utf-8") as f:

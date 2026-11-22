@@ -186,6 +186,16 @@ def cast(src, dst, skill, ms):
     return struct.pack("<HIIhhHIIB", rrf.P_CAST2, src, dst, 0, 0, skill, 0, ms, 0)
 
 
+def mvp(aid):
+    """0x010c: `aid` ganhou o MVP."""
+    return struct.pack("<HI", rrf.P_MVP, aid)
+
+
+def item_use(aid, item, left, ok=True, index=2):
+    """0x01c8: `aid` usou `item` e sobraram `left`."""
+    return struct.pack("<HHIIHB", rrf.P_ITEM_USE, index, item, aid, left, 1 if ok else 0)
+
+
 def rekey(data, date):
     """O mesmo replay cifrado como se tivesse sido gravado em `date` (ex.: 0 h, chave fraca)."""
     h = rrf.Header(data)

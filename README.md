@@ -12,7 +12,7 @@ Medidor de DPS e análise de replays para Ragnarok Online (ROLatam).
 
 Um widget que mostra o seu DPS e o ranking do grupo em tempo real, lendo a gravação de replay do próprio jogo.
 
-- **Widget:** DPS ao vivo, ranking do grupo, skills, alvos, drops e XP. Fixe até duas informações para ver em qualquer aba. Ele avisa quando o chefe muda (propriedade, tamanho, Dor Máxima, defesa), mostra o que te matou, resume a luta quando o chefe morre e a sessão quando a gravação para.
+- **Widget:** DPS ao vivo, ranking do grupo, skills, alvos, drops e XP. Fixe até duas informações para ver em qualquer aba. Ele avisa quando o chefe muda (propriedade, tamanho, Dor Máxima, defesa, dano que vira cura), mostra o que te matou, resume a luta quando o chefe morre e a sessão quando a gravação para, com destaques de cada classe.
 - **Cartões e efeitos:** ligue ou desligue cada cartão do widget e acompanhe qualquer buff, debuff ou efeito de chão (Garra Sombria, Cometa, Pólen...) com o tempo que falta, com prévia ao vivo e sons seus (.wav ou .mp3).
 - **Análise completa:** resumo, jogadores, equipamento com os ícones dos itens, monstros animados, drops, XP, buffs, mortes, testes de build lado a lado e visuais.
 - **Linha do tempo:** cada luta contra chefe com DPS, HP do chefe, a força de cada golpe, Lex Aeterna, debuffs, mortes e skills.
@@ -44,7 +44,7 @@ Um widget que mostra o seu DPS e o ranking do grupo em tempo real, lendo a grava
 
 A widget that shows your DPS and the party ranking in real time by reading the game's own replay recording.
 
-- **Widget:** live DPS, party ranking, skills, targets, drops and XP. Pin up to two pieces of info to see on any tab. It warns when the boss changes (property, size, Max Pain, defense), shows what killed you, sums up the fight when the boss dies and the session when the recording stops.
+- **Widget:** live DPS, party ranking, skills, targets, drops and XP. Pin up to two pieces of info to see on any tab. It warns when the boss changes (property, size, Max Pain, defense, damage that heals it), shows what killed you, sums up the fight when the boss dies and the session when the recording stops, with highlights for each class.
 - **Cards and effects:** turn each widget card on or off and track any buff, debuff or ground effect (Dark Claw, Magic Poison, All Bloom...) with the time left, with a live preview and your own sounds (.wav or .mp3).
 - **Full analysis:** summary, players, equipment with item icons, animated monsters, drops, XP, buffs, deaths, build tests side by side and costumes.
 - **Timeline:** each boss fight with DPS, boss HP, the strength of each hit, Lex Aeterna, debuffs, deaths and skills.
@@ -63,7 +63,7 @@ A widget that shows your DPS and the party ranking in real time by reading the g
 
 Un widget que muestra tu DPS y el ranking del grupo en tiempo real, leyendo la grabación de replay del propio juego.
 
-- **Widget:** DPS en vivo, ranking del grupo, habilidades, objetivos, drops y XP. Fija hasta dos datos para verlos en cualquier pestaña. Avisa cuando el jefe cambia (propiedad, tamaño, Dolor Máximo, defensa), muestra qué te mató, resume la pelea cuando el jefe muere y la sesión cuando se detiene la grabación.
+- **Widget:** DPS en vivo, ranking del grupo, habilidades, objetivos, drops y XP. Fija hasta dos datos para verlos en cualquier pestaña. Avisa cuando el jefe cambia (propiedad, tamaño, Dolor Máximo, defensa, daño que lo cura), muestra qué te mató, resume la pelea cuando el jefe muere y la sesión cuando se detiene la grabación, con destacados de cada clase.
 - **Tarjetas y efectos:** activa o desactiva cada tarjeta del widget y sigue cualquier buff, debuff o efecto de suelo (Garra Tenebrosa, Veneno mágico, Polen...) con el tiempo que falta, con vista previa en vivo y tus propios sonidos (.wav o .mp3).
 - **Análisis completo:** resumen, jugadores, equipo con los íconos de los objetos, monstruos animados, drops, XP, buffs, muertes, pruebas de build lado a lado y visuales.
 - **Línea de tiempo:** cada pelea contra jefe con DPS, HP del jefe, la fuerza de cada golpe, Lex Aeterna, debuffs, muertes y habilidades.

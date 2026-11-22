@@ -1560,6 +1560,53 @@ CATALOG = {
     "no início da gravação": ("at the start of the recording", "al inicio de la grabación"),
     "XP real até a próxima gravação": ("Real XP until the next recording", "XP real hasta la próxima grabación"),
     "%d sem XP conhecida": ("%d with unknown XP", "%d sin XP conocida"),
+    "(frágil)": ("(fragile)", "(frágil)"),
+    "⚠ No automático a XP estimada seria %s maior: %s em vez de %s.": (
+        "⚠ In automatic mode the estimated XP would be %s higher: %s instead of %s.",
+        "⚠ En automático la XP estimada sería %s mayor: %s en lugar de %s."),
+    "⚠ No automático a XP estimada seria %s menor: %s em vez de %s.": (
+        "⚠ In automatic mode the estimated XP would be %s lower: %s instead of %s.",
+        "⚠ En automático la XP estimada sería %s menor: %s en lugar de %s."),
+    "Ele corrige a lista pela XP exata medida nas suas gravações e conta todos os bônus que aparecem nelas. Para usar, "
+    "marque “Automático (recomendado)”.": (
+        "It corrects the list with the exact XP measured in your recordings and counts every bonus that shows up in "
+        "them. To use it, pick “Automatic (recommended)”.",
+        "Corrige la lista con la XP exacta medida en tus grabaciones y cuenta todos los bonos que aparecen en ellas. "
+        "Para usarlo, marca “Automático (recomendado)”."),
+    "No automático: %s": ("In automatic: %s", "En automático: %s"),
+    "personagens de nível %d+": ("characters at level %d+", "personajes de nivel %d+"),
+    "personagens abaixo do nível %d": ("characters below level %d", "personajes por debajo del nivel %d"),
+    "⟳ A última medida de XP exata (%s) é de %d dias atrás. Se o evento do servidor mudou ou acabou, a previsão só "
+    "acerta depois de uma medida nova: pare a gravação no jogo e comece outra em até 3 minutos (as duas seguidas dão "
+    "a XP exata).": (
+        "⟳ The last exact XP measurement (%s) is %d days old. If the server event changed or ended, the forecast is "
+        "only right again after a new measurement: stop the recording in the game and start another within 3 minutes "
+        "(the two in a row give the exact XP).",
+        "⟳ La última medida de XP exacta (%s) es de hace %d días. Si el evento del servidor cambió o terminó, la "
+        "previsión solo acierta después de una medida nueva: detén la grabación en el juego y empieza otra en hasta 3 "
+        "minutos (las dos seguidas dan la XP exacta)."),
+    # o cartão "Gravação nova" (com um replay aberto à mão, o jogo começou a gravar outro)
+    "Gravação nova": ("New recording", "Grabación nueva"),
+    "Aberto agora: %s": ("Open now: %s", "Abierto ahora: %s"),
+    "Seguir a nova": ("Follow it", "Seguir la nueva"),
+    "Ficar neste": ("Stay here", "Quedarme aquí"),
+    "Seguir a gravação nova": ("Follow the new recording", "Seguir la grabación nueva"),
+    "Ficar neste replay": ("Stay on this replay", "Quedarme en este replay"),
+    "Não perguntar mais": ("Don't ask again", "No preguntar más"),
+    "até você escolher": ("until you choose", "hasta que elijas"),
+    "Gravação nova com um replay aberto": ("New recording while a replay is open",
+                                           "Grabación nueva con un replay abierto"),
+    "Com um replay aberto à mão, quando o jogo começa a gravar outro: seguir a gravação nova ou ficar no aberto": (
+        "With a replay opened by hand, when the game starts recording another one: follow the new recording or stay "
+        "on the open one",
+        "Con un replay abierto a mano, cuando el juego empieza a grabar otro: seguir la grabación nueva o quedarse en "
+        "el abierto"),
+    "No automático, os bônus que aparecem na gravação sempre contam. Para ver a XP sem algum deles, use o simulador; "
+    "para escolher à mão, use “Pela lista abaixo”.": (
+        "In automatic mode, the bonuses that show up in the recording always count. To see the XP without one of "
+        "them, use the simulator; to choose by hand, use “From the list below”.",
+        "En automático, los bonos que aparecen en la grabación siempre cuentan. Para ver la XP sin alguno de ellos, "
+        "usa el simulador; para elegir a mano, usa “Según la lista de abajo”."),
     "Pegos por outros jogadores": ("Picked up by other players", "Recogidos por otros jugadores"),
     "Pegos por outros jogadores — %d": ("Picked up by other players — %d", "Recogidos por otros jugadores — %d"),
     "Ficaram no chão": ("Left on the ground", "Quedaron en el suelo"),
@@ -3442,4 +3489,132 @@ CATALOG.update({
         "la Biosfera con el programa abierto y, al parar, empieza otra grabación enseguida (las dos juntas dan la XP "
         "exacta). Desde entonces el simulador usa tu medida, que vale solo para ese mapa: la previsión de los demás "
         "mapas no cambia."),
+})
+
+
+# cartões de classe e de papel do resumo da sessão (roles.py, class_scenes.py), com os nomes que o usuário deu
+CATALOG.update({
+    "Redentor": ("Redeemer", "Redentor"),
+    "Absorveu com a Redenção %d vezes a sua vida em dano dos aliados": (
+        "Took %d times your HP in allies' damage with Sacrifice",
+        "Absorbió con Devoción %d veces tu vida en daño de los aliados"),
+    "Chuva de Lex": ("Lex rain", "Lluvia de Lex"),
+    "Passou de %s Lex Aeterna por segundo numa luta de chefe (no pico de 10 s)": (
+        "Went over %s Lex Aeterna per second in a boss fight (10 s peak)",
+        "Superó %s Lex Aeterna por segundo en una pelea de jefe (pico de 10 s)"),
+    "Podem ir": ("Good to go", "Ya pueden ir"),
+    "Numa luta de chefe, %d ou mais aliados com os seus buffs em %d%% da luta, em média; ou, numa caçada em grupo, "
+    "%d rodadas de buff ou mais (%d buffs diferentes em 30 s)": (
+        "In a boss fight, %d or more allies with your buffs for %d%% of the fight, on average; or, hunting in a "
+        "party, %d buff rounds or more (%d different buffs within 30 s)",
+        "En una pelea de jefe, %d o más aliados con tus buffs en el %d%% de la pelea, en promedio; o, cazando en "
+        "grupo, %d rondas de buffs o más (%d buffs distintos en 30 s)"),
+    "Sem mim era Wipe": ("Without me it's a wipe", "Sin mí era wipe"),
+    "Os seus efeitos no chefe (Lex, Pólen, Garra Sombria, Avanço Sísmico, áreas...) renderam boa parte do dano do "
+    "grupo numa luta": (
+        "Your effects on the boss (Lex, All Bloom, Dark Claw, Rush Quake, ground areas...) made up a big part of the "
+        "group's damage in a fight",
+        "Tus efectos en el jefe (Lex, Polen, Garra Tenebrosa, Avance Sísmico, áreas...) rindieron buena parte del daño "
+        "del grupo en una pelea"),
+    "Oi, tchau": ("Hi, bye", "Hola, chau"),
+    "Derrubou %d monstros ou mais com a mesma skill em 1 s": (
+        "Took down %d or more monsters with the same skill within 1 s",
+        "Derribó %d monstruos o más con la misma habilidad en 1 s"),
+    "Quero um aumento": ("I want a raise", "Quiero un aumento"),
+    "Trouxe aliados de volta com Ressuscitar %d vezes ou mais": (
+        "Brought allies back with Resurrection %d times or more",
+        "Trajo aliados de vuelta con Resurrección %d veces o más"),
+    "Bem servido": ("Don't mind if I do", "Bien servido"),
+    "Ficou com um MVP chegando depois (os outros já tinham dado %d%% do dano), ou deu %d KS ou mais: matou monstros "
+    "que outro jogador começou": (
+        "Got an MVP after arriving late (the others had already dealt %d%% of the damage), or made %d KS or more: "
+        "killed monsters another player had started",
+        "Se quedó con un MVP llegando tarde (los otros ya habían hecho el %d%% del daño), o hizo %d KS o más: mató "
+        "monstruos que otro jugador empezó"),
+    "Tá fácil pra ninguém": ("It's not easy for anyone", "No está fácil para nadie"),
+    "Acabou um item de cura (elixir, poção...) no meio da luta": (
+        "Ran out of a healing item (elixir, potion...) mid-fight",
+        "Se acabó un ítem de curación (elixir, poción...) en medio de la pelea"),
+    "Redentor!": ("Redeemer!", "¡Redentor!"),
+    "Escudo do grupo!": ("The group's shield!", "¡Escudo del grupo!"),
+    "Ninguém passa!": ("None shall pass!", "¡Nadie pasa!"),
+    "Chuva de Lex!": ("Lex rain!", "¡Lluvia de Lex!"),
+    "Lex Aeterna!": ("Lex Aeterna!", "¡Lex Aeterna!"),
+    "Dano em dobro!": ("Double damage!", "¡Daño doble!"),
+    "Podem ir!": ("Good to go!", "¡Ya pueden ir!"),
+    "Sem mim era Wipe!": ("Without me it's a wipe!", "¡Sin mí era wipe!"),
+    "Oi, tchau!": ("Hi, bye!", "¡Hola, chau!"),
+    "Quero um aumento!": ("I want a raise!", "¡Quiero un aumento!"),
+    "Bem servido!": ("Don't mind if I do!", "¡Bien servido!"),
+    "%s absorvido": ("%s absorbed", "%s absorbido"),
+    "Absorveu %s de dano dos aliados: %s vezes a sua vida": (
+        "Took %s of the allies' damage: %s times your HP", "Absorbió %s de daño de los aliados: %s veces tu vida"),
+    "%d Lex em %s contra %s; no pico, %s por segundo": (
+        "%d Lex in %s against %s; at the peak, %s per second", "%d Lex en %s contra %s; en el pico, %s por segundo"),
+    " · renderam %s": (" · they added %s", " · rindieron %s"),
+    "%s Lex/s": ("%s Lex/s", "%s Lex/s"),
+    "%s da luta": ("%s of the fight", "%s de la pelea"),
+    "%d aliados com %d buffs seus em %s da luta contra %s": (
+        "%d allies with %d of your buffs for %s of the fight against %s",
+        "%d aliados con %d buffs tuyos en el %s de la pelea contra %s"),
+    "%d rodadas de buff": ("%d buff rounds", "%d rondas de buffs"),
+    "Buffou o grupo todo %d vezes nesta caçada (%d buffs diferentes ou mais de cada vez)": (
+        "Buffed the whole group %d times this hunt (%d different buffs or more each time)",
+        "Bufeó a todo el grupo %d veces en esta caza (%d buffs distintos o más cada vez)"),
+    "+%s ao grupo": ("+%s to the group", "+%s al grupo"),
+    "%s rendeu %s: %s do dano do grupo contra %s": (
+        "%s added %s: %s of the group's damage against %s", "%s rindió %s: %s del daño del grupo contra %s"),
+    "golpe comum": ("normal attack", "golpe común"),
+    "%d de uma vez": ("%d at once", "%d de una vez"),
+    "%d monstros de uma vez com %s": ("%d monsters at once with %s", "%d monstruos de una vez con %s"),
+    "%d ressuscitados": ("%d revived", "%d resucitados"),
+    "Trouxe %d aliados de volta à luta (%d vezes)": (
+        "Brought %d allies back into the fight (%d times)", "Trajo %d aliados de vuelta a la pelea (%d veces)"),
+    "MVP de %s": ("%s MVP", "MVP de %s"),
+    "Chegou depois e ficou com o MVP: os outros já tinham dado %s do dano": (
+        "Arrived late and still got the MVP: the others had already dealt %s of the damage",
+        "Llegó tarde y se quedó con el MVP: los otros ya habían hecho el %s del daño"),
+    "%d KS": ("%d KS", "%d KS"),
+    "%d monstros que outro jogador começou e você terminou (mais em %s)": (
+        "%d monsters another player started and you finished (mostly %s)",
+        "%d monstruos que otro jugador empezó y tú terminaste (más en %s)"),
+    "%d monstros que outro jogador começou e você terminou": (
+        "%d monsters another player started and you finished",
+        "%d monstruos que otro jugador empezó y tú terminaste"),
+    "sem %s": ("out of %s", "sin %s"),
+    "%s acabou no meio da luta contra %s, depois de %d usos": (
+        "%s ran out mid-fight against %s, after %d uses",
+        "%s se acabó en medio de la pelea contra %s, después de %d usos"),
+    "%s acabou no meio da luta, depois de %d usos": (
+        "%s ran out mid-fight, after %d uses", "%s se acabó en medio de la pelea, después de %d usos"),
+    "abates": ("kills", "muertes"),
+})
+
+
+# o cartão da cura por dano (o "Curar" do monstro, meter.DAMAGE_HEAL)
+CATALOG.update({
+    "%s: dano físico vira cura por 30 s": ("%s: physical damage turns into healing for 30 s",
+                                           "%s: el daño físico se vuelve curación por 30 s"),
+    "%s: dano mágico vira cura por 30 s": ("%s: magic damage turns into healing for 30 s",
+                                           "%s: el daño mágico se vuelve curación por 30 s"),
+    "%s: dano especial vira cura por 30 s": ("%s: special damage turns into healing for 30 s",
+                                             "%s: el daño especial se vuelve curación por 30 s"),
+    "dano físico vira cura": ("physical damage heals", "el daño físico cura"),
+    "dano mágico vira cura": ("magic damage heals", "el daño mágico cura"),
+    "dano especial vira cura": ("special damage heals", "el daño especial cura"),
+    "Golpes físicos curam o chefe por 30 s": ("Physical hits heal the boss for 30 s",
+                                              "Los golpes físicos curan al jefe por 30 s"),
+    "Bata com magia ou espere acabar": ("Use magic or wait it out", "Usa magia o espera que termine"),
+    "Golpes mágicos curam o chefe por 30 s": ("Magic hits heal the boss for 30 s",
+                                              "Los golpes mágicos curan al jefe por 30 s"),
+    "Bata com golpes físicos ou espere acabar": ("Use physical hits or wait it out",
+                                                 "Usa golpes físicos o espera que termine"),
+    "O dano especial cura o chefe por 30 s": ("Special damage heals the boss for 30 s",
+                                              "El daño especial cura al jefe por 30 s"),
+    "Armadilhas e outros danos fixos": ("Traps and other fixed damage", "Trampas y otros daños fijos"),
+    "Chefe se cura com o dano": ("Boss heals from damage", "El jefe se cura con el daño"),
+    "Por 30 s o dano físico, mágico ou especial vira cura no chefe (o Atroce do Laboratório)": (
+        "For 30 s physical, magic or special damage heals the boss (Atroce in the Laboratory)",
+        "Por 30 s el daño físico, mágico o especial cura al jefe (el Atroce del Laboratorio)"),
+    "%d s (o efeito todo)": ("%d s (the whole effect)", "%d s (todo el efecto)"),
 })

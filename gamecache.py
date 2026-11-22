@@ -54,7 +54,7 @@ def save(name, mark, data):
 
 def items(info_path):
     """O resumo da lista de itens do jogo (System\\iteminfo_new.lub): dict(names, display, art, table, kinds,
-    classnum, slots), tudo por id do item. Lido uma vez só por execução (quem pedir ao mesmo tempo espera), e do disco
+    classnum, slots, heals (os itens de cura)), tudo por id do item. Lido uma vez só por execução (quem pedir ao mesmo tempo espera), e do disco
     enquanto o arquivo do jogo não mudar. Levanta OSError / ValueError se o arquivo não der para ler."""
     with _LOCK:
         got = _ITEMS.get(info_path)
@@ -62,7 +62,7 @@ def items(info_path):
             return got
         mark = stamp(info_path)
         raw = load(ITEMS_FILE, mark)
-        if raw is None or "slots" not in raw:        # resumo de uma versão sem as posições: refaz
+        if raw is None or "heals" not in raw:        # resumo de uma versão sem os itens de cura: refaz
             import itemkind
             import lub
             import visuals
@@ -81,7 +81,8 @@ def items(info_path):
                 kinds={str(i): k for i, k in itemkind.parse_kinds(tbl).items()},
                 classnum={str(i): v["ClassNum"] for i, v in rows
                           if isinstance(v.get("ClassNum"), int) and v["ClassNum"] > 0},
-                slots={str(i): s for i, s in visuals.slots_of(tbl).items()})
+                slots={str(i): s for i, s in visuals.slots_of(tbl).items()},
+                heals=sorted(itemkind.parse_heals(tbl)))
             save(ITEMS_FILE, mark, raw)
         got = _ITEMS[info_path] = dict(
             names={int(i): v for i, v in raw["names"].items()},
@@ -91,5 +92,6 @@ def items(info_path):
                    for i, entries in raw["table"].items()},
             kinds={int(i): k for i, k in raw["kinds"].items()},
             classnum={int(i): v for i, v in raw["classnum"].items()},
-            slots={int(i): v for i, v in raw["slots"].items()})
+            slots={int(i): v for i, v in raw["slots"].items()},
+            heals=set(raw["heals"]))
         return got

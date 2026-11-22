@@ -58,6 +58,7 @@ CHANGE_FIT = (0.12, 0.20)     # discordância que conta como mudança no mapa: t
 CHANGE_LONG_KILLS = 150
 BASE_SPREAD = 0.08            # o normal do personagem: os mapas que rendem até 8% acima do que rende menos
 SERVER_RECENT_S = 24 * 3600   # o evento do servidor mudou: saem as medidas do último dia (feitas com o % errado)
+STALE_S = 2 * 24 * 3600       # sem medida exata na faixa há mais que isto: a tela da XP sugere gravar de novo
 LEARN_KEEP, LEARN_UNKNOWN = 1000, 300  # registro do que o programa aprende (para o relatório; arquivo próprio)
 LEARN_DROP_RECS = 1000                 # gravações com drops guardadas no registro
 LEARN_QUESTS = 500                     # recompensas de missão aprendidas guardadas no registro (para o relatório)
@@ -324,7 +325,7 @@ LUMPY_FRAC = 0.10
 
 def _lumpy(c, cfg, t0, t1, nd):
     """True se algum abate do trecho vale (pela lista, com os bônus) LUMPY_FRAC ou mais da XP do nível."""
-    rows = estimate(c, dict(cfg or {}, xp_mode="lista"), (t0, t1))["rows"]
+    rows = estimate(c, calib_list(cfg), (t0, t1))["rows"]
     return any((r.get("total") or 0) >= LUMPY_FRAC * nd for r in rows)
 
 
@@ -368,7 +369,7 @@ def death_loss(c, cfg, t0, x0, lv, t1):
     nd = need(c, cfg, lv) if deaths else None
     if not nd:
         return 0.0, 0
-    lcfg = dict(cfg or {}, xp_mode="lista")           # pela lista: a correção medida usa estes trechos
+    lcfg = calib_list(cfg)                            # pela lista: a correção medida usa estes trechos
     lost = 0.0
     for td in deaths:
         here = x0 + (estimate(c, lcfg, (t0, td))["xp"] if td > t0 else 0.0) - lost
@@ -409,16 +410,50 @@ def _at_levelup(ta, t, up=True):
 
 
 def _list_xp(c, cfg, rng):
-    """XP dos abates do trecho pela lista de bônus (sem correção e sem missões), ou None se não dá para medir."""
-    est = estimate(c, dict(cfg or {}, xp_mode="lista"), rng)
-    return None if est["unknown"] or not est["kill_xp"] else est["kill_xp"]
+    """XP dos abates do trecho pela lista de bônus (sem correção e sem missões), ou None se não dá para medir: sem
+    XP de abates, ou com abates sem XP conhecida que podem pesar (_kill_band)."""
+    band = _kill_band(c, cfg, rng)
+    return band[0] if band and band[0] else None
+
+
+# Abate de monstro sem XP conhecida (cópia invocada nova, monstro de evento, monstro que o programa ainda não tem):
+# antes, um só deixava o trecho inteiro sem medida, e com ele a troca do evento e as missões da gravação (160
+# Quimeras da escolta do MVP de Amicitia, 2026-11-21, apagaram três gravações). Agora cada um vale entre 0 e o maior
+# abate conhecido do trecho; se essa faixa inteira não passa de UNKNOWN_SHARE da lista, o trecho mede com eles pela
+# metade dela (erro de no máximo metade disso). Faixa maior, ou um chefe sem XP conhecida, e o trecho não mede.
+UNKNOWN_SHARE = 0.03
+
+
+def _kill_band(c, cfg, rng):
+    """(XP dos abates do trecho pela lista, meia largura da faixa dos abates sem XP conhecida), ou None quando eles
+    podem pesar mais que UNKNOWN_SHARE (ou um deles é chefe). Sem abate desconhecido: (XP da lista, 0)."""
+    est = estimate(c, calib_list(cfg), rng)
+    kill = est["kill_xp"]
+    if not est["unknown"]:
+        return kill, 0.0
+    unk = [r for r in est["rows"] if r["xp"] is None]
+    if any(_unknown_boss(c, r["mob"]) for r in unk):
+        return None
+    top = max((r["total"] or 0.0 for r in est["rows"] if r["xp"] is not None), default=0.0)
+    width = len(unk) * top
+    if not kill or width > UNKNOWN_SHARE * kill:
+        return None
+    return kill + width / 2.0, width / 2.0
+
+
+def _unknown_boss(c, mob):
+    """O monstro sem XP conhecida é chefe ou MVP (marca do pacote de aparecer ou classe no rAthena)? Esse pode valer
+    muito mais que os comuns do trecho."""
+    import meter
+    return bool((getattr(c, "job_marks", None) or {}).get(mob)) or bool(meter.rathena_boss(mob))
 
 
 def session_correction(c, cfg):
     """(real ÷ lista, XP real coberta) das subidas de nível desta gravação, ou None."""
     # os trechos já fecharam (terminam numa subida de nível): não mudam com o que chega depois
     sig = (id(c), len(getattr(c, "level_ups", ())), len(getattr(c, "quests_done", ())),
-           len(getattr(c, "quests_added", ())), repr(sorted((cfg or {}).get("xp_bonuses", {}).items())))
+           len(getattr(c, "quests_added", ())), repr(sorted((cfg or {}).get("xp_bonuses", {}).items())),
+           repr(sorted(((cfg or {}).get("xp_server_band") or {}).items())))
     hit = _CACHE.get("sc")
     if hit and hit[0] == sig:
         return hit[1]
@@ -437,7 +472,7 @@ def session_correction(c, cfg):
 
 def _all_samples(cfg):
     """{personagem: [medidas que ainda valem]} de todos os personagens. Medida: [razão, XP coberta, quando, origem,
-    mapa, abates]. Valem as de até 30 dias antes da mais nova de qualquer personagem."""
+    mapa, abates, frágil (1/0)]. Valem as de até 30 dias antes da mais nova de qualquer personagem."""
     raw = {g: list((e or {}).get("samples") or []) for g, e in ((cfg or {}).get("xp_corr") or {}).items()}
     newest = max((_when(x[2]) for xs in raw.values() for x in xs if _when(x[2]) is not None), default=None)
     out = {}
@@ -454,9 +489,20 @@ def _fresh_samples(c, cfg):
 
 
 def _weighted(samples):
-    """(média das razões pesada pela XP de cada medida, nº de medidas) ou None."""
+    """(média das razões pesada pela XP de cada medida, nº de medidas) ou None. A medida frágil (os bônus ligaram ou
+    desligaram no meio do trecho, e a lista dele depende do instante exato: _fragile) só entra quando o grupo não tem
+    nenhuma firme. Na Amicitia (2026-11-21) uma gravação de aquecimento, com o Milagre, o manual, o Njord e o Cetro
+    entrando aos poucos, puxava a média do mapa para baixo junto da medida firme de dois dias antes."""
+    firm = [x for x in samples if not _fragile(x)]
+    if firm:
+        samples = firm
     w = sum(x[1] for x in samples)
     return (sum(x[0] * x[1] for x in samples) / w, len(samples)) if w else None
+
+
+def _fragile(x):
+    """A medida guardada é frágil (sétimo campo, das versões que o anotam; as mais antigas contam como firmes)?"""
+    return len(x) >= 7 and bool(x[6])
 
 
 def _sample_map(x):
@@ -493,7 +539,7 @@ def _baseline(samples):
 MEASURED = ("mapa", "personagens", "registro")   # de onde vem a correção quando o mapa já tem medida exata
 
 
-def predict(cfg, gid, mapname):
+def predict(cfg, gid, mapname, band=None):
     """A correção de um personagem num mapa: (correção, de onde, nº de medidas) ou None. De onde:
     "mapa" — as medidas dele nesse mapa;
     "personagens" — o mapa medido por outros personagens: quanto ele rende a mais para eles (sobre o normal de cada
@@ -510,10 +556,15 @@ def predict(cfg, gid, mapname):
             return w[0], "mapa", w[1]
     base_me = _baseline(mine) if mine else None
     if m:
+        band = band or _char_band(cfg, gid)  # só os personagens da mesma faixa de nível emprestam medidas
+        log_bands = _log_bands(cfg)
         for source, groups, skip in (("personagens", allc, str(gid)), ("registro", _log_samples(cfg), None)):
             eff = weight = 0.0
             n = 0
             for g, xs in groups.items():
+                other = _char_band(cfg, g) if source == "personagens" else log_bands.get(g)
+                if band and other and other != band:
+                    continue
                 on = [x for x in xs if _sample_map(x) == m] if g != skip else []
                 b = _baseline(xs) if on else None
                 w = _weighted(on) if on else None
@@ -531,7 +582,7 @@ def predict(cfg, gid, mapname):
 
 def _log_samples(cfg):
     """As medidas do registro de aprendizado no formato das guardadas ({personagem: [[razão, XP, quando, origem, mapa,
-    abates]]}): sem as de trecho com entrega de missão e só as de até 30 dias antes da mais nova. O registro guarda
+    abates, frágil]]}): sem as de trecho com entrega de missão e só as de até 30 dias antes da mais nova. O registro guarda
     tudo o que foi medido, também o que a configuração não tem: a leitura das gravações que já estavam na pasta e as
     medidas apagadas ao mudar os bônus. Como cada uma vale sobre o normal do personagem na época (predict), uma lista
     que mudou depois não atrapalha. Guardadas enquanto o registro não muda."""
@@ -551,8 +602,28 @@ def _log_samples(cfg):
         if newest is not None and w is not None and newest - w > CALIBRATE_FRESH_S:
             continue
         out.setdefault(str(x["char"]), []).append([float(x["ratio"]), float(x["gain"]), x.get("date"), x.get("src"),
-                                                   map_key(x["map"]), int(x.get("kills") or 0)])
+                                                   map_key(x["map"]), int(x.get("kills") or 0),
+                                                   1 if x.get("fragile") else 0])
     _CACHE["log"] = (key, out)
+    return out
+
+
+def _log_bands(cfg):
+    """{personagem: faixa de nível} pela medida mais nova de cada um no registro de aprendizado."""
+    lrn = (cfg or {}).get("xp_learn")
+    if not isinstance(lrn, dict) or not isinstance(lrn.get("measures"), list):
+        return {}
+    key = (id(lrn), lrn.get("rev"), len(lrn["measures"]))
+    hit = _CACHE.get("logband")
+    if hit and hit[0] == key:
+        return hit[1]
+    newest = {}
+    for x in lrn["measures"]:
+        if isinstance(x, dict) and x.get("char") and isinstance(x.get("level"), (int, float)):
+            if str(x.get("date") or "") >= newest.get(str(x["char"]), ("", 0))[0]:
+                newest[str(x["char"])] = (str(x.get("date") or ""), x["level"])
+    out = {g: band_of(lv) for g, (_d, lv) in newest.items()}
+    _CACHE["logband"] = (key, out)
     return out
 
 
@@ -604,7 +675,7 @@ def _kill_corrections(c, cfg, source, corr):
         i = bisect.bisect_right(starts, t) - 1
         m = names[i] if i >= 0 else ""
         if m not in memo:
-            p = predict(cfg, c.session.gid, m) if m else None
+            p = predict(cfg, c.session.gid, m, band_of(c.session.base_level)) if m else None
             memo[m] = p[0] if p else corr
         return memo[m]
     return at
@@ -624,7 +695,8 @@ def correction(c, cfg):
     sc = session_correction(c, cfg)
     if sc:
         return sc[0], "nivel"
-    p = predict(cfg, c.session.gid, c.map or c.session.map)      # a do mapa em que quem grava está
+    # a do mapa em que quem grava está
+    p = predict(cfg, c.session.gid, c.map or c.session.map, band_of(c.session.base_level))
     if p:
         return p[0], p[2]
     return None, None
@@ -634,36 +706,82 @@ def correction_kind(c, cfg):
     """De onde vem a correção agora: "nivel", "mapa", "personagens", "registro", "personagem" ou None."""
     if session_correction(c, cfg):
         return "nivel"
-    p = predict(cfg, c.session.gid, c.map or c.session.map)
+    p = predict(cfg, c.session.gid, c.map or c.session.map, band_of(c.session.base_level))
     return p[1] if p else None
 
 
 def calibration_hint(c, cfg):
     """Mapa ainda sem medida (nem deste personagem, nem de outro, nem no registro de gravações anteriores), 10 min de
     farm nele e nenhuma subida de nível na gravação: a tela da XP sugere parar e gravar de novo (duas gravações
-    seguidas dão a XP exata, e a previsão passa a valer para o mapa). Só quando gravar de novo mede mesmo este mapa: o
-    trecho desde o começo da gravação não tem entrega de missão, monstro sem XP nem Zerar, e a XP dos abates dele é
-    deste mapa (senão a pessoa reiniciava e o aviso voltava). Devolve o mapa ou None. Não aparece em replay que já
-    acabou de gravar."""
+    seguidas dão a XP exata, e a previsão passa a valer para o mapa). Só quando gravar de novo mede mesmo este mapa
+    (_remeasure_ok). Devolve o mapa ou None. Não aparece em replay que já acabou de gravar."""
+    here = _hint_map(c, cfg)
+    if not here:
+        return None
+    p = predict(cfg, c.session.gid, here, band_of(c.session.base_level))
+    if p and p[1] in MEASURED:
+        return None
+    return here if _remeasure_ok(c, cfg, here) else None
+
+
+def stale_hint(c, cfg):
+    """Nenhuma medida exata na faixa de nível do personagem (dele ou dos outros personagens da faixa) há STALE_S: a
+    tela da XP sugere gravar de novo, como no mapa sem medida. O evento do servidor só se ajusta numa medida exata
+    (detect_server): quando ele acaba, sem medida nova a previsão continua com o evento por dias (a XP ~40% acima do
+    real com VIP, Cetro e evento de +100%). Mesmas condições do calibration_hint (gravando, 10 min de farm, gravar de
+    novo mede mesmo). Devolve há quantos dias foi a última medida, ou None."""
+    here = _hint_map(c, cfg)
+    if not here or not c.session.recorded_at:
+        return None
+    last = last_measure(cfg, band_of(c.session.base_level))
+    rec = _when("%04d-%02d-%02d %02d:%02d" % tuple(c.session.recorded_at[:5]))
+    if last is None or rec is None:
+        return None
+    age = rec + c.now / 1000.0 - last
+    if age < STALE_S or not _remeasure_ok(c, cfg, here):
+        return None
+    return int(age // 86400)
+
+
+def last_measure(cfg, band):
+    """Quando foi a medida exata mais nova dos personagens da faixa `band` (as guardadas na configuração e as do
+    registro de aprendizado), em segundos de _when; None sem nenhuma."""
+    dates = [x[2] for g, xs in ((cfg or {}).get("xp_corr") or {}).items() if isinstance(xs, dict)
+             and _same_band(cfg, g, band) for x in (xs.get("samples") or [])]
+    lrn = (cfg or {}).get("xp_learn")
+    if isinstance(lrn, dict) and isinstance(lrn.get("measures"), list):
+        dates += [x.get("date") for x in lrn["measures"] if isinstance(x, dict)
+                  and band_of(x.get("level")) == band and isinstance(x.get("level"), (int, float))]
+    whens = [w for w in (_when(d) for d in dates) if w is not None]
+    return max(whens) if whens else None
+
+
+def _hint_map(c, cfg):
+    """O mapa onde quem grava está, se a tela da XP pode sugerir gravar de novo: modo automático ou medido, gravando
+    (não num replay que já acabou), personagem conhecido e nenhuma subida de nível na gravação (ela já mede)."""
     mode = cfg.get("xp_mode") if cfg.get("xp_mode") in MODES else "auto"
     if mode not in ("auto", "medido") or getattr(c, "finished", False) or not c.session.gid:
         return None
     if c.session.base_exp is None or getattr(c, "level_ups", None):
         return None
-    here = map_key(c.map or c.session.map)
-    p = predict(cfg, c.session.gid, here)
-    if not here or (p and p[1] in MEASURED):
-        return None
+    return map_key(c.map or c.session.map) or None
+
+
+def _remeasure_ok(c, cfg, here):
+    """Gravar de novo agora mede mesmo o mapa `here`? 10 min de farm nele, e o trecho desde o começo da gravação sem
+    entrega de missão, sem abates sem XP conhecida que pesem (_kill_band), sem Zerar, e com a XP dos abates dele
+    deste mapa (senão a pessoa reiniciava e o aviso voltava)."""
     spans = [s for s, _e, m in c.map_spans() if map_key(m) == here]
     rows = [r for r in kills(c, (spans[-1] if spans else 0, c.now))[0] if r["xp"]]
     if len(rows) < CALIBRATE_MIN_KILLS or c.now - rows[0]["t"] < CALIBRATE_MIN_MS:
-        return None
+        return False
     an = anchors(c)
     t0 = an[-1][0] if an else 0                      # o trecho que a gravação seguinte vai medir (exact_segments)
     cut = getattr(c, "reset_t", None)
-    if (cut is not None and cut > t0) or kills(c, (t0, c.now))[1] or unsure(c, t0, c.now):
-        return None
-    return here if _kill_map(c, t0, c.now) == here else None
+    if ((cut is not None and cut > t0) or unsure(c, t0, c.now)
+            or (kills(c, (t0, c.now))[1] and _kill_band(c, cfg, (t0, c.now)) is None)):
+        return False
+    return _kill_map(c, t0, c.now) == here
 
 
 def meter_name(mob):
@@ -736,7 +854,7 @@ def _measure_log(c, cfg, t0, t1, gain, ratio, mapname, src, when):
                 gain=int(gain), char=str(c.session.gid), job=c.session.job, level=level_at(c, t0), deaths=lost,
                 insured=len(mine) - lost, quests=[x[0] for x in quest_at],
                 quest_at=quest_at, edge=edge, bonus=bon, mobs=mobs, shared=sum(1 for r in rows if r["share"] < 0.999),
-                party=len(c.party), spot_list=bool(event_spots(c)))
+                party=len(c.party), spot_list=bool(event_spots(c)), unknown=sum(1 for r in rows if r["xp"] is None))
 
 
 def _learn_recording(c, cfg, name, when, logs):
@@ -825,10 +943,38 @@ def drop_log(c):
     return out
 
 
-def _check_change(cfg, gid, x):
+# Medida frágil: a XP pela lista do trecho depende muito do instante exato em que os bônus ligaram ou desligaram (o
+# trecho que começa com Milagre, manual, Njord e Cetro entrando nos primeiros minutos). No estudo das 264 gravações
+# da pasta (2026-11-21) esses trechos mediram bem na média, mas uma medida dessas que discorda das do mapa não prova
+# que o mapa mudou: ela entra junto com as outras e não as apaga (_check_change)
+TIMING_SHIFT_MS = 2 * 60000   # o teste: cada bônus que começou ou acabou no meio da gravação valendo 2 min depois
+TIMING_FRAGILE = 0.10         # a lista do trecho muda mais que isso com o teste: a medida é frágil
+
+
+def timing_sensitivity(c, cfg, rng):
+    """Quanto a XP pela lista do recorte muda se cada bônus que começou ou acabou no meio da gravação tivesse valido
+    TIMING_SHIFT_MS depois (fração; 0 = nada muda, negativo = a lista cai). Os bônus que já estavam ativos no começo
+    da gravação e os que seguem até o fim ficam como estão."""
+    rows = [r for r in kills(c, rng)[0] if r["xp"]]
+    if not rows:
+        return 0.0
+    wins, sets, marks, spots = windows(c, cfg), settings(cfg, c), marks_of(c), event_spots(c)
+    d, end = TIMING_SHIFT_MS, c.now - 1000
+    late = {k: (ws if k == "spot" else [(s + d if s > 5000 else s, e + d if e < end else e, v) for s, e, v in ws])
+            for k, ws in wins.items()}
+    now_parts, late_parts = _Parts(wins, sets), _Parts(late, sets)
+    a = b = 0.0
+    for r in rows:
+        a += r["xp"] * factor_at(r["t"], wins, sets, r["mob"], marks, now_parts.at(r["t"]), spots)
+        b += r["xp"] * factor_at(r["t"], late, sets, r["mob"], marks, late_parts.at(r["t"]), spots)
+    return b / a - 1.0 if a else 0.0
+
+
+def _check_change(cfg, gid, x, keep=None):
     """Medida nova que discorda das antigas do mesmo personagem no mesmo mapa (mais que 12% num trecho longo, 20%
     num curto): o mapa mudou (evento começou ou acabou). As medidas antigas desse mapa saem, de todos os personagens,
-    e a mudança vai para o registro."""
+    e a mudança vai para o registro. `keep()` True: a medida discorda, mas não prova que o mapa mudou (medida frágil,
+    replay aberto à mão): as antigas ficam e ela entra junto com elas."""
     m = _sample_map(x)
     p = predict(cfg, gid, m) if m else None
     if not p or p[1] != "mapa":
@@ -836,8 +982,13 @@ def _check_change(cfg, gid, x):
     fit = CHANGE_FIT[0] if _sample_kills(x) >= CHANGE_LONG_KILLS else CHANGE_FIT[1]
     if abs(x[0] / p[0] - 1.0) <= fit:
         return False
+    if keep is not None and keep():
+        return False
     t_new = _when(x[2])
-    for e in ((cfg.get("xp_corr") or {}).values()):
+    band = _char_band(cfg, gid)
+    for g, e in ((cfg.get("xp_corr") or {}).items()):
+        if not isinstance(e, dict) or not _same_band(cfg, g, band):
+            continue                              # personagem de outra faixa de nível: as medidas dele ficam
         e["samples"] = [y for y in e.get("samples", []) if _sample_map(y) != m
                         or (t_new is not None and _when(y[2]) is not None and _when(y[2]) >= t_new)]
     lrn = _learn(cfg)
@@ -847,20 +998,32 @@ def _check_change(cfg, gid, x):
     return True
 
 
-def calibrate(c, cfg, xp_after):
+def calibrate(c, cfg, xp_after, live=True):
     """Guarda em cfg["xp_corr"][personagem] as medidas de "XP real ÷ XP pela lista" desta gravação: cada trecho
     até uma subida de nível e o trecho até a gravação seguinte (se ela começou logo depois). Trecho com menos de
     10 min não conta. Também anota a XP do nível que o jogo mandou (cfg["xp_levels"]). Devolve a correção média
-    nova ou None."""
+    nova ou None. `live` False: replay aberto à mão, que pode ser de outro jogador (com outros bônus de conta):
+    mede e guarda, mas não troca o evento do servidor nem apaga as medidas que o mapa já tem."""
     s = c.session
     if not getattr(c, "path", None) or not s.gid or not gear_ready():
         return None
+    # a faixa de nível do personagem (BAND_LEVEL): o evento e as medidas dos outros só valem dentro dela
+    e0 = (cfg.get("xp_corr") or {}).get(str(s.gid))
+    if isinstance(e0, dict):
+        was, now_band = e0.get("band"), band_of(s.base_level)
+        bands = cfg.get("xp_server_band") or {}
+        if was and was != now_band and now_band not in bands and isinstance(bands.get(was), dict):
+            # passou de faixa: a nova, ainda sem evento deduzido, começa com o que ele já tinha (as medidas dele eram
+            # sobre esse evento)
+            cfg.setdefault("xp_server_band", {})[now_band] = dict(bands[was])
+        e0["band"] = now_band
     if s.base_level and s.next_exp and s.next_exp != 999999999:
         cfg.setdefault("xp_levels", {}).setdefault(str(s.job), {})[str(s.base_level)] = s.next_exp
     remember_manual(c, cfg)
     segs = exact_segments(c, cfg, xp_after)
     detect_spot(c, cfg, segs)                    # marcas automáticas de versões anteriores saem
-    detect_server(c, cfg, segs)                  # antes de medir: a correção é sobre a lista já acertada
+    if live:
+        detect_server(c, cfg, segs)              # antes de medir: a correção é sobre a lista já acertada
     when = "%04d-%02d-%02d %02d:%02d" % tuple(s.recorded_at[:5])
     name = os.path.basename(c.path)
     new, logs = [], []
@@ -873,17 +1036,20 @@ def calibrate(c, cfg, xp_after):
         m = _kill_map(c, t0, t1) or ""
         src = "%s#%s" % (name, tag)
         ratio = round(gain / est, 4)
-        logs.append(_measure_log(c, cfg, t0, t1, gain, ratio, m, src, when))
+        fragile = 1 if abs(timing_sensitivity(c, cfg, (t0, t1))) > TIMING_FRAGILE else 0
+        logs.append(dict(_measure_log(c, cfg, t0, t1, gain, ratio, m, src, when), fragile=fragile))
         if not unsure(c, t0, t1):                     # trecho com missão entregue vai só para o registro
-            new.append([ratio, gain, when, src, m, len(kills(c, (t0, t1))[0])])
+            new.append([ratio, gain, when, src, m, len(kills(c, (t0, t1))[0]), fragile])
     learn_quests(c, cfg, segs)
     _learn_recording(c, cfg, name, when, logs)
     if not new:
         return None
     entry = cfg.setdefault("xp_corr", {}).setdefault(str(s.gid), {})
+    entry["band"] = band_of(s.base_level)
     entry["samples"] = [x for x in entry.get("samples", []) if not x[3].startswith(name + "#")]
     for x in new:
-        _check_change(cfg, s.gid, x)                 # o mapa mudou: as medidas antigas dele saem
+        # o mapa mudou: as medidas antigas dele saem; não por uma medida frágil nem por um replay aberto à mão
+        _check_change(cfg, s.gid, x, keep=lambda x=x: not live or _fragile(x))
     entry["samples"] = (entry["samples"] + new)[-CALIBRATE_KEEP:]
     return stored_correction(c, cfg)[0]
 
@@ -969,36 +1135,40 @@ def detect_server(c, cfg, segs=None, xp_after=None):
     """Deduz o evento do servidor da XP exata (só no modo automático). Em cada trecho exato que serve (sem entrega
     de missão, sem manual de valor desconhecido), a lista é refeita com o evento em 0, 50, 100 e 200%; se um deles
     fecha a 6% do real e o que está marcado erra mais de 12%, o programa marca esse (e esquece as medidas antigas,
-    que eram sobre a lista errada). Devolve o % novo (0 = sem evento) ou None se nada mudou."""
+    que eram sobre a lista errada). Vale só para a faixa de nível do personagem (BAND_LEVEL): o evento deduzido fica
+    em cfg["xp_server_band"] e as medidas esquecidas são as dessa faixa. Devolve o % novo (0 = sem evento) ou None
+    se nada mudou."""
     if (cfg.get("xp_mode") if cfg.get("xp_mode") in MODES else "auto") != "auto" or not _fresh(c) or not gear_ready():
         return None
+    band = band_of(c.session.base_level)
     segs = exact_segments(c, cfg, xp_after) if segs is None else segs
     known = (cfg.get("xp_manual_last") or {}).get(str(c.session.gid))
     use = [(t0, t1, gain) for t0, t1, gain, _tag in segs
            if not unsure(c, t0, t1) and _big(c, cfg, t0, t1, gain) and (known or not _manual_blind(c, t0, t1))
            and not _foreign_in(c, t0, t1)]          # a lista de outra versão diz nada do evento
-    real = sum(g for _a, _b, g in use)
-    if not real:
-        return None
-
-    def ratio(pct):
+    cur = settings(cfg, c)["server"]                # o da faixa do personagem
+    now = cur["pct"] if cur["on"] else 0
+    pcts = set(SERVER_CHOICES) | {now}
+    lists = {}
+    for pct in pcts:
         bon = dict(cfg.get("xp_bonuses") or {})
         bon["server"] = dict(on=pct > 0, pct=pct or 100)
-        est = [_list_xp(c, dict(cfg, xp_bonuses=bon), (t0, t1)) for t0, t1, _g in use]
-        return real / sum(est) if all(est) else None
-    cur = settings(cfg)["server"]
-    now = cur["pct"] if cur["on"] else 0
-    fits = {pct: ratio(pct) for pct in set(SERVER_CHOICES) | {now}}
-    if any(v is None for v in fits.values()):
+        lists[pct] = [_list_xp(c, dict(cfg, xp_bonuses=bon, xp_server_band={}), (t0, t1)) for t0, t1, _g in use]
+    # o trecho que não mede (abates sem XP conhecida que podem pesar) fica de fora; os outros ainda dizem o evento
+    keep = [i for i in range(len(use)) if all(lists[p][i] for p in pcts)]
+    real = sum(use[i][2] for i in keep)
+    if not real:
         return None
+    fits = {p: real / sum(lists[p][i] for i in keep) for p in pcts}
+    use = [use[i] for i in keep]
     best = min(SERVER_CHOICES, key=lambda p: abs(fits[p] - 1.0))
     if best == now or abs(fits[best] - 1.0) > SERVER_FIT or abs(fits[now] - 1.0) < SERVER_MISS:
         return None
     t_rec = _when("%04d-%02d-%02d %02d:%02d" % tuple(c.session.recorded_at[:5]))
-    recent = [x for xs in _all_samples(cfg).values() for x in xs
+    recent = [x for g, xs in _all_samples(cfg).items() if _same_band(cfg, g, band) for x in xs
               if t_rec is not None and _when(x[2]) is not None and t_rec - _when(x[2]) <= SERVER_RECENT_S]
     if fits[now] > 1.0:
-        # XP acima da lista num mapa, mas as medidas recentes de outros mapas (de qualquer personagem) fecham com
+        # XP acima da lista num mapa, mas as medidas recentes de outros mapas (dos personagens da faixa) fecham com
         # ela: é coisa do mapa (o spotlight dá mais a alguns monstros), não do servidor; a correção do mapa cuida
         here = {_kill_map(c, t0, t1) or "" for t0, t1, _g in use}
         other = [x for x in recent if _sample_map(x) and _sample_map(x) not in here
@@ -1006,13 +1176,14 @@ def detect_server(c, cfg, segs=None, xp_after=None):
         w = _weighted([[x[0], _sample_kills(x)] for x in other])
         if w and abs(w[0] - 1.0) <= SERVER_FIT:
             return None
-    cfg.setdefault("xp_bonuses", {})["server"] = dict(on=best > 0, pct=best or 100, auto=True)
-    # as medidas do último dia foram feitas com o % errado; as mais velhas eram certas para a época delas
-    for e in (cfg.get("xp_corr") or {}).values():
-        e["samples"] = [x for x in e.get("samples", []) if x not in recent]
+    cfg.setdefault("xp_server_band", {})[band] = dict(on=best > 0, pct=best or 100, auto=True)
+    # as medidas do último dia (da faixa) foram feitas com o % errado; as mais velhas eram certas para a época delas
+    for g, e in (cfg.get("xp_corr") or {}).items():
+        if isinstance(e, dict) and _same_band(cfg, g, band):
+            e["samples"] = [x for x in e.get("samples", []) if x not in recent]
     lrn = _learn(cfg)
     lrn["server"] = (lrn["server"] + [dict(date="%04d-%02d-%02d" % tuple(c.session.recorded_at[:3]), old=now,
-                                           new=best)])[-50:]
+                                           new=best, band=band)])[-50:]
     touch_learn(lrn)
     _CACHE.pop("sc", None)
     return best
@@ -1051,7 +1222,6 @@ def learn_quests(c, cfg, segs):
     # sem medida exata dos abates (evento do servidor desmarcado, nenhum nível sem missão...) a lista pode errar
     # muito, e o erro iria todo para a missão: aí ela só é aprendida se pesar quase o trecho todo
     share_min = QUEST_LEARN_MIN if corr0 else QUEST_LEARN_BLIND
-    lcfg = dict(cfg or {}, xp_mode="lista")
     learned = False
     name = os.path.basename(getattr(c, "path", None) or "")
     when = "%04d-%02d-%02d" % tuple(c.session.recorded_at[:3]) if c.session.recorded_at else ""
@@ -1061,15 +1231,15 @@ def learn_quests(c, cfg, segs):
             continue
         if tag != "fim" and any(abs(q["t"] - t1) <= LEVELUP_TICK_MS for q in qs):
             continue                                  # a entrega subiu o nível: a sobra dela não aparece
-        est = estimate(c, lcfg, (t0, t1))
-        if est["unknown"]:
-            continue
-        kill = est["kill_xp"] * corr
+        band = _kill_band(c, cfg, (t0, t1))
+        if band is None:
+            continue                                  # abates sem XP conhecida que podem pesar
+        kill, loose = band[0] * corr, band[1] * corr  # loose: o quanto eles podem mexer nos abates
         pending = [q for q in qs if q["xp"] is None or _quest_partners(cfg, q["quest"])]
         known = [q for q in qs if q not in pending]
         if pending:
             rest = gain - kill - sum(q["xp"] for q in known)
-            if rest < share_min * gain:
+            if rest < share_min * gain or loose > QUEST_BAND * rest:
                 continue
             ids = sorted({q["quest"] for q in pending})
             entries = []
@@ -1090,7 +1260,7 @@ def learn_quests(c, cfg, segs):
             # Monstros: a mesma missão várias vezes no dia, cada entrega com a recompensa inteira)
             q = known[0]
             rest = gain - kill
-            if rest < share_min * gain:
+            if rest < share_min * gain or loose > QUEST_BAND * rest:
                 continue
             entry = dict(base=int(round(rest / sum(x["mult"] for x in known))), level=level_at(c, q["t"]),
                          mult=round(q["mult"], 3))
@@ -1168,6 +1338,56 @@ MANUALS = [("Manual de Combate", 50), ("Manual de Combate com Chiclete", 50), ("
            ("Enciclopédia de Combate", 200), ("Manual de Combate HE", 200), ("Manual de Combate x3", 300)]
 # "auto" (padrão): a lista, com a correção medida assim que existir uma, e o evento do servidor deduzido da XP exata
 MODES = ("auto", "lista", "medido", "fixo")
+# Os bônus que o programa vê na gravação (status, Milagre, equipamento) sempre contam, menos no modo "Pela lista
+# abaixo": lá a caixa "Contar" e o % valem; para ver a XP sem um deles há o simulador. As medidas de XP exata são
+# sempre sobre esta lista travada. Um amigo do usuário (2026-11-22) tinha desmarcado o Njord e o Cetro no automático:
+# as medidas saíram sobre uma lista sem eles, uma gravação de aquecimento passou por firme e a previsão errou 37%.
+LOCKED = tuple(b["key"] for b in BONUSES if b["status"] not in (None, "mapa"))
+LOCKED_PCT = tuple(k for k in LOCKED if k != "manual")    # o manual usado continua escolhível (o jogo nem sempre manda)
+
+
+def locked(cfg):
+    """Os bônus vistos na gravação (LOCKED) contam sempre? Sim, menos em "Pela lista abaixo". As contas da calibração
+    passam xp_locked=True (calib_list): as medidas são sempre sobre a lista travada."""
+    cfg = cfg or {}
+    if "xp_locked" in cfg:
+        return bool(cfg["xp_locked"])
+    return (cfg.get("xp_mode") if cfg.get("xp_mode") in MODES else "auto") != "lista"
+
+
+def calib_list(cfg):
+    """A configuração das contas pela lista da calibração: sem correção, com os bônus vistos sempre contando."""
+    return dict(cfg or {}, xp_mode="lista", xp_locked=True)
+
+
+def overridden(cfg):
+    """O modo da pessoa conta sempre um bônus visto na gravação que ela desmarcou (ou cujo % ela mudou)?"""
+    return locked(cfg) and settings(cfg or {}) != settings(dict(cfg or {}, xp_locked=False))
+
+
+# Faixas de nível: o evento que o automático deduz, a limpeza das medidas quando ele troca ou quando um mapa muda e as
+# medidas emprestadas de outro personagem ficam dentro da faixa (o usuário, 2026-11-22: um Ferreiro abaixo do 100,
+# que sobe de nível a cada poucos minutos, troca de mapa e entrega missões, mexia na conta de um Mestre Celestial 230).
+# Medido nas gravações da pasta, cada jogador com a própria configuração: trechos longos com mediana 2,9% e 80% até
+# 9,5% (antes 3,0% e 19,9%); o amigo foi de 20,5% para 9,5%. O evento marcado à mão vale para todas as faixas.
+BAND_LEVEL = 200
+
+
+def band_of(level):
+    """Faixa de nível do personagem: "200+" (as classes 4) ou "<200"."""
+    return "200+" if (level or 0) >= BAND_LEVEL else "<200"
+
+
+def _char_band(cfg, gid):
+    """A faixa do personagem pela última calibração dele (None nas configurações de antes desta regra)."""
+    e = ((cfg or {}).get("xp_corr") or {}).get(str(gid))
+    return e.get("band") if isinstance(e, dict) else None
+
+
+def _same_band(cfg, gid, band):
+    """O personagem está na faixa `band`? Sem saber a dele (ou sem faixa pedida), conta junto, como antes."""
+    b = _char_band(cfg, gid)
+    return b is None or band is None or b == band
 SERVER_CHOICES = (0, 50, 100, 200)   # o evento do servidor costuma ser +50%, +100% ou +200%
 SERVER_FIT, SERVER_MISS = 0.06, 0.12  # o evento deduzido tem de fechar a 6% do real, e o marcado errar mais de 12%
 SPOT_CHOICES = (20.0, 50.0)           # os que o jogo usa: +20% nos mapas de nível alto, +50% nos de nível mais baixo
@@ -1247,15 +1467,31 @@ def settings(cfg, c=None):
     também "last": o % do último manual visto nesse personagem (para quando o manual já estava ativo no começo da
     gravação e o jogo não manda o valor)."""
     saved = cfg.get("xp_bonuses") or {}
+    lock = locked(cfg)
     out = {}
     for b in BONUSES:
         st = saved.get(b["key"]) or {}
         pct = st.get("pct")
-        out[b["key"]] = dict(on=bool(st.get("on", b["on"])), pct=float(pct) if isinstance(pct, (int, float)) else b["pct"])
+        pct = float(pct) if isinstance(pct, (int, float)) else b["pct"]
+        on = bool(st.get("on", b["on"]))
+        if lock and b["key"] in LOCKED:       # visto na gravação: conta, com o % do jogo ou o padrão
+            on = True
+            if b["key"] in LOCKED_PCT:
+                pct = float(b["pct"])
+        out[b["key"]] = dict(on=on, pct=pct)
     if c is not None:
         last = (cfg.get("xp_manual_last") or {}).get(str(c.session.gid))
         if isinstance(last, (int, float)) and last > 0:
             out["manual"]["last"] = float(last)
+        # o evento que o automático deduziu para a faixa de nível do personagem vale no lugar do geral; a faixa ainda
+        # sem evento deduzido usa o da faixa de onde o personagem veio (acabou de passar do 199 para o 200)
+        bands = cfg.get("xp_server_band") or {}
+        over = bands.get(band_of(c.session.base_level))
+        if over is None:
+            own = _char_band(cfg, c.session.gid)
+            over = bands.get(own) if own else None
+        if isinstance(over, dict) and isinstance(over.get("pct"), (int, float)):
+            out["server"] = dict(on=bool(over.get("on")), pct=float(over["pct"]))
     return out
 
 
@@ -1496,6 +1732,26 @@ def factor(c, cfg):
     return None, ("auto" if mode == "auto" else "lista", None), 1.0
 
 
+# Fora do automático (o usuário, 2026-11-22: "um aviso para o caso de a pessoa não utilizar o automático e o
+# automático chegar a um valor muito diferente"): a tela avisa quando ele estimaria AUTO_GAP ou mais de diferença
+AUTO_GAP = 0.15
+
+
+def auto_gap(c, cfg, rng=None):
+    """Fora do automático: (diferença, XP pelo automático, XP pelo modo escolhido) do recorte quando o automático
+    daria AUTO_GAP ou mais de diferença (ele corrige a lista pela XP exata medida e conta os bônus que aparecem na
+    gravação); senão None."""
+    cfg = cfg or {}
+    if (cfg.get("xp_mode") if cfg.get("xp_mode") in MODES else "auto") == "auto":
+        return None
+    mine = estimate(c, cfg, rng)["xp"]
+    auto = estimate(c, dict(cfg, xp_mode="auto"), rng)["xp"]
+    if not mine or not auto:
+        return None
+    diff = auto / mine - 1.0
+    return (diff, auto, mine) if abs(diff) >= AUTO_GAP else None
+
+
 # XP das missões: o replay mostra a entrega (a missão sai da lista), não quanto ela rende. A recompensa sem bônus vem
 # do que o programa aprendeu ao fechar um nível (learn_quests, cfg["xp_quests"]: o que o jogo pagou no LATAM) ou da
 # tabela data/quest_exp.json (tools/build_quest_exp.py: o medido no LATAM, o RewardEXP do jogo e os scripts do
@@ -1513,6 +1769,7 @@ QUEST_XP_ON = True
 QUEST_LEARN_MIN = 0.25               # só aprende a XP de uma missão que pese pelo menos isso do trecho exato
 QUEST_LEARN_BLIND = 0.67             # ...ou isto, quando os abates ainda não têm medida exata (a lista pode errar muito)
 QUEST_RELEARN_FIT = 0.15             # missão já conhecida só é reaprendida se o medido errar mais que isso
+QUEST_BAND = 0.05                    # abates sem XP conhecida no trecho podem mexer no máximo isso na recompensa
 # bônus anotados em cada entrega de missão no registro de aprendizado (o relatório junta e mostra quais valem)
 QUEST_LOG_KEYS = ("server", "vip", "scepter", "kafra", "manual", "njord", "miracle", "gear")
 
@@ -1656,7 +1913,7 @@ def quests_uncounted(c, cfg=None):
 
 # o que da configuração entra na conta da estimativa (a guardada vale enquanto isto e a gravação não mudarem)
 EST_KEYS = ("xp_mode", "xp_fixed", "xp_bonuses", "xp_corr", "xp_manual_last", "xp_spot", "xp_event_off", "xp_quests",
-            "xp_levels")
+            "xp_levels", "xp_locked", "xp_server_band")
 
 
 def estimate(c, cfg, rng=None):
@@ -1867,6 +2124,7 @@ class _Gear:
         self.table, self.names, self.kinds, self._thread = None, {}, {}, None
         self.display = {}             # item -> nome que o jogo mostra (a lista para a busca do aviso de item)
         self.art = {}                 # item -> nome do arquivo da ilustração dele no data.grf
+        self.heals = set()            # itens que recuperam HP ou SP (poções, elixires)
 
     def start(self, path):
         if self.table is not None or self._thread is not None or not path:
@@ -1879,6 +2137,7 @@ class _Gear:
                 import gamecache
                 d = gamecache.items(path)
                 self.names, self.display, self.art, self.kinds = d["names"], d["display"], d["art"], d["kinds"]
+                self.heals = d["heals"]
                 self.table = d["table"]
             except (OSError, ValueError, IndexError, KeyError):
                 self.table = {}
@@ -2507,7 +2766,8 @@ def sim_map(c, cfg, rng, mapname, over=None):
         return None
     f, source_f, corr = factor(c, cfg)
     mode = cfg.get("xp_mode") if cfg.get("xp_mode") in MODES else "auto"
-    p = predict(cfg, c.session.gid, mapname) if mode in ("auto", "medido") and f is None else None
+    p = (predict(cfg, c.session.gid, mapname, band_of(c.session.base_level))
+         if mode in ("auto", "medido") and f is None else None)
     corr_x = p[0] if p else corr
     wins = sets = marks = parts = spots = None
     if f is None:

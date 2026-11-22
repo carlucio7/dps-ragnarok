@@ -150,8 +150,13 @@ def text(cfg, version=""):
     # mudanças detectadas
     changes = [(c["date"], _("%s: ×%s → ×%s (o mapa mudou: evento começou ou acabou?)") % (
         c["map"], dec("%.2f" % c["old"]), dec("%.2f" % c["new"]))) for c in lrn.get("changes") or []]
-    changes += [(s["date"], _("evento do servidor: +%d%% → +%d%% (deduzido pela XP exata)") % (s["old"], s["new"]))
-                for s in lrn.get("server") or []]
+    def server_text(s):
+        text = _("evento do servidor: +%d%% → +%d%% (deduzido pela XP exata)") % (s["old"], s["new"])
+        if s.get("band"):                          # o evento deduzido vale só na faixa de nível (xp.BAND_LEVEL)
+            text += " · " + ((_("personagens de nível %d+") if s["band"] == "200+" else
+                              _("personagens abaixo do nível %d")) % xp.BAND_LEVEL)
+        return text
+    changes += [(s["date"], server_text(s)) for s in lrn.get("server") or []]
     if changes:
         lines.append("== %s ==" % _("Mudanças detectadas"))
         lines += ["%s  %s" % (d, t) for d, t in sorted(changes)]
@@ -168,9 +173,15 @@ def text(cfg, version=""):
                 deaths.append(_("%d sem seguro") % m["deaths"])
             if m.get("insured"):
                 deaths.append(_("%d com seguro") % m["insured"])
+            kills_txt = "%d (%d)" % (m.get("kills") or 0, m.get("shared") or 0)
+            if m.get("unknown"):                  # poucos, contados pela metade (xp._kill_band)
+                kills_txt += ", " + _("%d sem XP conhecida") % m["unknown"]
+            ratio_txt = "×" + dec("%.3f" % m["ratio"])
+            if m.get("fragile"):                  # os bônus ligaram no meio: só vale sem medida firme (xp._weighted)
+                ratio_txt += " " + _("(frágil)")
             lines.append(" · ".join([
                 m["date"][:10], m.get("map") or "?", dec("%.1f" % (m.get("mins") or 0)),
-                "%d (%d)" % (m.get("kills") or 0, m.get("shared") or 0), "×" + dec("%.3f" % m["ratio"]),
+                kills_txt, ratio_txt,
                 "%s %s" % (letters.get(m.get("char"), "?"), m.get("level") or "?"),
                 ", ".join(deaths) or _("sem mortes"),
                 (_("missões %s") % ", ".join(str(q) for q in m["quests"])) if m.get("quests") else _("sem missões"),
@@ -291,7 +302,8 @@ def data_lines(cfg, version, letters=None):
                             job=m.get("job"), level=m.get("level"), deaths=m.get("deaths"), insured=m.get("insured"),
                             quests=m.get("quests") or [], quest_at=m.get("quest_at") or [], edge=m.get("edge") or [],
                             bonus=m.get("bonus") or {}, mobs=m.get("mobs") or [],
-                            shared=m.get("shared"), party=m.get("party"), spot_list=m.get("spot_list"))))
+                            shared=m.get("shared"), party=m.get("party"), spot_list=m.get("spot_list"),
+                            unknown=m.get("unknown") or 0, fragile=m.get("fragile") or 0)))
     for q in lrn.get("quests") or []:
         # mid: a marca da medida do mesmo trecho (a ferramenta não conta duas vezes)
         out.append(row(dict(t="q", id=_mark(secret, "%s|%s" % (q.get("src"), q.get("quest"))), quest=q.get("quest"),

@@ -401,7 +401,8 @@ P_ITEM_ENTRY = 0x009D      # ZC_ITEM_ENTRY: item que já estava no chão entrou 
 P_ITEM_GONE = 0x00A1       # ZC_ITEM_DISAPPEAR: item saiu do chão (pegaram ou acabou o tempo)
 P_PICKUP = 0x0B41          # ZC_ITEM_PICKUP_ACK (novo): item entrou na bolsa de quem grava
 P_MVP_ITEM = 0x010A        # ZC_MVP_GETTING_ITEM: prêmio de MVP para quem grava
-ITEM_PACKETS = {P_ITEM_FALL, P_ITEM_ENTRY, P_ITEM_GONE, P_PICKUP, P_MVP_ITEM}
+P_MVP = 0x010C            # ZC_MVP: quem ganhou o MVP (o AID); chega repetido no mesmo instante
+ITEM_PACKETS = {P_ITEM_FALL, P_ITEM_ENTRY, P_ITEM_GONE, P_PICKUP, P_MVP_ITEM, P_MVP}
 # a experiência ganha não fica no replay: só o total no começo da gravação (sessão, chunks 1015/1018)
 
 P_MOVE_SELF = 0x0087       # ZC_NOTIFY_PLAYERMOVE: tempo, MoveData[6] (só quem grava)

@@ -8,6 +8,7 @@ import re
 import struct
 import sys
 import threading
+import time
 
 import clientdata
 import i18n
@@ -498,6 +499,12 @@ MECH_REPEAT_MS = 3000         # o mesmo aviso do mesmo chefe não repete antes d
 MAXPAIN_ATK = 717             # o reflexo da Dor Máxima; sem o status no chefe, ele a usou fora da tela
 MAXPAIN_GUESS_MS = 12000      # a Dor Máxima dura 10 s: reflexo depois disso já é outro uso
 SELF_DESTRUCT = 173           # Autodestruição (os Robovacs do Aquila tiram HP fixo, sem pacote de dano)
+# "Curar" do monstro (NPC_DAMAGE_HEAL), usado nele mesmo: por 30 s o dano físico (nível 1), mágico (2) ou especial
+# (3) vira cura; os golpes chegam com dano 0 (o Atroce do Laboratório Central, a cada 35–43 s). O status não chega
+# para quem vê, só o uso (que vem duas vezes, 1 s uma da outra)
+DAMAGE_HEAL = 753
+DAMAGE_HEAL_MECH = {1: "heal_phys", 2: "heal_magic", 3: "heal_misc"}
+DAMAGE_HEAL_S = 30
 # anúncios da sala do Aquila (chave do texto, igual em todo idioma): o éter amarelo acabou / foi fornecido, e a
 # recarga do éter verde terminou (a defesa do núcleo some por 5 s: a quebra de defesa)
 ROOM_KEYS = {"ni0XDg": ("overload", True), "nS0XDg": ("overload", False), "my0XDg": ("defbreak", True)}
@@ -511,6 +518,7 @@ SURVIVED_FRAC = 0.5           # sumiu "morto" tendo levado menos que metade da �
 HATE_SKILL = 434              # Oposição Solar, Lunar e Estelar: o nível do uso diz a casa (1, 2, 3)
 HIDE_NAMES = False            # ligado só enquanto se copia uma imagem sem nomes: cada jogador aparece como a classe
 BOSS_ALERT_HP = 50000000      # sem marca de MVP, só avisa de chefe com pelo menos isto de HP na tabela
+MVP_REPEAT_MS = 2000          # o aviso de MVP (0x010c) chega repetido, até 70 vezes em 8 ms: um só por MVP
 
 
 class Hit:
@@ -618,6 +626,7 @@ class Combat:
         self._pending_pickups = []    # pickups ainda sem item do chão (só os recentes)
         self._gone_by_item = {}       # item -> drops que sumiram do chão, na ordem em que sumiram
         self.mvp_items = []           # (t, item)
+        self.mvp_log = []             # (t, AID) de quem ganhou cada MVP à vista (0x010c, um por MVP)
         self.version = 0             # muda a cada evento novo (para a interface saber se redesenha)
         if session.pos:
             self.add_pos(session.aid, 0, session.pos, session.pos)
@@ -678,6 +687,10 @@ class Combat:
         self.cooldowns = []           # (t, skill, ms) de cada recarga que o jogo mandou para quem grava
         self.post_delays = []         # (t, pós-conjuração de base em ms, depois das reduções em ms) de quem grava
         self.item_uses = []           # (t, quem usou, item) de cada item usado por alguém à vista
+        self.item_left = []           # (t, item, quantos sobraram) de cada item que quem grava usou
+        # golpes de um aliado nele mesmo: (t, aid, dano, skill). O dano que a Redenção passa para quem a usou chega
+        # assim (skill 0), um pacote por golpe que o aliado protegido levou (o cartão "Redentor")
+        self.self_hits = []
         self.cast_stops = []          # (t, quem) de cada conjuração interrompida
         self.skill_fails = []         # (t, skill, causa) de cada vez que a skill de quem grava não saiu
         if session.option:
@@ -1099,6 +1112,13 @@ class Combat:
             if len(d) >= 6:
                 self.mvp_items.append((t, struct.unpack_from("<I", d, 2)[0]))
                 self.version += 1
+        elif pid == rrf.P_MVP:
+            if len(d) >= 6:
+                aid = struct.unpack_from("<I", d, 2)[0]
+                last = self.mvp_log[-1] if self.mvp_log else None
+                if last is None or last[1] != aid or t - last[0] > MVP_REPEAT_MS:
+                    self.mvp_log.append((t, aid))
+                    self.version += 1
         elif pid == rrf.P_PARAM:
             r = rrf.parse_param(d)
             if r is not None and r[0] in rrf.STAT_PARAMS:
@@ -1148,6 +1168,8 @@ class Combat:
                     e = self.entities.get(r[0])
                     if e is not None and e.job in DEF_BREAK_BOSSES:
                         self.mech(t, r[0], "def_break")
+                elif r[2] == DAMAGE_HEAL and r[0] == r[1] and self.boss_like(r[0]):
+                    self.mech(t, r[0], DAMAGE_HEAL_MECH.get(rrf.skill_use_level(pid, d), "heal_phys"))
         elif pid in rrf.CAST_PACKETS:
             r = rrf.parse_cast(d)
             if r is not None and self.fresh(("c",) + r[:3], t):
@@ -1164,6 +1186,8 @@ class Combat:
             r = rrf.parse_item_use(d)
             if r is not None and r[3]:
                 self.item_uses.append((t, r[0], r[1]))
+                if r[0] == self.me:
+                    self.item_left.append((t, r[1], r[2]))
         elif pid == rrf.P_CAST_STOP:
             if len(d) >= 6:
                 self.cast_stops.append((t, struct.unpack_from("<I", d, 2)[0]))
@@ -1401,7 +1425,7 @@ class Combat:
 
     def mech(self, t, aid, kind, **extra):
         """Mecânica do chefe que vira aviso no widget: Dor Máxima ligou/acabou, modo defesa (Aquila), defesa caiu,
-        Aliviar muito alto (as Almas do Betelgeuse)."""
+        Aliviar muito alto (as Almas do Betelgeuse), dano que vira cura (o Atroce)."""
         key = (self.alias.get(aid, aid), kind)
         if t - self._mech_seen.get(key, -10 ** 9) < (RELIEF_REPEAT_MS if kind == "relief" else MECH_REPEAT_MS):
             return
@@ -1412,7 +1436,10 @@ class Combat:
             text = {"maxpain_on": _("%s: Dor Máxima ativa, segure os golpes grandes"),
                     "maxpain_off": _("%s: Dor Máxima acabou"),
                     "defense": _("%s: modo defesa, o dano quase não entra"),
-                    "def_break": _("%s: a defesa caiu, 5 s de dano total")}[kind] % self.name_of(aid)
+                    "def_break": _("%s: a defesa caiu, 5 s de dano total"),
+                    "heal_phys": _("%s: dano físico vira cura por 30 s"),
+                    "heal_magic": _("%s: dano mágico vira cura por 30 s"),
+                    "heal_misc": _("%s: dano especial vira cura por 30 s")}[kind] % self.name_of(aid)
         self.alert(t, "boss", text)
         self.boss_alerts[self.alert_seq] = dict(extra, t=t, aid=aid, mech=kind, element=None, immune=None,
                                                 size=None, prev_size=None, form=None)
@@ -1779,6 +1806,8 @@ class Combat:
                     self.maxpain_reflect(x.time, x.src)
             return
         if self.is_friendly(x.dst):
+            if x.src == x.dst and x.damage > 0:
+                self.self_hits.append((x.time, x.dst, x.damage, x.skill))
             return
         if not self.counts_target(x.dst):
             if x.damage > 0:                  # fora do filtro de dano, mas o abate continua valendo XP
@@ -1836,12 +1865,14 @@ class Combat:
         self.closed_ms = 0
         self.recent.clear()
         self.hits, self.uses, self.casts = [], [], []
+        self.self_hits = []
         self.ground_cells = {}
         self.deaths = {}
         self.death_log = []
         self.death_who = {}
         self.off_dmg, self.off_last, self.off_life = {}, None, {}
         self.drops, self.pickups, self.mvp_items, self.drop_ids = [], [], [], {}
+        self.mvp_log, self.item_left = [], []
         self._pending_pickups, self._gone_by_item = [], {}
         self.was_reset = True
         self.version += 1
@@ -2439,23 +2470,51 @@ class Watcher:
         self.gap_ms = gap_ms
         self.file = None
         self.pinned = False           # True quando o usuario abriu um arquivo manualmente
+        # com um replay aberto à mão: as gravações que o cartão "Gravação nova" não oferece (as que já estavam sendo
+        # escritas quando ele foi aberto, e as que a pessoa recusou); offered: a que ele oferece agora
+        self.pin_skip = set()
+        self.offered = None
         self.known = {}
         self.last_change = 0.0
         self._seen = {}               # pasta -> nomes de .rrf já conferidos
         self._active = set()          # arquivos que estavam sendo escritos na última varredura
+        self._active_m = {}           # ...e quando cada um mudou: caminho normalizado -> (modificado em, caminho)
         self._next_full = 0.0
 
     def open(self, path):
         self.file = ReplayFile(path, self.gap_ms, self.targets)
         self.pinned = True
+        # o que já estava gravando quando a pessoa abriu este replay não é novidade: ela escolheu sair de lá
+        self.scan(time.time())
+        self.pin_skip = set(self._active)
+        self.offered = None
         self.file.poll(max_bytes=64 << 20)
         if self.file.ready:
             self.file.combat.finished = True
         return self.file
 
-    def follow(self):
+    def follow(self, path=None):
+        """Volta a seguir a gravação mais recente; `path`: já esta (a que o cartão "Gravação nova" ofereceu)."""
         self.pinned = False
-        self.file = None
+        self.pin_skip = set()
+        self.offered = None
+        self.file = ReplayFile(path, self.gap_ms, self.targets) if path else None
+
+    def skip(self, path):
+        """A pessoa preferiu ficar no replay aberto: esta gravação não é oferecida de novo."""
+        self.pin_skip.add(os.path.normcase(path))
+        if self.offered and os.path.normcase(self.offered) == os.path.normcase(path):
+            self.offered = None
+
+    def offer(self, now):
+        """Com um replay aberto à mão: a gravação que o jogo começou a escrever depois (a mais recente, que não é a
+        aberta nem uma recusada), para o cartão "Gravação nova"; None se não há. Antes, quem consultava um replay e
+        começava a gravar outro precisava achar o "Voltar a seguir a gravação" no menu, e até lá o widget não
+        acompanhava a gravação nova (nem os avisos dela)."""
+        self.scan(now)
+        mine = os.path.normcase(self.file.path) if self.file is not None else None
+        live = [v for k, v in self._active_m.items() if k != mine and k not in self.pin_skip]
+        return max(live)[1] if live else None
 
     @property
     def folder(self):
@@ -2510,6 +2569,7 @@ class Watcher:
                     active[key] = (st.st_mtime, p)
         started = [v for k, v in active.items() if k not in self._active]
         self._active = set(active)
+        self._active_m = active
         if started:
             return max(started)[1]                    # uma gravação começou agora
         if cur in active:
@@ -2525,6 +2585,8 @@ class Watcher:
             path = self.scan(now)
             if path and (self.file is None or os.path.normcase(path) != os.path.normcase(self.file.path)):
                 self.file = ReplayFile(path, self.gap_ms, self.targets)
+        else:
+            self.offered = self.offer(now)
         if self.file is None:
             return False
         changed = self.file.poll()

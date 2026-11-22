@@ -38,11 +38,14 @@ FIELDS = [
 KEYS = [k for k, _n in FIELDS]
 DEFAULT = ["duration", "xp", "levels", "kills", "deaths", "favs", "bosses"]
 MIN_MS = 60000                # gravação de menos de 1 min só tem resumo se teve um destes acontecimentos:
-SHORT_OK = ("maxlevel", "mvp_card", "cards", "marked", "one_shot", "levelup", "boss")
+SHORT_OK = ("maxlevel", "mvp_card", "cards", "marked", "one_shot", "levelup", "boss",
+            "redeemer", "lex", "buffed", "credit", "aoe", "revive", "served",
+            "no_elixir")          # ...ou um cartão de classe (uma luta de chefe curta do Cardeal com a Lex a 3 por segundo)
 SESSION_END_S = 15.0          # o arquivo parado há isso: a gravação acabou (o mesmo tempo do "Gravando" do rodapé)
 GREEN, RED, WHITE, DIM, GOLD = "#4ade80", "#f87171", "#ffffff", "#a3a8b5", "#fbbf24"
 PURPLE, TEAL, BLUE, PINK = "#c084fc", "#2dd4bf", "#60a5fa", "#f472b6"
 SKY = "#7dd3fc"               # o "Nível máximo": o azul-claro da aura de nível máximo do jogo
+AMBER, FUCHSIA, ORANGE = "#fcd34d", "#f0abfc", "#fb923c"   # Redentor, Chuva de Lex, "Oi, tchau"
 
 # Destaques: o que a sessão teve de especial. O primeiro vira o título do cartão, com o emblema e uma animação curta
 # dele (confete, moedinhas, estrelas, brilho, chuva); os outros viram selos embaixo. Cada um pode ser desligado na aba
@@ -55,6 +58,22 @@ HIGHLIGHTS = [
     ("one_shot", "One shot", "Derrubou um chefe com um golpe só"),
     ("cards", "Mão de cartas", "Pegou %d cartas ou mais na gravação"),
     ("levelup", "Subiu de nível", "Subiu um ou mais níveis na gravação"),
+    # logo depois do "Subiu de nível": abaixo dele, o "Item marcado" (os itens dos avisos caem em toda gravação de
+    # quem caça por eles) ficava sempre com o título, e o "Quase lá" de 91% e 94% era só um selo (2026-11-22)
+    ("close", "Quase lá", "Passou de %d%% do nível: falta pouco para subir"),
+    # os cartões de classe e de papel (roles.py), com os nomes que o usuário deu (2026-11-22); acima do "Item marcado"
+    # (que cai em toda caçada de quem caça por ele): são raros, como o "Oi, tchau"
+    ("redeemer", "Redentor", "Absorveu com a Redenção %d vezes a sua vida em dano dos aliados"),
+    ("lex", "Chuva de Lex", "Passou de %s Lex Aeterna por segundo numa luta de chefe (no pico de 10 s)"),
+    ("buffed", "Podem ir", "Numa luta de chefe, %d ou mais aliados com os seus buffs em %d%% da luta, em média; ou, "
+                           "numa caçada em grupo, %d rodadas de buff ou mais (%d buffs diferentes em 30 s)"),
+    ("credit", "Sem mim era Wipe", "Os seus efeitos no chefe (Lex, Pólen, Garra Sombria, Avanço Sísmico, áreas...) "
+                                   "renderam boa parte do dano do grupo numa luta"),
+    ("aoe", "Oi, tchau", "Derrubou %d monstros ou mais com a mesma skill em 1 s"),
+    ("revive", "Quero um aumento", "Trouxe aliados de volta com Ressuscitar %d vezes ou mais"),
+    ("served", "Bem servido", "Ficou com um MVP chegando depois (os outros já tinham dado %d%% do dano), ou deu %d KS "
+                              "ou mais: matou monstros que outro jogador começou"),
+    ("no_elixir", "Tá fácil pra ninguém", "Acabou um item de cura (elixir, poção...) no meio da luta"),
     ("marked", "Item marcado", "Caiu um item favorito ou marcado nos avisos, e você pegou"),
     ("record", "Recorde pessoal", "Bateu um recorde seu: o maior golpe do personagem, ou a XP por hora ou os abates "
                                   "por minuto num mapa"),
@@ -63,7 +82,6 @@ HIGHLIGHTS = [
     ("top_damage", "Maior DPS do grupo", "O seu DPS foi o maior do seu grupo (o mesmo DPS do widget)"),
     ("miracle", "Escravo do Milagre", "O Milagre veio %d vezes ou mais"),
     ("boss", "Caçador de chefes", "Derrotou um ou mais chefes"),
-    ("close", "Quase lá", "Passou de %d%% do nível: falta pouco para subir"),
     ("top_hit", "Maior golpe do grupo", "O maior golpe da gravação no seu grupo foi seu"),
     ("kills", "Máquina de abates", "%d abates ou mais"),
     ("picked", "Bolsa cheia", "Pegou %d itens ou mais"),
@@ -88,6 +106,11 @@ HL_TANK_LIVES = 120           # vezes a vida máxima, numa gravação sem nenhum
 HL_ARGS = {"cards": HL_CARDS, "miracle": HL_MIRACLES, "close": HL_CLOSE_PCT, "kills": HL_KILLS, "picked": HL_PICKED,
            "used": HL_USED,
            "long": HL_LONG_H, "tough": HL_TOUGH, "untouchable": (HL_TANK_BURST, HL_TANK_LIVES)}
+# os cartões de classe e de papel (roles.found): das versões que o usuário testou (1.14.0-teste2), ficaram as que ele
+# aprovou, com os nomes que deu (2026-11-22): Redentor (o Escudo do Guardião), Chuva de Lex (os golpes em dobro, com
+# a cruz da Lex caindo na cabeça do chefe), Podem ir (as asas da Competentia), Sem mim era Wipe (o efeito no chefe),
+# Oi, tchau (a explosão) e Quero um aumento; e os dois que ele pediu depois: Bem servido e Tá fácil pra ninguém
+ROLE_KEYS = ("redeemer", "lex", "buffed", "credit", "aoe", "revive", "served", "no_elixir")
 RECORD_MIN = 10               # recordes de XP por hora e abates por minuto: com pelo menos isto de caça no mapa (min)
 RECORD_KILLS = 50             # ...e pelo menos estes abates lá
 MAIN_SHARE = 0.8              # o mapa da caça: com pelo menos isto dos abates (senão, só "e mais N mapas")
@@ -97,7 +120,9 @@ EMBLEMS = {"maxlevel": "⇑", "mvp_card": "♔", "cards": "♠", "marked": "✦"
            "record": "✪",
            "untouchable": "◆", "top_damage": "♛",
            "miracle": "★", "boss": "♚", "close": "➚", "top_hit": "✸", "kills": "⚔", "picked": "⛁", "used": "⚗",
-           "long": "⌛", "tough": "☁"}
+           "long": "⌛", "tough": "☁",
+           "redeemer": "⛨", "lex": "✠", "buffed": "✚", "credit": "⇈", "aoe": "☄", "revive": "☥", "served": "♨",
+           "no_elixir": "⚠"}
 # os títulos de cada destaque: um deles, sempre o mesmo para a mesma gravação
 TITLES = {
     "maxlevel": ("Nível máximo!", "Chegou ao topo!", "Nível %d!"),
@@ -120,6 +145,15 @@ TITLES = {
     "used": ("Gastou bonito!", "Sem economia!"),
     "long": ("Maratona!", "Que fôlego!"),
     "tough": ("Sessão difícil", "Dia puxado"),
+    "redeemer": ("Redentor!", "Escudo do grupo!", "Ninguém passa!"),
+    "lex": ("Chuva de Lex!", "Lex Aeterna!", "Dano em dobro!"),
+    # os que o usuário batizou têm o nome dele só (2026-11-22)
+    "buffed": ("Podem ir!",),
+    "credit": ("Sem mim era Wipe!",),
+    "aoe": ("Oi, tchau!",),
+    "revive": ("Quero um aumento!",),
+    "served": ("Bem servido!",),
+    "no_elixir": ("Tá fácil pra ninguém",),
 }
 # a animação de cada um. Golpes e dano: a luva de boxe dando vários socos ("jabs") ou, num one shot, um soco só, muito
 # forte ("one_punch"); "chase": Porings, Drops, Poporings e Marins fugindo de um jogador; "diamonds": o cartão
@@ -134,17 +168,54 @@ FX = {"maxlevel": "maxlevel", "mvp_card": "mvp_card", "cards": "deck", "marked":
       "levelup": "confetti",
       "record": "confetti", "untouchable": "diamonds", "top_damage": "combo", "miracle": "stars", "boss": "boss_down",
       "close": "glow", "top_hit": "heavy", "kills": "chase", "picked": "coins_stack", "used": "coins_down",
-      "long": "glow", "tough": "rain"}
+      "long": "glow", "tough": "rain",
+      "redeemer": "bulwark", "lex": "lex_double", "buffed": "buff_wings", "credit": "credit_boss", "aoe": "aoe_blast",
+      "revive": "revive", "served": "served_ks", "no_elixir": "no_elixir"}
 FX_KINDS = ("confetti", "coins_stack", "coins_down", "stars", "sparkle", "glow", "lucky", "flash", "rain", "jabs",
-            "one_punch", "chase", "diamonds", "combo", "heavy", "asura", "boss_down", "deck", "mvp_card", "maxlevel")
+            "one_punch", "chase", "diamonds", "combo", "heavy", "asura", "boss_down", "deck", "mvp_card", "maxlevel",
+            "bulwark", "lex_double", "buff_wings", "credit_boss", "aoe_blast", "revive", "served_ks", "served_mvp",
+            "no_elixir")
 # os cartões de dano são cenas de luta com os desenhos do jogo: "combo" (Maior DPS: uma sequência rápida de golpes, um
 # monte de números), "heavy" (Maior golpe: um golpe carregado só, um número grande, o monstro cambaleia) e "asura" (one
-# shot: carrega, avança, o monstro cai e a tela racha). "boss_down" (Chefe derrotado): a luta com o chefe da sessão,
-# que cai no golpe final, e o confete. Quem luta é o personagem de quem grava se for de uma destas
-# classes de punho (Monge, Mestre, Shura, Taekwon, Templário Estelar, Mestre Celestial e as versões baby e trans);
-# senão, um Mestre (Champion) com soqueira.
-FIST_JOBS = {15, 4016, 4030, 4070, 4077, 4102, 4046, 4047, 4048, 4239, 4241, 4243, 4244,
+# shot: carrega, acerta, o monstro cai e a tela racha). "boss_down" (Chefe derrotado): a luta com o chefe da sessão,
+# que cai no golpe final, e o confete. Quem luta é o personagem de quem grava, de qualquer classe (o usuário,
+# 2026-11-22), no estilo dela (fight_style): as de punho socam (e o Asura avança com as esferas), as de corpo a corpo
+# batem com a arma, as de longe atiram (flechas, balas) e as de magia conjuram (a esfera de magia vai até o monstro).
+# Sem o visual (a prévia sem replay aberto), um Mestre (Champion) com soqueira.
+FIST_JOBS = {15, 4016, 4038, 4070, 4077, 4106, 4046, 4047, 4048, 4225, 4226, 4238, 4239, 4241, 4243, 4244,
              4262, 4302, 4316}           # e as 4ªs: Inquisidor, Mestre Celestial (e a variante dele)
+# de magia: Mago, Bruxo, Sábio, Noviço e Sacerdote (e as trans, baby, 3ªs e 4ªs: Arquimago, Cardeal, Elementalista),
+# Espiritualista e Ceifador de Almas, Invocador (Doram), Shiranui e o Senhor das Trevas
+MAGIC_JOBS = {2, 4, 8, 9, 16, 4003, 4005, 4009, 4010, 4017, 4025, 4027, 4031, 4032, 4039, 4049, 4052, 4055, 4057,
+              4061, 4063, 4067, 4074, 4097, 4099, 4103, 4218, 4220, 4227, 4240, 4242, 4255, 4256, 4261, 4303, 4305,
+              4308}
+# de longe: Arqueiro, Caçador, Bardo, Odalisca, Justiceiro (e as trans, baby, 3ªs e 4ªs) e a Sentinela Noturna
+RANGED_JOBS = {3, 11, 19, 20, 24, 4004, 4012, 4020, 4021, 4026, 4034, 4042, 4043, 4056, 4062, 4068, 4069, 4075,
+               4076, 4084, 4085, 4098, 4104, 4105, 4111, 4215, 4228, 4229, 4257, 4263, 4264, 4278, 4306}
+
+
+def fight_style(job):
+    """Como a classe luta na cena de dano: "fist", "magic", "ranged" ou "melee"."""
+    if job in FIST_JOBS:
+        return "fist"
+    if job in MAGIC_JOBS:
+        return "magic"
+    if job in RANGED_JOBS:
+        return "ranged"
+    return "melee"
+
+
+# cartões de classe: (a classe do personagem da prévia, as classes cujo personagem a prévia usa)
+ROLE_JOBS = {
+    "redeemer": (4258, {14, 4015, 4022, 4037, 4066, 4073, 4082, 4083, 4102, 4110, 4258, 4281}),
+    "lex": (4256, {8, 4009, 4031, 4057, 4063, 4099, 4256}),
+    "buffed": (4256, {8, 4009, 4031, 4057, 4063, 4099, 4256, 4263, 4264, 4068, 4069, 4075, 4076, 4308}),
+    "credit": (4255, {4255, 4254, 4260, 4253, 4261, 4256, 4067, 4074, 4065, 4072, 4058, 4064}),
+    "aoe": (4255, None),                  # qualquer classe: o "Oi, tchau" é de quem grava
+    "revive": (4256, {8, 4009, 4031, 4057, 4063, 4099, 4256}),
+    "served": (4302, None),               # qualquer classe
+    "no_elixir": (4302, None),
+}
 
 
 def chosen(cfg):
@@ -393,8 +464,30 @@ def hl_text(key):
     for k, name, when in HIGHLIGHTS:
         if k == key:
             when = _(when)
+            if k in ROLE_KEYS:
+                return _(name), (when % role_args(k)) if "%" in when else when
             return _(name), (when % HL_ARGS[k]) if k in HL_ARGS else when
     return key, ""
+
+
+def role_args(key):
+    """Os limites de um cartão de classe, para o texto da aba Cartões."""
+    import roles
+    from fmt import dec
+    if key == "redeemer":
+        return roles.HL_REDEEM_LIVES
+    if key == "lex":
+        return dec("%g" % roles.HL_LEX_PER_S)
+    if key == "buffed":
+        return (roles.HL_BUFF_MEMBERS, int(round(100 * roles.HL_BUFF_COVER)), roles.HL_ROUNDS,
+                roles.ROUND_KINDS)
+    if key == "aoe":
+        return roles.HL_MULTI
+    if key == "revive":
+        return roles.HL_REVIVE
+    if key == "served":
+        return int(round(100 * roles.HL_LATE_SHARE)), roles.HL_KS
+    return ()
 
 
 def _seed(c):
@@ -410,13 +503,15 @@ def _title(seed, key, n=None):
     return text % n if n is not None and "%" in text else text
 
 
-def _hl(key, title, chip, color, sub=None, bar=None, fx=None, tag=None, fight=None, deal=None, rise=None):
+def _hl(key, title, chip, color, sub=None, bar=None, fx=None, tag=None, fight=None, deal=None, rise=None,
+        scene=None):
     """Um destaque. tag: o número que flutua ao lado do emblema na animação ("+1.412" itens pegos, "−268" usados).
     glass: o cartão fica translúcido (o "Intocável"). fight: a cena de luta dos cartões de dano (fight_of). deal: as
-    cartas das cenas de carta (deal_of). rise: a cena do "Nível máximo" (rise_of)."""
+    cartas das cenas de carta (deal_of). rise: a cena do "Nível máximo" (rise_of). scene: a cena dos cartões de
+    classe (class_scenes)."""
     return dict(key=key, title=title, chip=EMBLEMS.get(key, "✦") + " " + chip, color=color, emblem=EMBLEMS.get(key),
                 fx=FX.get(key) if fx is None else fx, sub=sub, bar=bar, tag=tag, glass=key == "untouchable",
-                fight=fight, deal=deal, rise=rise)
+                fight=fight, deal=deal, rise=rise, scene=scene)
 
 
 def rise_of(look, level):
@@ -469,11 +564,13 @@ def top_target(c):
 
 
 def fight_of(c, hit=None, avg=None, mob=None):
-    """O que a cena de luta de um cartão de dano mostra: dict(look (o visual de quem grava, se for de uma classe de
-    punho; None = o Mestre), mob (o monstro: o dado, ou o em que quem grava mais bateu), hit (o maior golpe), avg (o
-    golpe médio))."""
+    """O que a cena de luta de um cartão de dano mostra: dict(look (o visual de quem grava, de qualquer classe; None
+    = o Mestre), mob (o monstro: o dado, ou o em que quem grava mais bateu), hit (o maior golpe), avg (o golpe
+    médio))."""
     sess = c.session
-    look = dict(sess.look) if getattr(sess, "job", 0) in FIST_JOBS and getattr(sess, "look", None) else None
+    look = dict(sess.look) if getattr(sess, "look", None) else None
+    if look is not None and not look.get("job"):
+        look["job"] = getattr(sess, "job", None) or 0
     return dict(look=look, mob=mob if mob is not None else top_target(c), hit=hit, avg=avg)
 
 
@@ -642,6 +739,19 @@ def highlights(c, cfg, favs=(), records=None, marked=()):
                                 fight=fight_of(c, hit=value, mob=_mob_of(c, one[3]) if one else None))
         else:
             got["record"] = _hl("record", _title(seed, "record"), chip, GOLD, sub=sub)
+    # os cartões de classe e de papel (roles.py)
+    asked = want.intersection(ROLE_KEYS)
+    if asked:
+        import roles
+        try:
+            found = roles.found(c, asked)
+        except Exception:  # noqa: BLE001 - um erro nos cartões de classe não leva o resumo junto
+            import sys
+            import traceback
+            traceback.print_exception(*sys.exc_info())
+            found = {}
+        for key, data in found.items():
+            got[key] = role_hl(c, key, data, seed)
     if "untouchable" in want:
         tk_ = tank(c)
         if tk_ and (tk_[0] >= HL_TANK_BURST or (tk_[2] == 0 and tk_[1] >= HL_TANK_LIVES)):
@@ -737,13 +847,154 @@ def highlights(c, cfg, favs=(), records=None, marked=()):
     return [got[k] for k in HL_KEYS if k in got]
 
 
+def _pct(v):
+    from fmt import dec
+    return dec("%.0f%%" % (100.0 * v))
+
+
+def _boss_mob(c):
+    """O monstro do chefe de mais dano da gravação (para a cena), ou o em que quem grava mais bateu."""
+    import roles
+    fights = roles.boss_fights(c, 1)
+    return fights[0]["mob"] if fights and fights[0]["mob"] else top_target(c)
+
+
+def _effect_name(top):
+    import contrib
+    return contrib.effect_name(top) if top != 22 else "Lex Aeterna"
+
+
+def _role_texts(key, d, boss=None, item_name=None):
+    """(selo, frase, chave da cena) de um cartão de classe com os números `d` (de roles.found, ou de exemplo). boss: o
+    nome do chefe da luta; item_name: o nome do item de cura que acabou."""
+    import roles
+    from fmt import dec, dur, num
+    if key == "redeemer":
+        lives = d["total"] / float(d["life"]) if d.get("life") else d.get("lives", 0)
+        return (_("%s absorvido") % num(d["total"]),
+                _("Absorveu %s de dano dos aliados: %s vezes a sua vida") % (num(d["total"]), dec("%.0f" % lives)),
+                "bulwark")
+    if key == "lex":
+        sub = _("%d Lex em %s contra %s; no pico, %s por segundo") % (d["n"], dur(d["secs"] * 1000), boss,
+                                                                     dec("%.1f" % d["peak"]))
+        if d.get("credit"):
+            sub += _(" · renderam %s") % num(d["credit"])
+        return _("%s Lex/s") % dec("%.1f" % d["peak"]), sub, "lex_double"
+    if key == "buffed":
+        if d.get("farm"):                           # na caçada: as rodadas de buff
+            return (_("%d rodadas de buff") % d["n"],
+                    _("Buffou o grupo todo %d vezes nesta caçada (%d buffs diferentes ou mais de cada vez)") % (
+                        d["n"], roles.ROUND_KINDS), "buff_wings")
+        return (_("%s da luta") % _pct(d["cover"]),
+                _("%d aliados com %d buffs seus em %s da luta contra %s") % (
+                    d["members"], len(d["buffs"]), _pct(d["cover"]), boss), "buff_wings")
+    if key == "credit":
+        return (_("+%s ao grupo") % num(d["via"]),
+                _("%s rendeu %s: %s do dano do grupo contra %s") % (
+                    _effect_name(d["effect"] if "effect" in d else d["top"]), num(d["via"]), _pct(d["share"]), boss),
+                "credit_boss")
+    if key == "aoe":
+        skill = roles.skill_name(d["skill"]) or _("golpe comum")
+        return _("%d de uma vez") % d["n"], _("%d monstros de uma vez com %s") % (d["n"], skill), "aoe_blast"
+    if key == "revive":
+        back = d["allies"] if "allies" in d else d["back"]
+        return (_("%d ressuscitados") % d["n"], _("Trouxe %d aliados de volta à luta (%d vezes)") % (back, d["n"]),
+                "revive")
+    if key == "served":
+        if d.get("kind") == "mvp":                  # o MVP que ficou com quem chegou depois
+            return (_("MVP de %s") % (d.get("name") or boss),
+                    _("Chegou depois e ficou com o MVP: os outros já tinham dado %s do dano") % _pct(d["before"]),
+                    "served_mvp")
+        import meter
+        mob = meter.monster_name(d.get("mob")) if d.get("mob") else None
+        sub = (_("%d monstros que outro jogador começou e você terminou (mais em %s)") % (d["n"], mob)) if mob else \
+            _("%d monstros que outro jogador começou e você terminou") % d["n"]
+        return _("%d KS") % d["n"], sub, "served_ks"
+    # no_elixir: o item de cura que acabou
+    sub = (_("%s acabou no meio da luta contra %s, depois de %d usos") % (item_name, d["fight"], d["uses"])) \
+        if d.get("fight") else _("%s acabou no meio da luta, depois de %d usos") % (item_name, d["uses"])
+    return _("sem %s") % item_name, sub, "no_elixir"
+
+
+def role_hl(c, key, d, seed):
+    """O destaque de um cartão de classe (roles.found): os textos e a cena (class_scenes): quem grava, as classes do
+    grupo e os números do feito."""
+    import meter
+    import roles
+    look = dict(c.session.look) if getattr(c.session, "look", None) else None
+    scene = dict(look=look, job=getattr(c.session, "job", None), allies=roles.party_jobs(c))
+    f = d.get("fight") or {}
+    boss = f.get("name")
+    item_name = meter.item_name(d["item"]) if key == "no_elixir" else None
+    chip, sub, fx = _role_texts(key, d, boss, item_name)
+    if key == "redeemer":
+        scene.update(total=d["total"], hits=d["hits"], peak=d["peak"], mob=_boss_mob(c))
+    elif key == "lex":
+        scene.update(mob=f["mob"], peak=d["peak"], n=d["n"], credit=d.get("credit"))
+    elif key == "buffed":
+        if d.get("farm"):
+            scene.update(rounds=d["n"], skills=list(d["skills"]), members=d["members"])
+        else:
+            mine = collections.Counter(u[4] for u in c.uses if u[2] == c.me and f["first"] <= u[0] <= f["last"])
+            scene.update(mob=f["mob"], cover=d["cover"], members=d["members"], buffs=list(d["buffs"]),
+                         skills=[sk for sk, _n in mine.most_common(8)])
+    elif key == "credit":
+        scene.update(mob=f["mob"], effect=d["top"], via=d["via"], own=d["own"], share=d["share"], total=d["total"])
+    elif key == "aoe":
+        scene.update(mob=d["mob"], n=d["n"], skill=d["skill"])
+    elif key == "revive":
+        scene.update(n=d["n"], back=d["allies"])
+    elif key == "served":
+        if d.get("kind") == "mvp":
+            scene.update(mob=d["mob"], others=list(d["others"]), before=d["before"])
+        else:
+            scene.update(mob=d["mob"], others=list(d["victims"]), n=d["n"])
+    else:
+        scene.update(item=d["item"], uses=d["uses"], mob=d.get("mob"))
+    n = d.get("n") if key == "aoe" else None
+    return _hl(key, _title(seed, key, n), chip, COLORS[key], sub=sub, fx=fx, scene=scene)
+
+
+# os exemplos dos cartões de classe na prévia da aba Cartões (números de gravações de verdade daqui)
+ROLE_SAMPLES = {
+    "redeemer": dict(total=36100000, lives=62, mob=1039),
+    "lex": dict(n=116, secs=64, peak=3.4, credit=266000000, mob=1039),
+    "buffed": dict(members=5, buffs=[10, 12, 15, 19, 20, 336], cover=0.98, mob=1039,
+                   skills=[5282, 5281, 5275, 5272, 2041, 2042]),
+    "credit": dict(effect=1183, via=380000000, own=3000000, share=0.43, total=878000000, mob=1039),
+    "aoe": dict(n=23, mob=1002),
+    "revive": dict(n=9, back=3),
+    "served": dict(kind="ks", n=27, mob=20927, others=[4252, 4260]),
+    "no_elixir": dict(item=1100005, uses=71, fight=None, mob=20994),
+}
+
+
+def role_sample(key, look=None):
+    """O destaque de exemplo de um cartão de classe, para a prévia da aba Cartões. look: o visual de quem grava,
+    quando a classe dele serve para o cartão (ROLE_JOBS); senão, um personagem da classe do cartão."""
+    import meter
+    d = dict(ROLE_SAMPLES[key])
+    job = (look or {}).get("job") if look else ROLE_JOBS[key][0]
+    boss = meter.monster_name(d.get("mob")) or "Baphomet"
+    if key == "no_elixir":
+        d["fight"] = boss
+    if key == "aoe":
+        d["skill"] = 5473 if job in (4302, 4316) else 5216   # a Explosão Galáctica do Mestre Celestial, senão a Cascata
+    scene = dict(look=look, job=job, allies=[4302, 4255, 4254, 4262], **d)
+    item_name = (meter.item_name(d["item"]) or "Elixir Dourado") if key == "no_elixir" else None
+    chip, sub, fx = _role_texts(key, d, boss, item_name)
+    return _hl(key, _(TITLES[key][0]), chip, COLORS[key], sub=sub, fx=fx, scene=scene)
+
+
 # a prévia de cada destaque na aba Cartões: a cena (monstro, maior golpe, golpe médio) dos que têm luta
 SAMPLE_SCENES = {"one_shot": (1087, 86341920, 0), "top_damage": (1583, 11500000, 1250000),
                  "boss": (1312, 10200000, 900000), "top_hit": (1039, 86341920, 0)}
 COLORS = {"maxlevel": SKY, "mvp_card": GOLD, "cards": PURPLE, "marked": TEAL, "one_shot": SALMON, "levelup": GREEN,
           "record": GOLD,
           "untouchable": ICE, "top_damage": SALMON, "miracle": PURPLE, "boss": GOLD, "close": TEAL, "top_hit": SALMON,
-          "kills": BLUE, "picked": GOLD, "used": GOLD, "long": BLUE, "tough": BLUE}
+          "kills": BLUE, "picked": GOLD, "used": GOLD, "long": BLUE, "tough": BLUE,
+          "redeemer": AMBER, "lex": FUCHSIA, "buffed": GREEN, "credit": TEAL, "aoe": ORANGE, "revive": SKY,
+          "served": PINK, "no_elixir": BLUE}
 # as cartas das prévias: a do Bafomé (que ele mesmo deixa cair) e uma mão de 9 cartas de monstros comuns
 SAMPLE_DEALS = {"mvp_card": ([4147], 1, 1039),
                 "cards": ([4001, 4001, 4002, 4004, 4006, 4011, 4033, 4045, 4065], 9, None)}
@@ -792,6 +1043,11 @@ def _sample_texts(key):
 def sample_card_for(cfg, key, look=None):
     """O cartão de exemplo com o destaque `key` como título, para ver a animação dele na prévia da aba Cartões.
     look: o visual de quem grava (a gravação aberta), para a cena de luta usar o personagem dele."""
+    if key in ROLE_KEYS:
+        main = role_sample(key, look)
+        card = sample_card(cfg)
+        card["hl"] = [main] + [h for h in card["hl"] if h["key"] != key][:2]
+        return card
     title, chip, sub = _sample_texts(key)
     scene = SAMPLE_SCENES.get(key)
     tag = {"picked": "+2.728", "used": "−268"}.get(key)

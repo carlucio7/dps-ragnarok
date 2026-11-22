@@ -24,6 +24,9 @@ NOT_EQUIP = ("visual", "carta", "ovo", "munição", "isca", "acessório de masco
              "roupa", "item de treinamento", "item de domesticação", "neutro")
 _TYPE = re.compile(r"(?i)^tipo\s*:\s*(.+)$")
 _COLOR = re.compile(r"\^[0-9a-fA-F]{6}")
+# item de cura (o "Tá fácil pra ninguém"): "Regenera cerca de 2.750 de HP" (Elixir Dourado), "Recupera cerca de
+# 325 a 405 de HP" (Poção Branca), "que restaura cerca de 60 de SP", "Recupera 100% do HP e SP" (Fruto de Yggdrasil)
+_HEAL = re.compile(r"(?i)\b(recupera|regenera|restaura)\b(?:[^.]|\.(?=\d)){0,40}?\b(hp|sp)\b")
 
 _DATA = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))), "data")
 try:
@@ -56,6 +59,25 @@ def parse_kinds(items):
             kind = "refine"
         if kind:
             out[item] = kind
+    return out
+
+
+def parse_heals(items):
+    """Os itens que recuperam HP ou SP (poções, elixires, frutos...), pela descrição do jogo em português; fica de
+    fora o que só regenera aos poucos ("a cada") ou num efeito de equipamento ("Ao ...")."""
+    out = set()
+    for item, info in items.items():
+        if not isinstance(item, int) or not isinstance(info, dict):
+            continue
+        desc = info.get("identifiedDescriptionName") or {}
+        for k in sorted(k for k in desc if isinstance(k, int)):
+            line = _COLOR.sub("", desc[k]).strip() if isinstance(desc[k], str) else ""
+            low = line.lower()
+            if low.startswith("ao ") or "a cada" in low:
+                continue
+            if _HEAL.search(line):
+                out.add(item)
+                break
     return out
 
 

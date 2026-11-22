@@ -28,8 +28,13 @@ SYSTEM = [
     ("defense", "Modo defesa (Aquila)", "O dano quase não entra até a defesa cair", None),
     ("relief", "Aliviar muito alto (Betelgeuse)", "Almas ativas e a redução de dano do chefe", None),
     ("def_break", "A defesa caiu (Aquila)", "5 s de dano total", None),
+    ("damage_heal", "Chefe se cura com o dano",
+     "Por 30 s o dano físico, mágico ou especial vira cura no chefe (o Atroce do Laboratório)", None),
     ("summary", "Resumo da luta contra chefe", "No fim da luta: tempo, sua parte do dano e o Dedo Duro", "fight_summary"),
     ("session", "Resumo da sessão", "Quando a gravação para: as informações que você escolher", "session_card"),
+    ("follow", "Gravação nova com um replay aberto",
+     "Com um replay aberto à mão, quando o jogo começa a gravar outro: seguir a gravação nova ou ficar no aberto",
+     None),
     ("ping", "Item marcado caiu", "O cartão com o mapa e as coordenadas (o som é à parte)", None),
     ("miracle", "Milagre Solar, Lunar e Estelar", "A faixa dourada quando o Milagre ativa", "alert_miracle"),
     ("buff_end", "Buff importante acabou", "Aviso no rodapé, no meio da luta", "alert_buffs"),
@@ -37,9 +42,11 @@ SYSTEM = [
     ("fusion", "HP baixo com a União", "Aviso no rodapé (Mestre Taekwon)", "alert_fusion"),
     ("rec", "Jogo aberto sem gravar", "Lembrete no rodapé", "alert_rec"),
 ]
-BOSS_KEYS = ("boss_element", "boss_size", "maxpain", "defense", "relief", "def_break")   # dependem de alert_boss
+BOSS_KEYS = ("boss_element", "boss_size", "maxpain", "defense", "relief", "def_break",
+             "damage_heal")                # dependem de alert_boss
 MECH_KEY = {"maxpain_on": "maxpain", "maxpain_off": "maxpain", "defense": "defense", "relief": "relief",
-            "def_break": "def_break"}
+            "def_break": "def_break", "heal_phys": "damage_heal", "heal_magic": "damage_heal",
+            "heal_misc": "damage_heal"}
 GROUPS = ["Debuff no alvo", "Buff de grupo", "Buff de classe e outros", "Consumível", "Efeito de chão"]
 KIND_GROUP = {"Grupo/suporte": "Buff de grupo", "Consumível": "Consumível"}
 SUGGESTED = [730, 1142, 1183, 22, 1402]       # Garra Sombria, Cometa, Pólen, Lex Aeterna, Avanço Sísmico

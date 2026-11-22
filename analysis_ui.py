@@ -1815,6 +1815,11 @@ class AnalysisWindow:
         self.xp_hint = self.label(tab, "", "text", "fg", "panel", anchor="w", justify="left", wraplength=1150)
         self.xp_hint.configure(fg="#f59e0b")
         self.xp_hint_shown = False
+        # fora do automático: o aviso de quando ele estimaria um valor muito diferente (xp.auto_gap)
+        self.xp_auto_note = self.label(tab, "", "text", "fg", "panel", anchor="w", justify="left", wraplength=1150)
+        self.xp_auto_note.configure(fg="#f59e0b")
+        ui_parts.follow_wrap(tab, self.xp_auto_note, 30)
+        self.xp_auto_shown = False
         self.xp_hint_before = self.label(tab, _("O replay não grava a XP ganha: só a XP total no início de cada gravação. A estimativa soma "
                           "a XP de cada monstro que você ajudou a matar (rAthena e Divine Pride), com a penalidade de "
                           "nível e a sua parte do dano, vezes os bônus. Evento do servidor, VIP e Cetro somam entre "
@@ -1869,7 +1874,7 @@ class AnalysisWindow:
                 ttk.Button(row, text=_("Esquecer"), style="An.TButton", command=self.xp_forget).pack(side="right")
         lst = tk.Frame(left, bg=c["tile"])
         lst.pack(fill="x", padx=10, pady=(8, 4))
-        self.xp_on, self.xp_pct, self.xp_seen, self.xp_checks = {}, {}, {}, {}
+        self.xp_on, self.xp_pct, self.xp_seen, self.xp_checks, self.xp_ents = {}, {}, {}, {}, {}
         # a caixa diz se o bônus entra na conta; se ele estava ativo nesta gravação, diz a última coluna
         for col, text in ((0, _("Contar · Bônus")), (1, "%"), (3, _("Nesta gravação"))):
             self.label(lst, text, "small", "muted", "tile").grid(row=0, column=col, columnspan=2 if col == 1 else 1,
@@ -1890,6 +1895,7 @@ class AnalysisWindow:
                 ent = tk.Entry(lst, textvariable=pv, width=5, font=self.f["text"], bg=c["btn"], fg=c["fg"],
                                insertbackground=c["fg"], relief="flat", justify="right")
             ent.grid(row=i, column=1, padx=(8, 2), ipady=1)
+            self.xp_ents[bdef["key"]] = ent
             ent.bind("<Return>", lambda e: self.xp_save())
             ent.bind("<FocusOut>", lambda e: self.xp_save())
             self.label(lst, "%", color="muted", bg="tile").grid(row=i, column=2, sticky="w")
@@ -1912,6 +1918,14 @@ class AnalysisWindow:
                                                command=self.xp_event_menu)
                 self.xp_event_btn.grid(row=i, column=1, columnspan=2, padx=(8, 2), sticky="w")
         lst.columnconfigure(3, weight=1)
+        self.xp_list = lst
+        # no automático as caixas dos bônus vistos na gravação ficam marcadas e travadas (xp.LOCKED)
+        self.xp_lock_note = self.label(left, _("No automático, os bônus que aparecem na gravação sempre contam. Para "
+                                               "ver a XP sem algum deles, use o simulador; para escolher à mão, use "
+                                               "“Pela lista abaixo”."), "small", "muted", "tile", anchor="w",
+                                       justify="left", wraplength=440)
+        ui_parts.follow_wrap(left, self.xp_lock_note, 24)     # a coluna pode ser mais estreita que 440 px
+        self.xp_lock_shown = False
         row = tk.Frame(left, bg=c["tile"])
         row.pack(fill="x", padx=10, pady=(4, 2))
         self.label(row, _("Manual usado:"), color="muted", bg="tile").pack(side="left")
@@ -1999,24 +2013,69 @@ class AnalysisWindow:
                 self.xp_chart.pack(fill="x", padx=10, before=self.xp_sub)
         self.refresh(force=True)
 
-    def xp_load(self):
-        """Põe na tela o que está salvo (uma vez)."""
+    def xp_load(self, c=None):
+        """Põe na tela o que está salvo (uma vez). Com a gravação `c`, o evento do servidor é o da faixa de nível
+        do personagem dela (o automático deduz um por faixa: xp.BAND_LEVEL)."""
         cfg = self.app.cfg
-        sets = xp.settings(cfg)
+        sets = xp.settings(cfg, c)
         for key, st in sets.items():
             self.xp_on[key].set(st["on"])
             if key not in ("gear", "gear_event"):
                 self.xp_pct[key].set("%g" % st["pct"])
+        self.xp_server_shown = (bool(sets["server"]["on"]), float(sets["server"]["pct"]))
         self.xp_mode.set(cfg.get("xp_mode") if cfg.get("xp_mode") in xp.MODES else "auto")
         if isinstance(cfg.get("xp_fixed"), (int, float)):
             self.xp_fixed.set("%g" % cfg["xp_fixed"])
         pct = sets["manual"]["pct"]
         self.xp_manual.set(next(("%s (+%d%%)" % (_(n), p) for n, p in xp.MANUALS if p == pct), ""))
+        self.xp_sync_lock()
         self.xp_loaded = True
+
+    def xp_sync_server(self, c):
+        """O evento mostrado acompanha a faixa de nível do personagem aberto (e a troca que o automático fizer)."""
+        st = xp.settings(self.app.cfg, c)["server"]
+        shown = (bool(st["on"]), float(st["pct"]))
+        if shown == getattr(self, "xp_server_shown", None):
+            return
+        self._xp_syncing = True
+        try:
+            self.xp_on["server"].set(shown[0])
+            self.xp_pct["server"].set("%g" % shown[1])
+        finally:
+            self._xp_syncing = False
+        self.xp_server_shown = shown
+
+    def xp_sync_lock(self):
+        """Mostra a lista de bônus do modo escolhido: no automático (e no medido e no fixo) as caixas e os % dos bônus
+        vistos na gravação ficam marcados e travados, com o aviso; em "Pela lista abaixo" voltam o que a pessoa
+        marcou e dá para mexer."""
+        cfg, c = self.app.cfg, self.c
+        lock = xp.locked(dict(cfg, xp_mode=self.xp_mode.get()))
+        shown = xp.settings(dict(cfg, xp_locked=lock))
+        self._xp_syncing = True
+        try:
+            for key in xp.LOCKED:
+                self.xp_on[key].set(shown[key]["on"])
+                self.xp_checks[key].configure(state="disabled" if lock else "normal")
+                if key == "gear":                                # o % dos itens vem sempre do texto deles
+                    continue
+                if key in xp.LOCKED_PCT:
+                    self.xp_pct[key].set("%g" % shown[key]["pct"])
+                # travado como o % dos itens: o número no fundo do painel, apagado (o manual segue pelo "Manual usado")
+                self.xp_ents[key].configure(state="disabled" if lock else "normal", disabledbackground=c["tile"],
+                                            disabledforeground=c["muted"])
+        finally:
+            self._xp_syncing = False
+        if lock and not self.xp_lock_shown:
+            self.xp_lock_note.pack(fill="x", padx=10, pady=(0, 4), after=self.xp_list)
+            self.xp_lock_shown = True
+        elif not lock and self.xp_lock_shown:
+            self.xp_lock_note.pack_forget()
+            self.xp_lock_shown = False
 
     def xp_save_soon(self):
         """Salva o que foi digitado meio segundo depois da última tecla (o widget acompanha)."""
-        if not getattr(self, "xp_loaded", False):
+        if not getattr(self, "xp_loaded", False) or getattr(self, "_xp_syncing", False):
             return
         if getattr(self, "_xp_after", None):
             try:
@@ -2052,18 +2111,41 @@ class AnalysisWindow:
             except ValueError:
                 return None
         cfg = self.app.cfg
+        raw = cfg.get("xp_bonuses") or {}
+        was_locked = xp.locked(cfg)          # a tela mostrava os bônus vistos marcados e travados (xp_sync_lock)
         saved = {}
         for b in xp.BONUSES:
-            pct = number(self.xp_pct[b["key"]].get())
-            saved[b["key"]] = dict(on=bool(self.xp_on[b["key"]].get()), pct=pct if pct is not None else b["pct"])
-        old = xp.settings(cfg)
-        if any((old[k]["on"], old[k]["pct"]) != (v["on"], v["pct"]) for k, v in saved.items()):
+            key = b["key"]
+            pct = number(self.xp_pct[key].get())
+            entry = dict(on=bool(self.xp_on[key].get()), pct=pct if pct is not None else b["pct"])
+            if was_locked and key in xp.LOCKED:
+                # a caixa travada não diz o que a pessoa quer em "Pela lista abaixo": fica o que estava guardado
+                keep = raw.get(key) or {}
+                entry = dict(on=bool(keep.get("on", b["on"])),
+                             pct=keep["pct"] if isinstance(keep.get("pct"), (int, float)) else b["pct"])
+                if key == "manual" and pct is not None:
+                    entry["pct"] = pct                   # o manual escolhido vale nos dois modos
+            saved[key] = entry
+        # o evento na tela é o da faixa de nível do personagem aberto: sem mexer nele, fica o geral guardado; mexendo,
+        # o que a pessoa marcou vale para todas as faixas (as deduzidas pelo automático saem)
+        shown = getattr(self, "xp_server_shown", None)
+        now_s = (saved["server"]["on"], float(saved["server"]["pct"]))
+        if shown is not None and now_s == shown:
+            saved["server"] = dict(raw.get("server") or {"on": False, "pct": 100.0})
+        elif shown is not None:
+            cfg["xp_server_band"] = {}
+            self.xp_server_shown = now_s
+        new = dict(cfg, xp_bonuses=saved, xp_mode=self.xp_mode.get())
+        # as medidas guardadas são sempre sobre a lista travada (xp.calib_list): só uma mudança nela as invalida
+        old_l, new_l = xp.settings(dict(cfg, xp_locked=True)), xp.settings(dict(new, xp_locked=True))
+        if any((old_l[k]["on"], old_l[k]["pct"]) != (v["on"], v["pct"]) for k, v in new_l.items()):
             cfg["xp_corr"] = {}                  # as medidas guardadas eram sobre a lista antiga
-            if old["manual"]["pct"] != saved["manual"]["pct"]:
+            if old_l["manual"]["pct"] != new_l["manual"]["pct"]:
                 cfg["xp_manual_last"] = {}       # a pessoa escolheu o manual: vale o que ela disse
         cfg["xp_bonuses"] = saved
         cfg["xp_mode"] = self.xp_mode.get()
         cfg["xp_fixed"] = number(self.xp_fixed.get())
+        self.xp_sync_lock()
         self.app.save()
         self.app.dirty = True
         self.refresh(force=True)
@@ -2084,7 +2166,8 @@ class AnalysisWindow:
 
     def refresh_xp(self, c):
         if not self.xp_loaded:
-            self.xp_load()
+            self.xp_load(c)
+        self.xp_sync_server(c)
         f = self.app.watcher.file
         # as outras gravações da pasta são lidas num fio à parte; enquanto isso a aba aparece sem a medida exata
         folder = os.path.dirname(getattr(c, "path", None) or "")
@@ -2097,16 +2180,39 @@ class AnalysisWindow:
             self.app.xp_calibrate(c)
         cfg = self.app.cfg
         hint = xp.calibration_hint(c, cfg)
-        if hint:
-            self.xp_hint.configure(text=_("⟳ %s ainda não tem medida de XP exata. Para a previsão valer neste mapa: "
-                                          "pare a gravação no jogo e comece outra em até 3 minutos (as duas seguidas "
-                                          "dão a XP exata).") % hint)
+        stale = None if hint else xp.stale_hint(c, cfg)
+        if hint or stale:
+            if hint:
+                text = _("⟳ %s ainda não tem medida de XP exata. Para a previsão valer neste mapa: pare a gravação no "
+                         "jogo e comece outra em até 3 minutos (as duas seguidas dão a XP exata).") % hint
+            else:
+                band = ((_("personagens de nível %d+") if xp.band_of(c.session.base_level) == "200+" else
+                         _("personagens abaixo do nível %d")) % xp.BAND_LEVEL)
+                text = _("⟳ A última medida de XP exata (%s) é de %d dias atrás. Se o evento do servidor mudou ou "
+                         "acabou, a previsão só acerta depois de uma medida nova: pare a gravação no jogo e comece "
+                         "outra em até 3 minutos (as duas seguidas dão a XP exata).") % (band, stale)
+            self.xp_hint.configure(text=text)
             if not self.xp_hint_shown:
                 self.xp_hint.pack(fill="x", padx=12, pady=(6, 0), before=self.xp_anchor)
                 self.xp_hint_shown = True
         elif self.xp_hint_shown:
             self.xp_hint.pack_forget()
             self.xp_hint_shown = False
+        gap = xp.auto_gap(c, cfg, self.rng)
+        if gap:
+            diff, auto, mine = gap
+            text = (_("⚠ No automático a XP estimada seria %s maior: %s em vez de %s.") if diff > 0 else
+                    _("⚠ No automático a XP estimada seria %s menor: %s em vez de %s.")) % (
+                dec("%.0f%%" % (100 * abs(diff))), num(auto), num(mine))
+            self.xp_auto_note.configure(text=text + " " + _(
+                "Ele corrige a lista pela XP exata medida nas suas gravações e conta todos os bônus que aparecem "
+                "nelas. Para usar, marque “Automático (recomendado)”."))
+            if not self.xp_auto_shown:
+                self.xp_auto_note.pack(fill="x", padx=12, pady=(6, 0), before=self.xp_anchor)
+                self.xp_auto_shown = True
+        elif self.xp_auto_shown:
+            self.xp_auto_note.pack_forget()
+            self.xp_auto_shown = False
         series, est = xp.timeline(c, cfg, self.rng)
         put = self.xp_tiles.put
         put("est", full(round(est["xp"])), short=num(est["xp"]), color=self.c["accent"])
@@ -2256,7 +2362,7 @@ class AnalysisWindow:
             text = _("ainda sem subida de nível ou duas gravações seguidas de 10 min ou mais")
         self.xp_measured.configure(text=text)
         self.xp_mode_btns["medido"].configure(state="normal" if corr else "disabled")
-        lst = xp.estimate(c, dict(cfg, xp_mode="lista"), self.rng)
+        lst = xp.estimate(c, dict(cfg, xp_mode="lista", xp_locked=xp.locked(cfg)), self.rng)
         parts = [_("Pela lista: ×%s") % dec("%.2f" % lst["factor"])]
         if corr:
             parts.append(_("medido: ×%s (%s%% da lista)") % (dec("%.2f" % (lst["factor"] * corr)),

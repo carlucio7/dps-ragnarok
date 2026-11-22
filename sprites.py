@@ -87,6 +87,9 @@ MADOGEAR = 0x400000
 FLYING_SPRITE = {4302: "sky_emperor2", 4047: "권성융합", 4239: "성제융합"}
 MADO_SPRITE = {4253: "meister_madogear1", 4058: "마도기어", 4064: "마도기어", 4100: "마도기어"}
 SHIELD_NAMES = {1: "_가드", 2: "_버클러", 3: "_쉴드", 4: "_미러쉴드"}
+# classes cujo corpo tem outro nome que a pasta das armas: o Guardião Real (e o trans e o baby) tem o corpo "가드" e
+# as armas e os escudos em 인간족\로얄가드
+BODY_SPRITE = {4066: "가드", 4073: "가드", 4102: "가드"}
 
 # slots (máscara do rAthena) de onde sai cada parte do visual: o visual (costume) vale mais que o normal
 VIEW_SLOTS = {"top": (1024, 256), "mid": (2048, 512), "low": (4096, 1), "robe": (8192, 4)}
@@ -1023,13 +1026,17 @@ class Wardrobe:
         job = job_sprite(look.get("job", 0), look.get("option", 0))
         race = DORAM if look.get("job") in DORAM_JOBS else HUMAN
         missing = []
+        gear = job                        # a pasta das armas e dos escudos
+        other = BODY_SPRITE.get(look.get("job"))
+        if other and self.grf.has("%s몸통\\%s\\%s_%s.spr" % (race, sex, other, sex)):
+            job = other
         if not job or not self.grf.has("%s몸통\\%s\\%s_%s.spr" % (race, sex, job, sex)):
             plain = JOB_SPRITE.get(look.get("job", 0))
             if plain and self.grf.has("%s몸통\\%s\\%s_%s.spr" % (race, sex, plain, sex)):
-                job = plain
+                job = gear = plain
             else:
                 missing.append("corpo")
-                job = "초보자"
+                job = gear = "초보자"
         cloth = look.get("cloth_color", 0)
         body = self.part("corpo", "%s몸통\\%s\\%s_%s" % (race, sex, job, sex),
                          "%s몸\\%s_%s_%d.pal" % (PAL, job, sex, cloth) if cloth else None, anchored=False)
@@ -1055,8 +1062,8 @@ class Wardrobe:
         robe = self.robe_part(look.get("robe") or 0, job, sex, race)
         if look.get("robe") and robe is None:
             missing.append("robe")
-        weapon = self.weapon_part(look, job, sex)
-        shield = self.shield_part(look, job, sex)
+        weapon = self.weapon_part(look, gear, sex)
+        shield = self.shield_part(look, gear, sex)
         back = direction in BACK_DIRS
         order = []
         if robe and not back:
@@ -1166,8 +1173,15 @@ class Wardrobe:
         view = self.classnum.get(item, item if 0 < item < 100 else 0)
         if not view:
             return None
-        for suffix in ("_%d_방패" % view, SHIELD_NAMES.get(view, "\0") + "_방패"):
+        # os de item se chamam "<classe>_<sexo>_<id>_방패"; os comuns, "<classe>_<sexo>_쉴드" (sem o "_방패": com ele,
+        # nenhum dos 230 do jogo era achado)
+        for suffix in ("_%d_방패" % view, SHIELD_NAMES.get(view, "\0"), SHIELD_NAMES.get(view, "\0") + "_방패"):
             p = self.part("shield", "%s%s\\%s_%s%s" % (SHIELD, job, job, sex, suffix), anchored=False)
+            if p:
+                return p
+        # o Guardião Real guarda os escudos junto com as armas (인간족\로얄가드\로얄가드_남_쉴드)
+        for suffix in (SHIELD_NAMES.get(view, "\0"), "_%d_방패" % view):
+            p = self.part("shield", "%s%s\\%s_%s%s" % (HUMAN, job, job, sex, suffix), anchored=False)
             if p:
                 return p
         return None

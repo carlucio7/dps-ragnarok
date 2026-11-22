@@ -28,6 +28,7 @@ from tkinter import filedialog, messagebox
 
 import analysis
 import cards
+import class_scenes
 import clientdata
 import itemkind
 import itemping
@@ -100,19 +101,26 @@ CONFETTI = ("#fbbf24", "#4ade80", "#60a5fa", "#f472b6", "#c084fc", "#f87171")
 CHASE_MOBS = (1002, 1113, 1031, 1242)
 CHASE_RIDER = {"job": 13, "sex": 1, "hair": 2, "hair_color": 0, "weapon": 5}   # Cavaleiro no Peco Peco, lança
 LANCE_POSE = 4            # a pose "em guarda" do .act de jogador: a arma aparece (andando, o jogo não desenha a arma)
-# as cenas de luta dos cartões de dano: o Mestre (Champion) com soqueira quando quem grava não é de uma classe de punho
+# as cenas de luta dos cartões de dano: quem grava, de qualquer classe; sem o visual dele (a prévia sem replay
+# aberto), o Mestre (Champion) com soqueira
 FIGHTER = {"job": 4016, "sex": 1, "hair": 6, "hair_color": 0, "weapon": 12}
 CAST, ATK1, ATK2, ATK3 = 12, 5, 10, 11      # ações do .act de jogador: conjurando e os três ataques
 FIGHT_ACTS = {"combo": (ATK2, ATK3), "heavy": (CAST, ATK1), "asura": (CAST, ATK1), "boss_down": (ATK2, ATK3, ATK1)}
+# as ações de cada estilo de luta (session.fight_style): as classes de magia conjuram, as de longe atiram; as de
+# punho e as de corpo a corpo batem (FIGHT_ACTS)
+STYLE_ACTS = {"magic": {"combo": (CAST,), "heavy": (CAST,), "asura": (CAST,), "boss_down": (CAST,)},
+              "ranged": {"combo": (ATK1,), "heavy": (CAST, ATK1), "asura": (CAST, ATK1), "boss_down": (ATK1,)}}
+SHOT_S = 0.16             # o tiro de quem luta de longe (flecha, bala, esfera de magia) voando até o monstro
 BOSS_FALL_S = 3.4         # "Chefe derrotado": o golpe final, o chefe cai e vem o confete
 FIGHT_DUMMY = 1002        # o alvo quando o monstro da sessão não tem desenho: um Poring
 FIGHT_KEEP = 6            # cenas de luta montadas guardadas (a prévia da aba Cartões passa de uma para a outra)
 # o palco: nas cenas com personagens o texto sobe e eles ficam numa faixa no pé do cartão (não passam por cima das
 # linhas); acabada a animação, ela recolhe em STAGE_FOLD_S e as linhas voltam
-SCENE_FX = ("combo", "heavy", "asura", "boss_down", "chase", "jabs", "one_punch", "deck", "mvp_card", "maxlevel")
+SCENE_FX = ("combo", "heavy", "asura", "boss_down", "chase", "jabs", "one_punch", "deck", "mvp_card", "maxlevel") \
+    + class_scenes.CLASS_FX       # os cartões de classe (Redentor, Chuva de Lex...): class_scenes
 STAGE_H = 50              # altura do palco (pixels, no zoom 1)
 # a carta de MVP, o Coringa (uma carta gigante) e quem grava com a aura do nível máximo pedem palco mais alto
-STAGE_HS = {"mvp_card": 64, "deck": 58, "maxlevel": 64}
+STAGE_HS = dict({"mvp_card": 64, "deck": 58, "maxlevel": 64}, **class_scenes.STAGE_HS)
 STAGE_FOLD_S = 0.5
 # "Mão de cartas": o Coringa do jogo embaralha (as metades do baralho se intercalam) e distribui as cartas da sessão
 # num leque, cada uma virando no ar até mostrar a ilustração dela (do data.grf; sem o jogo, cartas desenhadas)
@@ -151,6 +159,11 @@ MAXLV_RING_EVERY = 0.32   # ...e sai um a cada tanto, desde o clarão do número
 MAXLV_GROW = (1.0, 1.15, 1.3)                             # o anel alarga um pouco enquanto sobe
 CRIT_TINT, SHOT_TINT = (255, 228, 60), (255, 160, 48)   # números amarelos (crítico) e laranja (one shot)
 STAR_JOBS = {4047, 4048, 4239, 4241, 4243, 4244, 4302, 4316}   # a linha estelar: estrelinhas no lugar das esferas
+# os Guardiões (Real e Imperial, com as montarias e os baby) lutam de escudo: nas cenas, quando o dele não aparece
+# (escudo sem desenho, ou o visual sem escudo), o Escudo comum do jogo (o usuário, 2026-11-22: "e adicione um escudo
+# ao guardião real")
+GUARD_JOBS = {4066, 4073, 4082, 4083, 4102, 4110, 4258, 4281}
+SCENE_SHIELD = 3              # "_쉴드"
 BIG_PART = (1.6, 2.5)     # peça maior que isto (altura, largura) vezes o corpo fica fora da cena (chapéu-aura etc.)
 CHASE_COLORS = {1002: "#f9a8d4", 1113: "#fdba74", 1031: "#86efac", 1242: "#a5b4fc"}
 # o punho de monge: pele, sombra da pele, contorno, faixa, sombra da faixa, contorno da faixa, conta do rosário
@@ -171,7 +184,15 @@ MECH_CARDS = {
     "defense": ("modo defesa", "atencao", [("O dano quase não entra (99%)", None)]),
     "relief": ("Aliviar muito alto", "grave", []),        # as linhas (Almas ativas, redução) são montadas na hora
     "def_break": ("a defesa caiu", "bom", [("5 s de dano total: solte tudo", "#4ade80")]),
+    # o "Curar" do monstro (meter.DAMAGE_HEAL): o cartão fica os 30 s do efeito, com a contagem
+    "heal_phys": ("dano físico vira cura", "grave", [("Golpes físicos curam o chefe por 30 s", "#f87171"),
+                                                    ("Bata com magia ou espere acabar", None)]),
+    "heal_magic": ("dano mágico vira cura", "grave", [("Golpes mágicos curam o chefe por 30 s", "#f87171"),
+                                                      ("Bata com golpes físicos ou espere acabar", None)]),
+    "heal_misc": ("dano especial vira cura", "atencao", [("O dano especial cura o chefe por 30 s", "#f87171"),
+                                                         ("Armadilhas e outros danos fixos", None)]),
 }
+MECH_SECS = {"heal_phys": 30.0, "heal_magic": 30.0, "heal_misc": 30.0}   # o cartão dura o efeito (os outros: 5 s)
 DEATH_RED = "#ef4444"
 DEATH_CARD_BG = "#1f0606"   # cartão escuro no meio do widget
 # título do resumo a cada morte no mesmo encontro (1ª, 2ª, ...); a última vale dali em diante, com o número
@@ -208,6 +229,8 @@ HINTS = {
     "summary": _("Clique: abrir o Dedo Duro · botão direito: desligar o resumo da luta"),
     "session": _("Clique: abrir a análise · botão direito: fechar, escolher o que mostrar ou desligar"),
     "session_x": _("Fechar este resumo"),
+    "ping_x": _("Fechar este aviso"), "bosscard_x": _("Fechar este aviso"), "summary_x": _("Fechar este resumo"),
+    "fxcard_x": _("Clique: fechar até o efeito acabar · botão direito: como mostrar"),
     "more": _("Opções"), "min": _("Minimizar"), "close": _("Fechar o medidor"), "reset": _("Zerar: começa a contar de novo"),
     "view": _("Escolher o que mostrar: tudo ou uma luta"), "prev": _("Luta anterior"), "next": _("Próxima luta"),
     "group": _("Dano de cada jogador"), "skills": _("O seu dano por skill"), "targets": _("Em quem você bateu"),
@@ -221,6 +244,10 @@ HINTS = {
     "tracker": _("Efeito acompanhado · botão direito: como mostrar ou parar de acompanhar"),
     "fxcard": _("Clique: fechar até o efeito acabar · botão direito: como mostrar"),
 }
+# o ✕ dos cartões no padrão único (draw_card) tem área própria e fecha só o cartão: antes ele era parte do cartão, e
+# no item marcado copiava o /navi e no resumo da luta abria o Dedo Duro (o usuário, 2026-11-21). {área do ✕: cartão}
+CARD_X = {"ping_x": "ping", "summary_x": "summary", "bosscard_x": "bosscard", "fxcard_x": "fxcard",
+          "follow_x": "follow"}
 # o que dá para fixar na faixa abaixo das abas (além dos itens da aba Drops)
 PIN_STATS = [("xp_min", _("XP por minuto")), ("xp_hour", _("XP por hora")), ("xp_total", _("XP estimada")),
              ("xp_eta", _("Até o próximo nível")), ("kills", _("Abates")), ("level", _("Nível"))]
@@ -239,7 +266,7 @@ ICONS = {
     "shot": ("\uE722", "📷"),
 }
 
-CONFIG_VERSION = 3
+CONFIG_VERSION = 4
 DEFAULTS = {
     "theme": "Grafite", "scale": 1.0, "alpha": 0.92, "pinned": True,
     "rows": 6, "gap_s": 15, "tab": "group", "session": True, "show_pct": False,
@@ -256,6 +283,7 @@ DEFAULTS = {
     "vis_ground": "",      # o chão da prévia na aba Visuais ("" = o primeiro terreno do jogo)
     "xp_levels": {},       # {classe: {nível: XP do nível}} visto no começo das gravações
     "xp_bonuses": {},      # {bônus: {"on", "pct"}} da lista de bônus de XP (xp.BONUSES)
+    "xp_server_band": {},  # {faixa de nível: {"on", "pct", "auto"}} o evento que o automático deduziu em cada faixa
     "xp_mode": "auto",     # "auto" (lista + correção medida + evento deduzido), "lista", "medido" ou "fixo"
     "xp_fixed": None,      # bônus fixo (%) do modo "fixo"
     "xp_manual_last": {},  # {personagem: % do último manual que o jogo mandou} (para o manual já ativo no começo)
@@ -528,6 +556,10 @@ def load_config():
             if saved.get("v", 1) < 3 and cfg.get("xp_mode") == "lista":
                 # v3: a XP sai de "pela lista" (o padrão antigo, que quase ninguém escolheu) para o automático
                 cfg["xp_mode"] = "auto"
+            if saved.get("v", 1) < 4 and xp.overridden(cfg):
+                # v4: no automático os bônus vistos na gravação contam sempre (xp.LOCKED); quem tinha desmarcado
+                # algum (o Njord e o Cetro de um amigo do usuário) mediu a XP sobre outra lista: as medidas saem
+                cfg["xp_corr"] = {}
             cfg["v"] = CONFIG_VERSION
     except (OSError, ValueError):
         pass
@@ -539,7 +571,7 @@ def load_config():
         cfg["targets"] = "all"
     if not cfg["gap_s"]:
         cfg["gap_s"] = 15
-    for k, kind in (("session_hl_off", list), ("session_records", dict)):
+    for k, kind in (("session_hl_off", list), ("session_records", dict), ("xp_server_band", dict)):
         v = cfg.get(k)                          # um objeto só desta configuração (não o do DEFAULTS), do tipo certo
         cfg[k] = v if isinstance(v, kind) and v is not DEFAULTS[k] else kind()
     cfg["xp_learn"] = load_learn(saved)
@@ -620,7 +652,7 @@ def tk_finalize_on_main(root, every_ms=1000):
 
 # ---------------------------------------------------------------- app
 
-class DpsApp:
+class DpsApp(class_scenes.ClassScenes):
     def __init__(self, root, open_path=None):
         self.root = root
         tk_finalize_on_main(root)
@@ -685,6 +717,9 @@ class DpsApp:
         self._xp_rows = None          # (chave, até quando vale, linhas) da última conta da aba XP
         self.pings = itemping.Tracker()   # itens marcados para aviso: os que caíram e ainda estão no chão
         self.ping_card = None         # (item marcado que caiu e onde, quando apareceu)
+        # o cartão "Gravação nova": com um replay aberto à mão, o jogo começou a gravar outro. dict(path, name,
+        # current) até a pessoa escolher (seguir a nova ou ficar no aberto), ou None
+        self.follow_offer = None
         self.ping_played = 0.0
         self.ping_session = None      # itens marcados só até fechar o programa (ping_keep "session")
         self.watch = cards.Watch()    # efeitos acompanhados: o que estava ativo na leitura anterior
@@ -931,6 +966,7 @@ class DpsApp:
                 self.dirty = True
         except Exception:  # noqa: BLE001 - um replay estranho nao pode derrubar o widget
             self.log_error(*sys.exc_info())
+        self.check_follow()
         if clientdata.NAMES.version != self.names_v:
             # os nomes dos monstros novos (lidos do próprio jogo) ficaram prontos
             self.names_v = clientdata.NAMES.version
@@ -945,6 +981,8 @@ class DpsApp:
                 self.tests_left.add(self.tests_file, grew_at)
             self.tests_file = f
         cur = f.combat if f is not None and f.ready else None
+        if cur is not None and self.watcher.pinned:
+            cur.by_hand = True                    # replay aberto à mão: pode ser de outro jogador (xp_calibrate)
         if cur is not self.xp_seen:
             prev, self.xp_seen = self.xp_seen, cur
             if prev is not None and prev is self.live_combat:
@@ -1062,18 +1100,24 @@ class DpsApp:
         except Exception:  # noqa: BLE001 - é um extra: não pode parar a leitura
             self.log_error(*sys.exc_info())
 
+    def by_hand(self, c):
+        """True se a gravação é um replay aberto à mão (pode ser de outro jogador, com outros bônus de conta)."""
+        w = self.watcher
+        return bool(getattr(c, "by_hand", False) or (w.pinned and w.file is not None and w.file.combat is c))
+
     def xp_calibrate(self, c):
         """Fator de XP do personagem: XP exata até a próxima gravação ÷ XP estimada dos abates desta. No modo
-        automático a mesma medida confere o evento do servidor e aprende a XP das missões."""
+        automático a mesma medida confere o evento do servidor e aprende a XP das missões. Um replay aberto à mão
+        mede, mas não troca o evento do servidor nem apaga as medidas dos mapas (xp.calibrate live=False)."""
         try:
             def sig():
                 # o registro de aprendizado (drops, monstros sem XP) muda até em gravação sem XP exata
                 return json.dumps([self.cfg.get(k) for k in ("xp_bonuses", "xp_quests", "xp_manual_last")]
                                   + [(self.cfg.get("xp_learn") or {}).get("rev")], sort_keys=True)
             before = sig()
-            server = xp.settings(self.cfg)["server"]
-            done = xp.calibrate(c, self.cfg, meter.xp_after)
-            now = xp.settings(self.cfg)["server"]
+            server = xp.settings(self.cfg, c)["server"]          # o evento da faixa de nível do personagem
+            done = xp.calibrate(c, self.cfg, meter.xp_after, live=not self.by_hand(c))
+            now = xp.settings(self.cfg, c)["server"]
             if (server["on"], server["pct"]) != (now["on"], now["pct"]):
                 self.xp_server_found(now["pct"] if now["on"] else 0)
             after = sig()
@@ -1092,7 +1136,8 @@ class DpsApp:
             if sig != self.xp_lvl_seen and xp.gear_ready():
                 self.xp_lvl_seen = sig
                 if c.level_ups:
-                    changed = self.xp_server_found(xp.detect_server(c, self.cfg)) or changed
+                    if not self.by_hand(c):          # o replay aberto à mão não troca o evento do servidor
+                        changed = self.xp_server_found(xp.detect_server(c, self.cfg)) or changed
                     changed = xp.learn_levels(c, self.cfg) or changed
             if changed:
                 self.save()
@@ -1143,7 +1188,7 @@ class DpsApp:
         if self.death_card and now - self.death_card[1] > DEATH_CARD_S:
             self.death_card = None
             self.dirty = True
-        if self.boss_card and now - self.boss_card[1] > BOSS_CARD_S:
+        if self.boss_card and now - self.boss_card[1] > MECH_SECS.get(self.boss_card[0].get("mech"), BOSS_CARD_S):
             self.boss_card = None
             self.dirty = True
         if self.summary_card and now - self.summary_card[1] > SUMMARY_CARD_S:
@@ -1688,6 +1733,80 @@ class DpsApp:
                 lines.append((_("de %s") % d["mob"], CARD_DIM))
         self.draw_card("ping", shown, d["secs"], sev, title, lines, d.get("sprite"))
 
+    def draw_follow_card(self):
+        """Cartão "Gravação nova": com um replay aberto à mão, o jogo começou a gravar outro. Dois botões, seguir a
+        gravação nova ou ficar no replay aberto (o ✕ também fica). Sem contagem: fica até a pessoa escolher (ou até a
+        gravação nova parar de ser escrita). Num widget baixo saem primeiro as linhas, depois o título; os botões
+        ficam sempre."""
+        d = self.follow_offer
+        if not d:
+            return
+        c, s, W = self.canvas, self.s, self.W
+        col = SEV_COLORS["info"]
+        x0, x1 = 8 * s, W - 8 * s
+        y0 = (TABS_Y0 - 2) * s
+        y1 = (self.rows_y0() + self.cfg["rows"] * ROW_H - 3) * s
+        pad = 9 * s
+        c.create_polygon(round_rect_pts(x0, y0, x1, y1, 10 * s), smooth=True, fill=CARD_BG, outline=col,
+                         width=max(1, int(2 * s)))
+        self.hits.append((("follow", None), (x0, y0, x1, y1)))
+        cx = (x0 + x1) / 2
+        over_x = self.hover == ("follow_x", None)
+        xid = c.create_text(x1 - pad, y0 + pad + 4 * s, anchor="e", text="✕", font=self.fonts["small"],
+                            fill=CARD_WHITE if over_x else CARD_DIM)
+        xb = c.bbox(xid)
+        if over_x:
+            r = max(xb[2] - xb[0], xb[3] - xb[1]) / 2 + 3 * s
+            mx, my = (xb[0] + xb[2]) / 2, (xb[1] + xb[3]) / 2
+            c.tag_lower(c.create_oval(mx - r, my - r, mx + r, my + r, fill=mix(CARD_BG, col, 0.3), outline=""), xid)
+        self.hits.append((("follow_x", None), (xb[0] - 6 * s, xb[1] - 5 * s, xb[2] + 6 * s, xb[3] + 5 * s)))
+        lines = [(d["name"], CARD_WHITE)]
+        if d.get("current"):
+            lines.append((_("Aberto agora: %s") % d["current"], CARD_DIM))
+        btn_h, gap = 22 * s, 8 * s
+        room = (y1 - y0) - 2 * pad
+
+        def need(n):                           # título + n linhas + os botões
+            return (22 + 14 * n) * s + gap + btn_h
+        n = len(lines)
+        while n and room < need(n):
+            n -= 1
+        top = pad
+        if room < need(0):                     # o widget de 2 linhas: menos margem, e o título cabe
+            top = 4 * s
+            room = (y1 - y0) - 2 * top
+        title = room >= need(0)
+        y = y0 + top + max(0.0, (room - (need(n) if title else btn_h)) / 2)
+        if title:
+            side = (xb[2] - xb[0]) + 8 * s        # o título não passa por baixo do ✕ (e fica no meio)
+            self.center_text(cx, y + 8 * s, _("Gravação nova").upper(), self.fonts["title"], col, x0 + pad + side,
+                             x1 - pad - side)
+            y += 22 * s
+            for text, fill in lines[:n]:
+                self.center_text(cx, y + 5 * s, text, self.fonts["small"], fill, x0 + pad, x1 - pad)
+                y += 14 * s
+            y += gap
+        font = self.fonts["tab"]
+        buttons = (("follow_new", _("Seguir a nova"), True), ("follow_stay", _("Ficar neste"), False))
+        widths = [font.measure(text) + 22 * s for _k, text, _f in buttons]
+        bgap = 8 * s
+        avail = (x1 - x0) - 2 * pad
+        if sum(widths) + bgap > avail:
+            widths = [(avail - bgap) / 2.0] * 2
+        bx = cx - (sum(widths) + bgap) / 2
+        for (key, text, filled), bw in zip(buttons, widths):
+            box = (bx, y, bx + bw, y + btn_h)
+            hov = self.hover == ("btn", key)
+            if filled:
+                fill, fg, line = (shade(col, 0.15) if hov else col), on_color(col), col
+            else:
+                fill, fg, line = (mix(CARD_BG, col, 0.28) if hov else CARD_BG), CARD_WHITE, col
+            c.create_polygon(round_rect_pts(*box, 7 * s), smooth=True, fill=fill, outline=line, width=max(1, int(s)))
+            self.center_text((box[0] + box[2]) / 2, (box[1] + box[3]) / 2, text, font, fg, box[0] + 5 * s,
+                             box[2] - 5 * s)
+            self.hits.append((("btn", key), box))
+            bx += bw + bgap
+
     def check_summary(self, c, now):
         """O chefe morreu: depois dos últimos pacotes (ou de ver que não vem outra fase), mostra o resumo da luta."""
         due = self.summary_due
@@ -1755,6 +1874,7 @@ class DpsApp:
                 if clientdata.NAMES.grf:            # os desenhos do resumo (os Porings e o cavaleiro da "Máquina
                     sprites.MONSTERS.start(clientdata.NAMES.grf)      # de abates")
                     sprites.LOADER.start(clientdata.NAMES.grf)
+                    class_scenes.KIT.start(clientdata.NAMES.grf)      # (os efeitos das cenas de classe)
             if self.session_ended(f, now, quiet):
                 self.end_live(c, now)
         elif self.live_combat is c:
@@ -1837,6 +1957,10 @@ class DpsApp:
             if clientdata.NAMES.grf:
                 sprites.MONSTERS.start(clientdata.NAMES.grf)
                 sprites.LOADER.start(clientdata.NAMES.grf)
+        if d["hl"] and d["hl"][0].get("fx") in class_scenes.CLASS_FX and clientdata.NAMES.grf:
+            sprites.MONSTERS.start(clientdata.NAMES.grf)
+            sprites.LOADER.start(clientdata.NAMES.grf)
+            class_scenes.KIT.start(clientdata.NAMES.grf)
         if not self.session_covered():
             self.prepare_session_fx(d)
         self.session_card = (d, time.time())      # depois de montar a cena: a animação começa do começo
@@ -1866,7 +1990,7 @@ class DpsApp:
     def session_covered(self):
         """Algum cartão que passa na frente do resumo da sessão está na tela (a morte, o item marcado, o aviso de chefe,
         o resumo da luta: a ordem do draw)?"""
-        return bool(self.death_card or self.ping_card or self.boss_card or self.summary_card)
+        return bool(self.death_card or self.ping_card or self.boss_card or self.summary_card or self.follow_offer)
 
     def session_wait(self, now):
         """O resumo da sessão atrás de outro cartão fica parado: o relógio dele (a animação e os SESSION_CARD_S) só
@@ -1911,6 +2035,8 @@ class DpsApp:
                 self.card_scene(d.setdefault("chase", {}), hl["fx"], hl.get("deal") or {})
             elif hl["fx"] == "maxlevel":
                 self.rise_scene(d.setdefault("chase", {}), hl.get("rise") or {})
+            elif hl["fx"] in class_scenes.CLASS_FX:
+                self.class_assets(hl.get("scene") or {}, hl["fx"])
         except Exception:  # noqa: BLE001 - a cena é um extra: sem ela, os desenhos de reserva
             self.log_error(*sys.exc_info())
 
@@ -2061,7 +2187,7 @@ class DpsApp:
         if anim:
             self.draw_session_fx(main["fx"], k, (x0, y0, x1, y1), col, y + 8 * s, (bx0 + 13 * s, y + 8 * s),
                                  main.get("tag"), d.setdefault("chase", {}), GLASS_BG if glass else CARD_BG,
-                                 main.get("fight"), main.get("deal"), main.get("rise"))
+                                 main.get("fight"), main.get("deal"), main.get("rise"), main.get("scene"))
         over_x = self.hover == ("session_x", None)
         cid = c.create_text(x1 - pad, y0 + pad + 4 * s, anchor="e", text="✕", font=self.fonts["small"],
                             fill=CARD_WHITE if over_x else CARD_DIM)
@@ -2375,8 +2501,8 @@ class DpsApp:
         return got
 
     def fight_assets(self, fight, kind):
-        """Os desenhos da cena de luta de um cartão de dano, do jogo: o lutador (o visual de quem grava, se for de uma
-        classe de punho, ou o Mestre) nas ações da cena, virado para a direita; o monstro (o da sessão, ou um Poring)
+        """Os desenhos da cena de luta de um cartão de dano, do jogo: o lutador (o visual de quem grava, de qualquer
+        classe, ou o Mestre) nas ações do estilo dele (STYLE_ACTS), virado para a direita; o monstro (o da sessão, ou um Poring)
         parado, apanhando e caindo, virado para o lutador; e os números de dano. Guardados por (visual, monstro, cena,
         zoom), as últimas FIGHT_KEEP (guardando uma só, cada troca de destaque na prévia da aba Cartões montava tudo de
         novo: 0,2 a 0,5 s parado); None sem o guarda-roupa do jogo."""
@@ -2391,12 +2517,21 @@ class DpsApp:
         w, book = sprites.LOADER.wardrobe, sprites.MONSTERS.book
         if w is None:
             return None
-        out = dict(acts={}, mob={}, digits=None, photos={}, star=look.get("job") in STAR_JOBS)
+        style = session.fight_style(look.get("job")) if fight.get("look") else "fist"
+        out = dict(acts={}, mob={}, digits=None, photos={}, star=look.get("job") in STAR_JOBS, style=style,
+                   swing=None)
         try:
+            # o golpe com a arma das classes físicas (as ações 5 e 10 do corpo são o soco e o chute)
+            swing = class_scenes.weapon_attack(w, look) if style in ("melee", "ranged") else None
+            out["swing"] = swing
             look, body_h = self.scene_look(w, look)
             ref = w.render(look, sprites.IDLE, 6, 0)
             f = 42 * self.s / float(body_h or ref[1]) if ref else None
-            for act in FIGHT_ACTS[kind]:
+            if swing:
+                acts_for = (CAST, swing) if kind in ("heavy", "asura") else (swing,)
+            else:
+                acts_for = STYLE_ACTS.get(style, {}).get(kind) or FIGHT_ACTS[kind]
+            for act in acts_for:
                 r0 = w.render(look, act, 6, 0) if f else None
                 if r0 is None:
                     continue
@@ -2446,7 +2581,8 @@ class DpsApp:
     @staticmethod
     def scene_look(w, look):
         """O visual para a cena: sem as peças muito maiores que o corpo (o chapéu-aura de dragão, as capas gigantes),
-        que no palco pequeno engoliriam o personagem; e a altura do corpo com a cabeça, que dá a escala.
+        que no palco pequeno engoliriam o personagem, e com o escudo dos Guardiões (GUARD_JOBS); e a altura do corpo
+        com a cabeça, que dá a escala.
         (visual, altura) — altura None se não der para medir."""
         order, body, _missing = w.parts(look, 6)
         if body is None:
@@ -2455,6 +2591,8 @@ class DpsApp:
         if b is None:
             return look, None
         out = dict(look)
+        if look.get("job") in GUARD_JOBS and not any(p.name == "shield" for p in order):
+            out["shield"] = SCENE_SHIELD
         for p in order:
             if p is not body and p.name in ("top", "mid", "low", "robe"):
                 r = sprites.compose([p], body, sprites.IDLE, 6, 0)
@@ -2507,6 +2645,8 @@ class DpsApp:
         parar, com um monte de números (de vez em quando um crítico amarelo). "heavy" (Maior golpe): carrega com uma
         aura dourada e dá um golpe só, com o número grande, um clarão e o monstro cambaleando. "asura" (one shot):
         carrega com as esferas espirituais girando, avança, acerta com o número enorme, o monstro cai e a tela racha.
+        Quem luta é quem grava, no estilo da classe dele: as de magia conjuram e as de longe atiram (o tiro voa até o
+        monstro, sem avançar); as esferas do Asura são só das de punho.
         False se os desenhos do jogo não estiverem prontos (quem chamou desenha os socos de antes)."""
         assets = self.fight_assets(fight, kind)
         if assets is None:
@@ -2515,8 +2655,14 @@ class DpsApp:
         x0, y0, x1, y1 = box
         base = y1 - 8 * s
         tx = x0 + (x1 - x0) * 0.70
-        ax = tx - 50 * s
         acts, mobs = assets["acts"], assets["mob"]
+        style = assets.get("style") or "fist"
+        swing = assets.get("swing") if assets.get("swing") in acts else None   # o golpe com a arma
+        blow = CAST if style == "magic" else (swing or ATK1)                     # o golpe forte
+        far = style in ("magic", "ranged")         # de longe: fica mais longe e o tiro voa até o monstro
+        ax = tx - (74 if far else 50) * s
+        hand = (ax + 12 * s, base - 24 * s)
+        shots = []                                  # (quando chega, grande?)
         hit = float(fight.get("hit") or 0) or 99999
         avg = float(fight.get("avg") or 0) or hit * 0.3
         rnd = random.Random(31)
@@ -2542,7 +2688,7 @@ class DpsApp:
         if kind == "boss_down":                     # combo no chefe; no golpe final ele cai
             final = BOSS_FALL_S
             if k < final - 0.3:
-                seq = [a for a in (ATK2, ATK3) if a in acts] or list(acts)
+                seq = self.fight_seq(acts, style, swing)
                 lengths = [len(acts[a][0]) * 0.08 for a in seq]
                 t = (k % sum(lengths)) if k > 0 else 0.0
                 for a, ln in zip(seq, lengths):
@@ -2550,11 +2696,15 @@ class DpsApp:
                         put(frame_of(a, t, 80.0), ax, base)
                         break
                     t -= ln
-            elif ATK1 in acts:
-                put(frame_of(ATK1, k - (final - 0.3), loop=False), ax, base)
+            elif blow in acts:
+                put(frame_of(blow, k - (final - 0.3), loop=blow == CAST), ax, base)
+            shots.append((final, True))
             for i in range(9):                      # golpes até o final
                 ti = 0.4 + 0.33 * i
-                if ti > k or ti > final - 0.35:
+                if ti > final - 0.35:
+                    break
+                shots.append((ti, False))
+                if ti > k:
                     break
                 numbers.append((ti, avg * rnd.uniform(0.75, 1.25), None, 1, ((i % 3) - 1) * 12 * s))
                 if k - ti < 0.16:
@@ -2570,7 +2720,7 @@ class DpsApp:
                     self.draw_burst(impact_x, impact_y, (12 + 16 * u) * s, 12, mix(bg, "#fde047", fade * (1 - u)),
                                     mix(bg, "#f97316", fade * (1 - u)))
         elif kind == "combo":
-            seq = [a for a in (ATK2, ATK3) if a in acts] or list(acts)
+            seq = self.fight_seq(acts, style, swing)
             ms = 70.0
             lengths = [len(acts[a][0]) * ms / 1000.0 for a in seq]
             cycle = sum(lengths)
@@ -2582,7 +2732,10 @@ class DpsApp:
                 t -= ln
             for i in range(18):                     # um golpe a cada 0,3 s; os números saem em três colunas
                 ti = 0.35 + 0.3 * i
-                if ti > k or ti > SESSION_FX_S - 0.8:
+                if ti > SESSION_FX_S - 0.8:
+                    break
+                shots.append((ti, False))
+                if ti > k:
                     break
                 crit = i % 4 == 3
                 value = avg * rnd.uniform(0.75, 1.25) * (1.4 if crit else 1.0)
@@ -2593,8 +2746,11 @@ class DpsApp:
                                     mix(bg, "#fde047" if crit else "#ffffff", fade), mix(bg, "#f97316", fade))
         else:
             charge = 1.2 if kind == "heavy" else 1.1
-            strike = charge + (0.0 if kind == "heavy" else 0.18)
-            impact = charge + 0.3 if kind == "heavy" else strike
+            dash = kind == "asura" and not far      # o avanço do Asura (as de longe atiram dali mesmo)
+            strike = charge + (0.18 if dash else 0.0)
+            impact = strike if dash else charge + (SHOT_S if far else 0.3)
+            if far:
+                shots.append((impact, True))
             if k < charge:                          # carregando: a aura dourada (e as esferas no Asura)
                 g = min(1.0, k / charge)
                 cx_, cy_ = ax, base - 22 * s
@@ -2603,7 +2759,12 @@ class DpsApp:
                     c.create_oval(cx_ - r, cy_ - r * 1.25, cx_ + r, cy_ + r * 1.25,
                                   outline=mix(bg, ("#fde68a", "#fbbf24", "#f59e0b")[j], fade * g * (0.85 - 0.2 * j)),
                                   width=max(1, int(2 * s)))
-                if kind == "asura":                 # as esferas espirituais (ou estrelinhas, na linha estelar)
+                if style == "magic":                # o círculo mágico nos pés de quem conjura
+                    for j in range(2):
+                        rx, ry = (22 - 6 * j) * s * (0.6 + 0.4 * g), (6 - 2 * j) * s * (0.6 + 0.4 * g)
+                        c.create_oval(ax - rx, base - ry, ax + rx, base + ry,
+                                      outline=mix(bg, ("#a78bfa", "#e9d5ff")[j], fade * g), width=max(1, int(1.6 * s)))
+                if kind == "asura" and style == "fist":   # as esferas espirituais (ou estrelinhas, na linha estelar)
                     for j in range(5):
                         a = k * 5 + j * 2 * math.pi / 5
                         ox_, oy_ = cx_ + math.cos(a) * 20 * s, cy_ + math.sin(a) * 9 * s - 6 * s
@@ -2617,18 +2778,18 @@ class DpsApp:
                     put(frame_of(CAST, k), ax, base)
                 elif ATK1 in acts:
                     put(frame_of(ATK1, 0.0), ax, base)
-            elif kind == "asura" and k < strike:    # o avanço
+            elif dash and k < strike:               # o avanço
                 u = (k - charge) / (strike - charge)
                 x = ax + (tx - 24 * s - ax) * u
                 for j in (-14, -8, -2):
                     c.create_line(x - 46 * s, base + j * s - 10 * s, x - 14 * s, base + j * s - 10 * s,
                                   fill=mix(bg, "#fde68a", 0.7 * fade), width=max(1, int(1.5 * s)))
-                if ATK1 in acts:
-                    put(frame_of(ATK1, 0.3, loop=False), x, base)
+                if blow in acts:
+                    put(frame_of(blow, 0.0, loop=False), x, base)
             else:                                   # o golpe e depois
-                x = tx - 24 * s if kind == "asura" else ax
-                if ATK1 in acts:
-                    put(frame_of(ATK1, k - strike, loop=False), x, base)
+                x = tx - 24 * s if dash else ax
+                if blow in acts:
+                    put(frame_of(blow, k - strike, loop=blow == CAST), x, base)
             if k >= impact:
                 t = k - impact
                 shake = math.sin(t * 70) * 3 * s * max(0.0, 1 - t / 0.4)
@@ -2659,6 +2820,11 @@ class DpsApp:
                                       outline=mix(bg, col, fade * (1.0 - u / 0.8)), width=max(1, int(3 * s * (1 - u))))
                 if kind == "asura" and t > 0.45:
                     self.draw_cracks(impact_x, impact_y, min(1.0, (t - 0.45) / 0.25), box, fade, bg)
+        if far:                                     # o tiro voando da mão até o monstro
+            for ti, big in shots:
+                u = (k - (ti - SHOT_S)) / SHOT_S
+                if 0 <= u < 1:
+                    self.draw_shot(style, hand, (impact_x, impact_y), u, big, fade, bg)
         # o monstro (virado para o lutador): parado, apanhando ou caindo
         got = mobs.get(mob_state) or mobs.get(sprites.MOB_IDLE)
         if got:
@@ -2674,6 +2840,42 @@ class DpsApp:
                 self.draw_number(tx + dx, base - mob_h - 2 * s - (14 if zoom == 1 else 20) * s * u, value, assets, tint,
                                  zoom)
         return True
+
+    @staticmethod
+    def fight_seq(acts, style, swing=None):
+        """As ações que se revezam nos golpes seguidos: o golpe com a arma (as classes físicas), a conjuração (magia)
+        ou o soco e o chute (punho, e quem está sem arma)."""
+        if swing and swing in acts:
+            return [swing]
+        want = {"magic": (CAST,), "ranged": (ATK1, ATK2)}.get(style, (ATK2, ATK3))
+        return [a for a in want if a in acts] or list(acts)
+
+    def draw_shot(self, style, a, b, u, big, fade, bg):
+        """O tiro de quem luta de longe, de `a` até `b` (u de 0 a 1): a flecha (ou a bala), ou a esfera de magia com
+        o rastro; `big`: o golpe forte (maior e dourado)."""
+        c, s = self.canvas, self.s
+        x = a[0] + (b[0] - a[0]) * u
+        y = a[1] + (b[1] - a[1]) * u - math.sin(u * math.pi) * (4 if style == "ranged" else 9) * s
+        if style == "ranged":
+            ln = (17 if big else 11) * s
+            ang = math.atan2(b[1] - a[1], b[0] - a[0]) - math.cos(u * math.pi) * 0.25
+            dx, dy = math.cos(ang) * ln, math.sin(ang) * ln
+            if big:
+                c.create_line(x - dx * 1.6, y - dy * 1.6, x, y, fill=mix(bg, "#f59e0b", 0.45 * fade),
+                              width=max(2, int(4 * s)), capstyle="round")
+            c.create_line(x - dx, y - dy, x, y, fill=mix(bg, "#fde68a" if big else "#e5e7eb", fade),
+                          width=max(1, int((2.2 if big else 1.4) * s)), arrow="last",
+                          arrowshape=(5 * s, 6 * s, 2.4 * s))
+            return
+        r = (7.5 if big else 4.2) * s
+        tones = ("#faf5ff", "#e9d5ff", "#c084fc", "#7c3aed") if not big else ("#fffbeb", "#fde68a", "#f59e0b", "#b45309")
+        for tr in range(4):                         # o rastro e a esfera
+            q = max(0.0, u - tr * 0.07)
+            tx_ = a[0] + (b[0] - a[0]) * q
+            ty_ = a[1] + (b[1] - a[1]) * q - math.sin(q * math.pi) * 9 * s
+            rr = r * (1 - tr * 0.2)
+            c.create_oval(tx_ - rr, ty_ - rr, tx_ + rr, ty_ + rr, fill=mix(bg, tones[tr], fade * (1 - tr * 0.18)),
+                          outline="")
 
     def draw_chase(self, k, box, fade, frames, bg):
         """Os bichinhos atravessam o pé do cartão pulando, fugindo do Cavaleiro no Peco Peco com a lança (os desenhos
@@ -3433,7 +3635,7 @@ class DpsApp:
             x += w + gap
 
     def draw_session_fx(self, kind, k, box, col, title_y, origin, tag=None, chase=None, bg=CARD_BG, fight=None,
-                        deal=None, rise=None):
+                        deal=None, rise=None, scene=None):
         """A animação do destaque principal nos primeiros SESSION_FX_S do resumo (atrás do texto): confete (do alto e
         dos cantos), moedinhas que se empilham (ganhou muito) ou que caem do emblema (gastou muito), estrelas piscando
         (Milagre), brilhos em volta do título, ondas saindo do emblema, chuva ou a moldura pulsando. As peças saem
@@ -3639,6 +3841,9 @@ class DpsApp:
                 self.draw_maxlv_stage(k, box, fade, rise or {}, chase if chase is not None else {}, bg)
         elif kind == "chase":                       # Porings, Drops, Poporings e Marins fugindo de um cavaleiro
             self.draw_chase(k, box, fade, chase if chase is not None else {}, bg)
+        elif kind in class_scenes.CLASS_FX:         # os cartões de classe: a cena com os desenhos do jogo
+            if not self.draw_class_fx(kind, k, box, fade, scene or {}, bg, col):
+                self.draw_session_fx("sparkle", k, box, col, title_y, origin, tag, chase, bg)
         elif kind == "diamonds":                    # o "Intocável": diamantes brilhando no vidro
             self.draw_diamonds(k, box, fade, bg)
         elif kind == "stars":
@@ -3853,7 +4058,7 @@ class DpsApp:
         self.hits = []
         # o cartão dos efeitos acompanhados só aparece quando nenhum outro cartão está na frente
         self.fx_now = [] if (self.death_card or self.ping_card or self.boss_card or self.summary_card
-                             or self.session_card) else self.fx_card_rows()
+                             or self.session_card or self.follow_offer) else self.fx_card_rows()
         self.root.configure(bg=t["bg"])
         c.configure(bg=t["bg"])
 
@@ -3939,7 +4144,7 @@ class DpsApp:
 
         # faixa das informações fixadas (sempre visível, em qualquer aba; com um cartão aberto ela fica acima dele)
         card_up = (self.death_card or self.ping_card or self.boss_card or self.summary_card or self.session_card
-                   or self.fx_now)
+                   or self.fx_now or self.follow_offer)
         if not card_up:
             self.draw_pins(cb)
 
@@ -3949,7 +4154,9 @@ class DpsApp:
         if not card_up:
             self.draw_trackers()              # um cartão ocupa a área inteira: os contadores voltam quando ele sai
         if not self.death_card:
-            if self.ping_card:                    # o item marcado que caiu passa na frente dos outros avisos
+            if self.follow_offer:                 # a pergunta da gravação nova fica até a pessoa responder
+                self.draw_follow_card()
+            elif self.ping_card:                  # o item marcado que caiu passa na frente dos outros avisos
                 self.draw_ping_card()
             else:
                 self.draw_boss_card()
@@ -4461,7 +4668,8 @@ class DpsApp:
             return []
         cfg = self.cfg
         key = (id(cb), cfg["session"], self.enc_back, cfg.get("xp_mode"), cfg.get("xp_fixed"),
-               repr(cfg.get("xp_bonuses")), repr(cfg.get("xp_event_off")), len(cb.level_ups), len(cb.quests_done),
+               repr(cfg.get("xp_bonuses")), repr(cfg.get("xp_server_band")), repr(cfg.get("xp_event_off")),
+               len(cb.level_ups), len(cb.quests_done),
                len(cb.quests_added), cb.finished, xp.GEAR.table is None, i18n.LANG)
         now = time.monotonic()
         hit = self._xp_rows
@@ -4479,11 +4687,17 @@ class DpsApp:
         how = {"medido": _("×%s medido"), "fixo": _("×%s fixo"), "auto": _("×%s aproximado")}.get(
             kind, _("×%s pela lista")) % dec("%.2f" % est["factor"])
         rows = []
-        if xp.calibration_hint(cb, self.cfg):
-            # mapa sem medida: duas gravações seguidas dão a XP exata (a linha só aparece na aba XP; não é fixável)
+        if xp.calibration_hint(cb, self.cfg) or xp.stale_hint(cb, self.cfg):
+            # mapa sem medida, ou dias sem medida exata (o evento do servidor pode ter mudado): duas gravações seguidas
+            # dão a XP exata (a linha só aparece na aba XP; não é fixável)
             # texto curto e sem coluna da direita: um texto largo ali empurra as colunas de todas as linhas
             rows.append(dict(label=_("Calibrar: grave de novo"), value="⟳", right="", frac=0.0, me=False,
                              color="#f59e0b"))
+        gap = xp.auto_gap(cb, self.cfg, rng)
+        if gap:
+            # fora do automático e ele daria um valor muito diferente: o aviso (o texto inteiro fica na aba XP)
+            rows.append(dict(label=_("No automático: %s") % dec("%+.0f%%" % (100 * gap[0])), value="⚠", right="",
+                             frac=0.0, me=False, color="#f59e0b"))
         # porcentagem do nível primeiro, número absoluto depois (quando o jogo mandou quanto falta para o nível)
         pct = est["pct"] is not None
         rows.append(dict(label=_("XP estimada") if rng is None else _("XP nesta luta"),
@@ -4610,7 +4824,8 @@ class DpsApp:
         "agora / total / em combate": o cartão cobre a faixa fixa e fica com a área inteira.
         [(chave, rótulo, valor, cor)], ou [] quando não é o caso."""
         if self.death_card or not self.cfg.get("pins") or not (
-                self.ping_card or self.boss_card or self.summary_card or self.session_card or self.fx_now):
+                self.ping_card or self.boss_card or self.summary_card or self.session_card or self.fx_now
+                or self.follow_offer):
             return []
         return [(key, label, value, color) for key, label, value, _right, color in self.pin_texts(cb)]
 
@@ -4917,7 +5132,7 @@ class DpsApp:
         cursor = ""
         if tgt:
             cursor = {"btn": "hand2", "tab": "hand2", "fav": "hand2", "ping": "hand2", "session_x": "hand2",
-                      "grip": "size_nw_se"}.get(tgt[0], "")
+                      "grip": "size_nw_se"}.get(tgt[0], "hand2" if tgt[0] in CARD_X else "")
         c.configure(cursor=cursor)
 
     # ------------------------------------------------------------ ações
@@ -5106,6 +5321,17 @@ class DpsApp:
         self.death_card = None
         self.dirty = True
 
+    def close_card(self, kind):
+        """O ✕ de um cartão no padrão único (CARD_X): fecha só ele. O de efeito fecha até o efeito acabar."""
+        if kind == "fxcard":
+            self.close_fx_card()
+            return
+        if kind == "follow":
+            self.follow_stay()
+            return
+        setattr(self, {"ping": "ping_card", "summary": "summary_card", "bosscard": "boss_card"}[kind], None)
+        self.dirty = True
+
     def boss_menu(self):
         m = self.new_menu()
         m.add_command(label=_("Fechar este aviso"), command=lambda: (setattr(self, "boss_card", None),
@@ -5132,10 +5358,21 @@ class DpsApp:
                          width=max(1, int(2 * s)))
         self.hits.append(((hit, None), (x0, y0, x1, y1)))
         cx = (x0 + x1) / 2
-        cid = c.create_text(x1 - pad, y0 + pad + 4 * s, anchor="e",
-                            text=(timer + "  ✕") if timer is not None else "%d s  ✕" % max(1, round(secs - k)),
+        # o ✕ com área própria (vem depois da do cartão, então ganha dela, e é maior que o símbolo): fecha só o
+        # cartão (CARD_X); a contagem fica à esquerda dele
+        over_x = self.hover == (hit + "_x", None)
+        xid = c.create_text(x1 - pad, y0 + pad + 4 * s, anchor="e", text="✕", font=self.fonts["small"],
+                            fill=CARD_WHITE if over_x else CARD_DIM)
+        xb = c.bbox(xid)
+        cid = c.create_text(xb[0] - 6 * s, y0 + pad + 4 * s, anchor="e",
+                            text=timer if timer is not None else "%d s" % max(1, round(secs - k)),
                             font=self.fonts["small"], fill=CARD_DIM)
-        count_w = c.bbox(cid)[2] - c.bbox(cid)[0]
+        count_w = xb[2] - c.bbox(cid)[0]
+        if over_x:
+            r = max(xb[2] - xb[0], xb[3] - xb[1]) / 2 + 3 * s
+            mx, my = (xb[0] + xb[2]) / 2, (xb[1] + xb[3]) / 2
+            c.tag_lower(c.create_oval(mx - r, my - r, mx + r, my + r, fill=mix(CARD_BG, col, 0.3), outline=""), xid)
+        self.hits.append(((hit + "_x", None), (xb[0] - 6 * s, xb[1] - 5 * s, xb[2] + 6 * s, xb[3] + 5 * s)))
         room = (y1 - y0) - 2 * pad
 
         def text_h(n):                         # título + n linhas
@@ -5241,7 +5478,8 @@ class DpsApp:
             if pct is not None:
                 lines.append((_("Seu ataque: %s → %d%%") % (analysis.element_name(mine), pct),
                               "#f87171" if pct < 100 else ("#4ade80" if pct > 100 else dim)))
-        self.draw_card("bosscard", shown, BOSS_CARD_S, sev, title, lines, d.get("sprite"))
+        self.draw_card("bosscard", shown, MECH_SECS.get(d.get("mech"), BOSS_CARD_S), sev, title, lines,
+                       d.get("sprite"))
 
     def death_menu(self):
         """Botão direito no resumo da morte: fechar ou desligar de vez (volta pelo menu de opções)."""
@@ -5276,13 +5514,58 @@ class DpsApp:
         if path:
             self.watcher.gap_ms = self.gap_ms()
             self.watcher.open(path)
+            self.follow_offer = None
             self.enc_back = 0
             self.dirty = True
 
-    def follow(self):
-        self.watcher.follow()
+    def follow(self, path=None):
+        """Volta a seguir a gravação (o menu "Voltar a seguir a gravação"); `path`: a do cartão "Gravação nova"."""
+        self.watcher.follow(path)
+        self.follow_offer = None
         self.enc_back = 0
         self.dirty = True
+
+    def check_follow(self):
+        """Cartão "Gravação nova": com um replay aberto à mão, o jogo começou a gravar outro (Watcher.offer).
+        Fica até a pessoa escolher, ou até a gravação nova parar de ser escrita."""
+        w = self.watcher
+        path = w.offered if w.pinned and cards.enabled(self.cfg, "follow") else None
+        cur = self.follow_offer
+        if (cur["path"] if cur else None) == path:
+            return
+        self.follow_offer = dict(path=path, name=os.path.basename(path),
+                                 current=os.path.basename(w.file.path) if w.file is not None else None) if path else None
+        self.dirty = True
+
+    def follow_new(self):
+        """O "Seguir a nova" do cartão: o widget passa para a gravação que começou."""
+        d = self.follow_offer
+        self.follow(d["path"] if d else None)
+
+    def follow_stay(self):
+        """O "Ficar neste" (ou o ✕) do cartão: continua no replay aberto e não pergunta de novo por esta gravação
+        (a próxima que o jogo começar pergunta de novo)."""
+        d = self.follow_offer
+        self.follow_offer = None
+        if d:
+            self.watcher.skip(d["path"])
+        self.dirty = True
+
+    def follow_never(self):
+        """O "Não perguntar mais" do menu do cartão: desliga o cartão (volta na aba Cartões)."""
+        off = [k for k in (self.cfg.get("cards_off") or []) if k != "follow"]
+        self.cfg["cards_off"] = off + ["follow"]
+        self.follow_offer = None
+        self.save()
+        self.dirty = True
+
+    def follow_menu(self):
+        m = self.new_menu()
+        m.add_command(label=_("Seguir a gravação nova"), command=self.follow_new)
+        m.add_command(label=_("Ficar neste replay"), command=self.follow_stay)
+        m.add_separator()
+        m.add_command(label=_("Não perguntar mais"), command=self.follow_never)
+        return m
 
     def pick_folder(self):
         path = filedialog.askdirectory(parent=self.root,
@@ -5357,7 +5640,7 @@ class DpsApp:
             "more": lambda: self.popup_at(target, self.main_menu),
             "view": lambda: self.popup_at(target, self.view_menu), "reset": self.reset, "chart": self.open_analysis,
             "prev": lambda: self.browse(1), "next": lambda: self.browse(-1), "where": self.copy_where,
-            "shot": self.copy_image,
+            "shot": self.copy_image, "follow_new": self.follow_new, "follow_stay": self.follow_stay,
         }
         actions[key]()
 
@@ -5600,6 +5883,8 @@ class DpsApp:
                 self.open_summary()
             elif not moved and self.press_target and self.press_target[0] == "session_x":
                 self.close_session_card()
+            elif not moved and self.press_target and self.press_target[0] in CARD_X:
+                self.close_card(CARD_X[self.press_target[0]])
             elif not moved and self.press_target and self.press_target[0] == "session":
                 self.open_session()
             elif not moved and self.press_target and self.press_target[0] == "fxcard":
@@ -5616,6 +5901,8 @@ class DpsApp:
 
     def on_right_click(self, e):
         tgt = self.target_at(e.x, e.y)
+        if tgt and tgt[0] in CARD_X:                        # botão direito no ✕: o menu do cartão
+            tgt = (CARD_X[tgt[0]], tgt[1])
         if tgt and tgt[0] in ("row", "fav", "pinbar"):
             self.popup(lambda: self.row_menu(tgt), e.x_root, e.y_root)
         elif tgt and tgt[0] == "death":
@@ -5628,6 +5915,8 @@ class DpsApp:
             self.popup(self.session_menu, e.x_root, e.y_root)
         elif tgt and tgt[0] == "ping":
             self.popup(self.ping_menu, e.x_root, e.y_root)
+        elif tgt and tgt[0] == "follow":
+            self.popup(self.follow_menu, e.x_root, e.y_root)
         elif tgt and tgt[0] == "tracker":
             self.popup(lambda: self.tracker_menu(tgt[1]), e.x_root, e.y_root)
         elif tgt and tgt[0] == "fxcard" and self.fx_now:
